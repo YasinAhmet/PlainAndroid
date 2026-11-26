@@ -60,10 +60,11 @@ data class VideoInfo(
     val client: String,
     val hls: String? = null, // HLS master (VISIONOS / IOS_PRODUCER): what the in-app player streams for Watch
     val channelId: String? = null,
+    val members: Boolean = false, // members-only video, answered through the signed-in account (2.0)
 )
 
 /** Why a video can't be downloaded. [tryOther] = another client might still work. */
-class YtError(message: String, val tryOther: Boolean, val geo: Boolean = false) : Exception(message)
+class YtError(message: String, val tryOther: Boolean, val geo: Boolean = false, val members: Boolean = false) : Exception(message)
 
 sealed class PlayerResult {
     class Ok(val info: VideoInfo, val visitorData: String?) : PlayerResult()
@@ -159,9 +160,10 @@ object Yt {
             "not a bot" in r || "confirm you" in r && "bot" in r -> YtError("YouTube asked to confirm you're not a bot", true)
             // "This content is not available on this country domain due to a legal complaint from the government."
             isGeo(r) -> YtError("Blocked in your country (legal complaint)", false, geo = true)
+            // "Join this channel to get access to members-only content like this video, and other exclusive perks."
+            Members.inReason(reason) -> YtError("Members-only video", false, members = true)
             "age" in r && ("confirm" in r || "restrict" in r || "inappropriate" in r) || status == "AGE_CHECK_REQUIRED" ||
                 status == "AGE_VERIFICATION_REQUIRED" -> YtError("Age-restricted video: needs sign-in, not supported", false)
-            "member" in r -> YtError("Members-only video: not supported", false)
             "private" in r -> YtError("Private video", false)
             "live" in r && ("stream" in r || "event" in r) -> YtError("Live streams can't be downloaded", false)
             status == "LOGIN_REQUIRED" -> YtError(reason.ifBlank { "YouTube wants a sign-in for this video" }, true)

@@ -279,7 +279,7 @@ class BrowseTest {
         assertEquals(Rss.isoMillis("2026-11-24T10:34:48+00:00"), v.published)
         assertTrue(v.published > 0)
         assertTrue(v.views, v.views.endsWith("views"))
-        assertTrue(items.all { it.kind == IKind.VIDEO && it.id.length == 11 && it.channelId == "UCLA_DiR1FfKNvjuUpBHmylQ" })
+        assertTrue(items.all { it.isVideo && it.id.length == 11 && it.channelId == "UCLA_DiR1FfKNvjuUpBHmylQ" })
         // the same with namespace processing off (prefixed names)
         val raw = Rss.parse(KXmlParser(), javaClass.getResourceAsStream("/rss_nasa.xml")!!, "UCLA_DiR1FfKNvjuUpBHmylQ")
         assertEquals(items.map { it.id }, raw.map { it.id })

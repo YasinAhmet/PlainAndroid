@@ -24,7 +24,7 @@ import app.plain.update.PlainUpdate
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
-    private val main = Handler(Looper.getMainLooper())
+    val main = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor()
 
     private lateinit var input: EditText
@@ -69,12 +69,21 @@ class MainActivity : Activity() {
     private val cacheRows = ArrayList<Pair<android.widget.ImageView, String>>()
 
     // tabs: 0 = Download (the original screen), 1 = Search
-    private lateinit var search: SearchScreen
+    lateinit var search: SearchScreen
+        private set
     private lateinit var downloadView: View
     private val tabViews = ArrayList<TextView>()
     private var tab = -1
     private var started = false
     private var cameFromSearch = false // Back on Download returns to Search after a tap on a search result
+
+    // 2.3: the app-level player (overlay) and the Back history
+    lateinit var player: PlayerPanel
+        private set
+    private val nav = NavHistory()
+    private var lastBackAt = -10_000L
+    private var lastBackHandled = -1_000_000L
+    private var leftPip = false // PiP just ended: expanded (onResume follows) or closed (onStop follows)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,8 +91,19 @@ class MainActivity : Activity() {
         kind = Store.kind; audioFmt = Store.audioFmt; audioQ = Store.audioQ
         search = SearchScreen(this)
         dlThumbs = ThumbLoader(this, dlCalls)
-        setContentView(build())
-        selectTab(Store.tab.coerceIn(0, 1))
+        val frame = android.widget.FrameLayout(this)
+        frame.addView(build(), android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+        player = PlayerPanel.get(this)
+        player.attach(this)
+        frame.addView(player.root, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+        setContentView(frame)
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC // hardware keys = media volume while the app is in front
+        search.onNav = { nav.push(it) }
+        search.onPagePopped = { nav.dropPage() }
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
+        }
+        selectTab(Store.tab.coerceIn(0, 1), record = false)
         handleIntent(intent)
     }
 
@@ -104,6 +124,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
+        player.hostStart()
         Store.addListener(onStore)
         renderList()
         if (tab == 1) search.onShown()
@@ -115,7 +136,15 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        leftPip = false
+    }
+
     override fun onStop() {
+        // PiP closed with its ✕ = stop; screen off in PiP or Home without PiP = pause and release (no background playback)
+        player.hostStop(pipClosed = leftPip)
+        leftPip = false
         started = false
         Store.removeListener(onStore)
         search.onHidden() // cancels every Search request (and queued thumbnails)
@@ -125,6 +154,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        player.detach(this) // playing: goes on under the playback service; paused: closes
         io.shutdownNow()
         search.destroy()
         dlThumbs.shutdown()
@@ -132,11 +162,54 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (tab == 1 && search.onBack()) return
-        if (tab == 0 && cameFromSearch) { selectTab(1); return }
-        @Suppress("DEPRECATION")
-        super.onBackPressed()
+    override fun onBackPressed() = handleBack()
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        if (!inPip) leftPip = true
+        player.onPip(inPip)
+    }
+
+    /** API 30 has no auto-enter: Home while a video plays enters PiP if the setting is on (31+ uses setAutoEnterEnabled). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < 31 && Store.pipAuto && player.state != PState.CLOSED) player.enterPip()
+    }
+
+    fun onPlayerState(s: PState) {
+        if (s == PState.FULL) getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(window.decorView.windowToken, 0)
+    }
+
+    /**
+     * Back = one step back through the app: end a selection, leave the player's full screen / minimise it, then the
+     * history (tabs, Feed/Search/Lists, pages, the Cached folder); at the very start "press back again to exit".
+     * Dialogs and menus are their own windows and close first by themselves. Both Back paths (onBackPressed and the
+     * API 33+ callback) may fire for one press: the second is ignored.
+     */
+    private fun handleBack() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBackHandled < 150) return
+        lastBackHandled = now
+        val selectingHere = if (tab == 0) selecting else search.topSelecting
+        when (BackRule.decide(selectingHere, player.isFull, player.isFullscreen, !nav.isEmpty, lastBackAt, now)) {
+            BackRule.Action.END_SELECTION -> if (tab == 0) endSelection() else search.endTopSelection()
+            BackRule.Action.LEAVE_FULLSCREEN -> player.leaveFullscreen()
+            BackRule.Action.MINIMIZE_PLAYER -> player.minimize()
+            BackRule.Action.POP -> popNav()
+            BackRule.Action.EXIT -> moveTaskToBack(true)
+            BackRule.Action.EXIT_HINT -> { lastBackAt = now; toast("Press back again to exit") }
+        }
+    }
+
+    private fun popNav() {
+        while (true) {
+            when (val s = nav.pop() ?: return) {
+                is NavStep.Tab -> { selectTab(s.from, record = false); return }
+                is NavStep.Base -> { if (tab != 1) selectTab(1, record = false); search.showBaseIndex(s.from); return }
+                NavStep.Page -> { if (tab != 1) selectTab(1, record = false); if (search.popPage()) return } // stale = already gone
+                NavStep.CachedOpen -> { if (cachedOpen) { if (tab != 0) selectTab(0, record = false); cachedOpen = false; refreshCached(); return } }
+            }
+        }
     }
 
     /** Shared links still land in Download; a shared channel/playlist link opens its page in Search. */
@@ -151,7 +224,7 @@ class MainActivity : Activity() {
         i.action = null // don't refetch on rotation/recreate
         when (val target = Links.classify(t)) {
             is Target.Video -> { selectTab(0); cameFromSearch = false; input.setText(Yt.watchUrl(target.id)); fetch() }
-            is Target.Playlist, is Target.Channel, is Target.ChannelUrl -> { search.open(target); selectTab(1) }
+            is Target.Playlist, is Target.Channel, is Target.ChannelUrl -> { if (tab != 1) nav.push(NavStep.Tab(tab)); search.open(target); selectTab(1, record = false) }
             else -> { selectTab(0); showStatus("No YouTube link in what was shared", true) }
         }
     }
@@ -159,9 +232,10 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------------------------------------------------
     // tabs
 
-    private fun selectTab(t: Int) {
+    private fun selectTab(t: Int, record: Boolean = true) {
         if (t != 0) cameFromSearch = false
         val changed = t != tab
+        if (changed && record && tab >= 0) nav.push(NavStep.Tab(tab))
         tab = t
         Store.tab = t
         tabViews.forEachIndexed { i, v ->
@@ -185,8 +259,9 @@ class MainActivity : Activity() {
     /** A search result was tapped: the usual Download flow for that video, prefilled. */
     /** Channel page in the Search tab (hold menu "Visit channel", the player's Channel button, the info card). */
     fun openChannel(id: String, name: String) {
+        if (tab != 1) nav.push(NavStep.Tab(tab)) // Back: the page first, then the tab we came from
         search.openChannel(id, name) // pushed first, so only that page loads when the tab shows
-        selectTab(1)
+        selectTab(1, record = false)
     }
 
     fun openVideo(id: String) {
@@ -220,6 +295,7 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_IMPORT && resultCode == RESULT_OK) data?.data?.let { search.importUri(it) }
+        if (requestCode == AccountUi.REQ_COOKIES || requestCode == AccountUi.REQ_SIGNIN) account.onResult(requestCode, resultCode, data)
         if (requestCode in REQ_TRASH..REQ_DELETE) sync() // the system dialog trashed / restored / deleted files
     }
 
@@ -363,7 +439,7 @@ class MainActivity : Activity() {
 
         cachedHeader = text("Cached", 15f, C.DIM, bold = true, lines = 2).apply {
             setPadding(0, dp(24), 0, dp(4))
-            setOnClickListener { cachedOpen = !cachedOpen; refreshCached() }
+            setOnClickListener { cachedOpen = !cachedOpen; if (cachedOpen) nav.push(NavStep.CachedOpen) else nav.dropCached(); refreshCached() }
         }
         col.addView(cachedHeader, lpL(MATCH, WRAP))
         cachedBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -386,6 +462,7 @@ class MainActivity : Activity() {
                 toast(if (Store.wifiOnly) "Downloads use Wi-Fi only" else "Mobile data allowed")
             },
             "Play queue (${Store.queue().items.size})" to { if (Store.queue().items.isEmpty()) toast("The play queue is empty") else PlayerActivity.queue(this) },
+            "Account: " + (if (!Account.hasAccount) "not signed in" else if (Account.expired) "expired" else "signed in") + "…" to { account.show() },
             "Import YouTube subscriptions…" to { selectTab(1); search.importDialog() },
             (if (Store.originalAudio) "✓ Audio: original format (no conversion)" else "   Audio: convert to clean M4A") to {
                 Store.originalAudio = !Store.originalAudio
@@ -396,6 +473,11 @@ class MainActivity : Activity() {
                 menu("Parallel audio downloads (bulk music)", (1..4).map { n -> (if (n == Store.parallelAudio) "✓ $n" else "   $n") to { Store.parallelAudio = n } })
             },
             "Cover art: ${Store.artQuality.label}…" to { artMenu() },
+            (if (Store.pipAuto) "✓ Picture-in-picture when leaving with Home" else "   Picture-in-picture when leaving with Home (off)") to {
+                Store.pipAuto = !Store.pipAuto
+                player.updatePip(force = true)
+                toast(if (Store.pipAuto) "A playing video goes picture-in-picture when you press Home" else "Home pauses the video")
+            },
             "Add missing cover art…" to { offerArt(force = true) },
             "Trash (${trashCount}${if (trashBytes > 0) " · " + Text.size(trashBytes) else ""})…" to { trashView() },
             "Retry all failed" to {
@@ -415,6 +497,8 @@ class MainActivity : Activity() {
         ))
     }
 
+    private val account by lazy { AccountUi(this) }
+
     private fun about() = message(
         "Plain Youtube",
         "Downloads YouTube audio (M4A/AAC or Opus) and MP4 video for personal offline use.\n\n" +
@@ -423,7 +507,8 @@ class MainActivity : Activity() {
             "). YouTube changes break this from time to time.\n\n" +
             "YouTube's Terms of Service forbid downloading except where YouTube offers a download option. " +
             "Use this only for content you have the right to keep; you are responsible for how you use it.\n\n" +
-            "No account, no cookies, no analytics. Network is used only when you fetch a link, search, open a channel, " +
+            "No analytics. No account unless you add one in ⋮ → Account, and then it's used only for members-only videos and " +
+            "the subscriptions sync; everything else stays anonymous. Network is used only when you fetch a link, search, open a channel, " +
             "playlist or the Feed, or download. Search follows are kept on this phone only."
     )
 
@@ -483,7 +568,8 @@ class MainActivity : Activity() {
         showStatus(null)
         card.visibility = View.VISIBLE
         titleV.text = v.title
-        metaV.text = listOf(Naming.channel(v.author), Text.duration(v.durationSec)).filter { it.isNotEmpty() }.joinToString(" · ")
+        metaV.text = listOf(if (v.members) "MEMBERS" else "", Naming.channel(v.author), Text.duration(v.durationSec)).filter { it.isNotEmpty() }.joinToString(" · ")
+        metaV.setTextColor(if (v.members) C.BLUE else C.DIM)
         thumb.setImageDrawable(null)
         loadThumb(v)
         val choices = Pick.videoChoices(v.formats, Build.VERSION.SDK_INT)
@@ -580,6 +666,7 @@ class MainActivity : Activity() {
             id = Store.newId(), videoId = v.id, title = v.title, channel = Naming.channel(v.author), durationSec = v.durationSec,
             kind = kind, audioFmt = audioFmt, audioQ = audioQ, height = c?.p ?: 0, codec = c?.codec ?: VCodec.AVC,
             total = if (kind == Kind.AUDIO) (Pick.audio(v.formats, audioFmt, audioQ)?.estBytes ?: 0) else (c?.estBytes ?: 0),
+            members = v.members,
         )
         Store.add(j)
         DownloadService.start(this)
@@ -608,6 +695,7 @@ class MainActivity : Activity() {
         val bar = ProgressLine(this@MainActivity)
         val actions = LinearLayout(this@MainActivity).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         val thumbV = RoundImage(this@MainActivity)
+        val membersV = membersBadge()
         var thumbAsked = false
         var videoId = ""
 
@@ -619,6 +707,7 @@ class MainActivity : Activity() {
             }
             box.addView(thumbV, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
             box.addView(playGlyph(16f), android.widget.FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+            box.addView(membersV, android.widget.FrameLayout.LayoutParams(WRAP, WRAP, Gravity.START or Gravity.TOP).apply { setMargins(dp(3), dp(3), 0, 0) })
             top.addView(box, lpL(dp(112), dp(63)))
             val texts = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
             texts.addView(title, lpL(MATCH, WRAP))
@@ -650,6 +739,7 @@ class MainActivity : Activity() {
             bound = j
             if (videoId != j.videoId) { videoId = j.videoId; thumbAsked = false }
             title.text = j.title
+            membersV.visibility = if (j.members) View.VISIBLE else View.GONE
             sub.text = listOf(j.channel, j.what, Text.duration(j.durationSec)).filter { it.isNotEmpty() }.joinToString(" · ")
             val pct = if (j.total > 0) (j.done * 100 / j.total).toInt().coerceIn(0, 100) else 0
             state.text = Pipeline.status(j) // "Downloading 40%", "Converting 37% · about 1:10 left", "Saved · … · converted in 2:41"
@@ -835,7 +925,7 @@ class MainActivity : Activity() {
     private var undoAction: (() -> Unit)? = null
     private val hideUndoTask = Runnable { hideUndo() }
 
-    private fun showUndo(msg: String, undo: () -> Unit) {
+    fun showUndo(msg: String, undo: () -> Unit) {
         undoText.text = msg; undoAction = undo
         undoBar.visibility = View.VISIBLE
         main.removeCallbacks(hideUndoTask); main.postDelayed(hideUndoTask, 8000)

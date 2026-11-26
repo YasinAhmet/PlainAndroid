@@ -20,6 +20,7 @@ data class Item(
     val thumbId: String? = null, // video id whose thumbnail is shown
     val published: Long = 0, // RSS only: epoch ms
     val live: Boolean = false, // live now / upcoming: nothing to download yet
+    val members: Boolean = false, // members-only (blue MEMBERS badge; plays only with the account, 2.0)
 ) {
     val isVideo get() = kind == IKind.VIDEO || kind == IKind.SHORT
 }
@@ -193,13 +194,14 @@ object Browse {
         val live = liveBadge || r.has("upcomingEventData") || bs.any { it.second == "LIVE" || it.second == "UPCOMING" }
         // playlistVideoRenderer: videoInfo runs = "1.2M views • 3 years ago"
         val info = text(r.opt("videoInfo")).split(" • ", "•").map { it.trim() }
+        val short = r.optJSONObject("navigationEndpoint")?.has("reelWatchEndpoint") == true
         return Item(
-            kind = IKind.VIDEO, id = id, title = text(r.opt("title")).ifEmpty { text(r.opt("headline")) },
+            kind = if (short) IKind.SHORT else IKind.VIDEO, id = id, title = text(r.opt("title")).ifEmpty { text(r.opt("headline")) },
             channel = text(owner), channelId = channelIdIn(owner),
             durationSec = dur,
             views = text(r.opt("shortViewCountText")).ifEmpty { text(r.opt("viewCountText")) }.ifEmpty { info.firstOrNull(::isViews).orEmpty() },
             age = text(r.opt("publishedTimeText")).ifEmpty { info.firstOrNull(::isAge).orEmpty() },
-            thumbId = id, live = live,
+            thumbId = id, live = live, members = Members.inRenderer(r),
         )
     }
 
@@ -252,6 +254,7 @@ object Browse {
                     views = texts.firstOrNull(::isViews).orEmpty(), age = texts.firstOrNull(::isAge).orEmpty(),
                     thumbId = id,
                     live = bs.any { it.second.endsWith("_LIVE") || it.first.equals("LIVE", true) || it.first.equals("UPCOMING", true) },
+                    members = Members.inRenderer(v),
                 )
             }
             type == "LOCKUP_CONTENT_TYPE_PLAYLIST" || type == "LOCKUP_CONTENT_TYPE_PODCAST" || type == "LOCKUP_CONTENT_TYPE_ALBUM" -> Item(

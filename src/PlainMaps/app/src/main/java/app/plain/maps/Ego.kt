@@ -189,6 +189,43 @@ object Ego {
         return Placed(pos, byRef, named, guessed)
     }
 
+    /** A line as text, to keep it between sync steps. */
+    fun encode(l: Line): String = buildString {
+        append(l.code).append('\n').append(l.name).append('\n').append(l.minutes).append('\n')
+        for (a in listOf(l.weekday, l.saturday, l.sunday)) append(a.joinToString(",")).append('\n')
+        for ((n, nm) in l.stops) append(n).append('\t').append(nm).append('\n')
+    }
+
+    fun decode(s: String): Line? {
+        val p = s.split('\n')
+        if (p.size < 6) return null
+        fun ints(x: String) = if (x.isBlank()) IntArray(0) else x.split(',').mapNotNull { it.trim().toIntOrNull() }.toIntArray()
+        val stops = p.drop(6).filter { '\t' in it }.map { it.substringBefore('\t') to it.substringAfter('\t') }
+        return Line(p[0], p[1], p[2].toIntOrNull() ?: 0, ints(p[3]), ints(p[4]), ints(p[5]), stops)
+    }
+
+    /**
+     * The box (lat/lon) that EGO's network spans: every placed stop that lies within 15 km of a
+     * placed neighbour on its line. A stop number that also exists elsewhere (a wrong match far away)
+     * has no such neighbour, so it can't stretch the map. Null if nothing is placed.
+     */
+    fun extent(lines: List<Line>, pos: Map<String, DoubleArray>): BBox? {
+        var s = 90.0; var n = -90.0; var w = 180.0; var e = -180.0
+        var any = false
+        for (l in lines) {
+            val pts = l.stops.mapNotNull { pos[it.first] }
+            for (i in pts.indices) {
+                val p = pts[i]
+                val near = (i > 0 && Geo.dist(p[0], p[1], pts[i - 1][0], pts[i - 1][1]) < 15_000) ||
+                    (i + 1 < pts.size && Geo.dist(p[0], p[1], pts[i + 1][0], pts[i + 1][1]) < 15_000)
+                if (!near) continue
+                any = true
+                if (p[0] < s) s = p[0]; if (p[0] > n) n = p[0]; if (p[1] < w) w = p[1]; if (p[1] > e) e = p[1]
+            }
+        }
+        return if (any) BBox(w, s, e, n) else null
+    }
+
     /** Weekday / Saturday / Sunday day masks. */
     const val WEEKDAYS = 0x1F
     const val SATURDAY = 1 shl 5

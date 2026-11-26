@@ -74,6 +74,17 @@ object WebApi {
         return Rss.parse(Xml.newPullParser(), bytes.inputStream(), channelId)
     }
 
+    /**
+     * A channel's members-only uploads: YouTube's public RSS of its UUMO… playlist (no account; verified 2026-11-26:
+     * 15 newest members-only uploads; 404 for channels without memberships). Null = no members list.
+     */
+    fun rssMembers(ctx: Context, calls: Calls, g: Int, channelId: String): List<Item>? {
+        val pl = Members.playlistOf(channelId) ?: return null
+        val bytes = try { request(ctx, calls, g, Clients.RSS_PLAYLIST_URL + pl, null, mapOf("User-Agent" to Clients.WEB_UA), 2 shl 20) }
+            catch (_: NotFound) { return null }
+        return Rss.parse(Xml.newPullParser(), bytes.inputStream(), channelId).map { it.copy(members = true) }
+    }
+
     /** Plain GET (HLS playlists) with the same retries, Wi-Fi binding and cancellation. */
     fun get(ctx: Context, calls: Calls, g: Int, url: String, ua: String, limit: Int = 4 shl 20): ByteArray =
         request(ctx, calls, g, url, null, mapOf("User-Agent" to ua), limit)

@@ -35,6 +35,14 @@ object C {
     const val ACCENT = 0xFFE6B422.toInt()
     const val RED = 0xFFD46A6A.toInt()
     const val GREEN = 0xFF6CBF6C.toInt()
+    const val BLUE = 0xFF4A90E2.toInt() // members-only content (2.0)
+}
+
+/** Blue "MEMBERS" badge: members-only video (plays/downloads only with the account in ⋮ → Account). */
+fun Context.membersBadge() = text("MEMBERS", 10f, C.BLUE, bold = true).apply {
+    background = GradientDrawable().apply { setColor(0xCC000000.toInt()); cornerRadius = dpf(4); setStroke(dp(1), C.BLUE) }
+    setPadding(dp(4), dp(1), dp(4), dp(1))
+    contentDescription = "Members only"
 }
 
 fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density + 0.5f).toInt()

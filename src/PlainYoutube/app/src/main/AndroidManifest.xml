@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 2.4: audio keeps playing in the background (Watch and Listen) through a mediaPlayback service, only while playing -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- partial wake lock + Wi-Fi lock, held only while a download is actually transferring/muxing -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -22,6 +24,8 @@
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security"
@@ -33,6 +37,8 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="true"
             android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -46,12 +52,24 @@
             </intent-filter>
         </activity>
 
-        <!-- In-app player: streams through a 127.0.0.1 caching proxy while open; nothing runs after it closes -->
+
+        <!-- 2.0 "Sign in to YouTube": Android's WebView as it comes (no user-agent or header changes). Not exported. -->
         <activity
-            android:name=".PlayerActivity"
+            android:name=".SignInActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="false"
-            android:launchMode="singleTop" />
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 2.4 background playback: foreground only while playing; no work of its own (the player is in MainActivity) -->
+        <service
+            android:name=".PlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- media notification buttons (explicit broadcasts from this app's own PendingIntents) -->
+        <receiver
+            android:name=".PlayControl"
+            android:exported="false" />
 
         <service
             android:name=".DownloadService"

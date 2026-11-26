@@ -46,6 +46,8 @@ data class Job(
     var media: Media = Media.OK,
     // "Add missing cover art": a job that tags an already saved file ([uri]) in place instead of downloading
     val art: Boolean = false,
+    // members-only video (2.0): blue MEMBERS badge in the downloads list
+    var members: Boolean = false,
 ) {
     val active get() = state == State.QUEUED || state == State.RUNNING
 
@@ -73,6 +75,7 @@ object JobCodec {
             if (j.batch != 0L) { put("batch", j.batch); put("batchTitle", j.batchTitle) }
             if (j.media != Media.OK) put("media", j.media.name)
             if (j.art) put("art", true)
+            if (j.members) put("members", true)
         })
         return a.toString()
     }
@@ -108,6 +111,7 @@ object JobCodec {
                     saveMs = o.optLong("saveMs"),
                     savedConverted = o.optBoolean("converted"),
                     batch = o.optLong("batch"),
+                    members = o.optBoolean("members"),
                     batchTitle = o.optString("batchTitle"),
                     media = enumOr(o.optString("media"), Media.OK),
                     art = o.optBoolean("art"),

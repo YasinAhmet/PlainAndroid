@@ -55,11 +55,11 @@ fun Context.text(s: CharSequence, sp: Float = 14f, color: Int = C.TEXT, bold: Bo
 
 fun Context.button(label: String, color: Int = C.CARD, textColor: Int = C.TEXT, onClick: (View) -> Unit) = TextView(this).apply {
     text = label
-    textSize = 14f
+    textSize = 13.5f
     setTextColor(textColor)
     gravity = Gravity.CENTER
-    background = ripple(roundRect(color, dpf(18)))
-    setPadding(dp(14), dp(8), dp(14), dp(8))
+    background = ripple(roundRect(color, dpf(16)))
+    setPadding(dp(12), dp(6), dp(12), dp(6))
     setOnClickListener(onClick)
 }
 

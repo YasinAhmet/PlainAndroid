@@ -74,10 +74,10 @@ class Sync(
         """.trimIndent()
 
         /** The province minus the core, as squares of at most [OUT_STEP]. */
-        fun outskirts(core: BBox): List<BBox> {
+        fun outskirts(core: BBox, all: BBox = AREA): List<BBox> {
             val bands = listOf(
-                BBox(AREA.w, AREA.s, core.w, AREA.n), BBox(core.e, AREA.s, AREA.e, AREA.n),
-                BBox(core.w, core.n, core.e, AREA.n), BBox(core.w, AREA.s, core.e, core.s),
+                BBox(all.w, all.s, core.w, all.n), BBox(core.e, all.s, all.e, all.n),
+                BBox(core.w, core.n, core.e, all.n), BBox(core.w, all.s, core.e, core.s),
             ).filter { it.e - it.w > 1e-6 && it.n - it.s > 1e-6 }
             val out = ArrayList<BBox>()
             for (b in bands) {
@@ -124,17 +124,33 @@ class Sync(
 
     @Volatile private var lastF = 0f
 
+    /**
+     * The map's area: the city's box, grown to cover every stop of its transit
+     * (Istanbul: İETT's stops; Ankara: EGO's stops, worked out while the extract is read).
+     */
+    private var area: BBox = City.area
+
+    private fun saveArea() = work.execSQL("INSERT OR REPLACE INTO wmeta VALUES('area', ?)", arrayOf(area.encode()))
+
+    /** The union of two boxes, clamped to the city's search area. */
+    private fun grow(a: BBox, b: BBox): BBox {
+        val c = City.searchArea
+        return BBox(maxOf(c.w, minOf(a.w, b.w)), maxOf(c.s, minOf(a.s, b.s)), minOf(c.e, maxOf(a.e, b.e)), minOf(c.n, maxOf(a.n, b.n)))
+    }
+
     fun run() {
         net = Net.Net0(wifi())
         openDbs()
         var missing = 0
         try {
             if (City.ankara) {
-                // EGO's stops get their positions from the map extract, so the map comes first
+                // EGO's lines first (they decide how big the map is), then the map, then the stops' positions
+                if (!done("egolines")) { egoLines(); mark("egolines") }
                 core()
                 if (!done("transit")) { egoTransit(); mark("transit") }
             } else {
                 if (!done("transit")) { transit(); mark("transit") }
+                if (!done("area")) { fitToStops(); mark("area") }
                 core()
             }
             missing = if (City.mapCoversArea) 0 else outskirts()
@@ -180,7 +196,18 @@ class Sync(
             work.execSQL("CREATE TABLE piece(lvl INTEGER, x INTEGER, y INTEGER, k INTEGER, data BLOB)")
             work.execSQL("INSERT INTO wmeta VALUES('version', '$VERSION')")
             work.execSQL("INSERT INTO wmeta VALUES('started', '${System.currentTimeMillis()}')")
-        } else say(0f, "Continuing the last sync…")
+        } else {
+            say(0f, "Continuing the last sync…")
+            work.rawQuery("SELECT v FROM wmeta WHERE k='area'", null).use { c -> if (c.moveToFirst()) BBox.decode(c.getString(0))?.let { area = it } }
+        }
+    }
+
+    /** Istanbul: grow the map's box to every İETT stop (plus about 3 km). */
+    private fun fitToStops() {
+        out.rawQuery("SELECT min(lat),max(lat),min(lon),max(lon) FROM stop WHERE mode=0", null).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) area = grow(City.area, BBox(c.getDouble(2), c.getDouble(0), c.getDouble(3), c.getDouble(1)).pad(3000.0))
+        }
+        saveArea()
     }
 
     private fun done(k: String) = work.rawQuery("SELECT 1 FROM done WHERE k=?", arrayOf(k)).use { it.moveToFirst() }
@@ -358,10 +385,26 @@ class Sync(
     }
 
     // ------------------------------------------------------------------ 1b. EGO (Ankara)
-    private fun egoTransit() {
-        say(0.55f, "EGO: reading the line list")
+    private fun egoLines() {
+        say(0.01f, "EGO: reading the line list")
         val codes = retry("EGO line list") { EgoFetch.lineCodes(net) }
-        val lines = EgoFetch.lines(net, codes, cancel) { n -> if (n % 10 == 0 || n == codes.size) say(0.55f + 0.28f * n / codes.size, "EGO: timetables, line $n of ${codes.size}") }
+        val lines = EgoFetch.lines(net, codes, cancel) { n -> if (n % 10 == 0 || n == codes.size) say(0.01f + 0.18f * n / codes.size, "EGO: timetables, line $n of ${codes.size}") }
+        work.execSQL("CREATE TABLE IF NOT EXISTS egoline(code TEXT PRIMARY KEY, data TEXT)")
+        tx(work) {
+            work.execSQL("DELETE FROM egoline")
+            for (l in lines) work.execSQL("INSERT OR REPLACE INTO egoline VALUES(?,?)", arrayOf(l.code, Ego.encode(l)))
+        }
+    }
+
+    private fun storedEgoLines(): List<Ego.Line> {
+        val out = ArrayList<Ego.Line>()
+        work.rawQuery("SELECT data FROM egoline", null).use { c -> while (c.moveToNext()) Ego.decode(c.getString(0))?.let { out.add(it) } }
+        return out
+    }
+
+    private fun egoTransit() {
+        val lines = storedEgoLines()
+        if (lines.isEmpty()) throw IOException("EGO's lines were not read")
         say(0.84f, "EGO: placing the stops on the map")
         val osm = ArrayList<Ego.OsmStop>()
         work.rawQuery("SELECT ref,name,lat,lon FROM osmstop", null).use { c ->
@@ -493,8 +536,21 @@ class Sync(
         ex.wantNode = { Filters.poi(it) || (keepBus && Filters.busStop(it)) }
         work.execSQL("CREATE TABLE IF NOT EXISTS road(data BLOB)")
         work.execSQL("DELETE FROM road")
-        // a regional extract is cut down to the city's area as it is read
-        val a = AREA
+        // a regional extract is cut down to the city's area as it is read. Ankara: stops are read from the
+        // whole province; at the first way (nodes come first) the area becomes the box EGO's stops span.
+        var a = if (City.ankara) City.searchArea else area
+        val egoLines = if (City.ankara) storedEgoLines() else emptyList()
+        val seenStops = ArrayList<Ego.OsmStop>()
+        var fitted = !City.ankara
+        fun fit() {
+            if (fitted) return
+            fitted = true
+            val placed = Ego.place(egoLines, seenStops, interpolate = false)
+            Ego.extent(egoLines, placed.pos)?.let { area = grow(City.area, it.pad(3000.0)) }
+            a = area
+            saveArea()
+            say(0.4f, String.format(java.util.Locale.US, "Map: EGO reaches %.2f–%.2f N, %.2f–%.2f E", area.s, area.n, area.w, area.e))
+        }
         fun inArea(lat: Double, lon: Double) = lat in a.s..a.n && lon in a.w..a.e
         fun inArea(g: DoubleArray): Boolean { val b = Clip.bounds(g); return b[2] >= a.w && b[0] <= a.e && b[3] >= a.s && b[1] <= a.n }
         fun inArea(e: OsmEl) = e.members.orEmpty().any { m -> m.geom?.let { inArea(it) } ?: (!m.lat.isNaN() && inArea(m.lat, m.lon)) }
@@ -512,10 +568,14 @@ class Sync(
                 ex.run(
                     { e ->
                         if (!inArea(e.lat, e.lon)) return@run
-                        if (keepBus && Filters.busStop(e.tags)) work.execSQL("INSERT INTO osmstop VALUES(?,?,?,?)", arrayOf(e["ref"], e["name"] ?: "", e.lat, e.lon))
+                        if (keepBus && Filters.busStop(e.tags)) {
+                            work.execSQL("INSERT INTO osmstop VALUES(?,?,?,?)", arrayOf(e["ref"], e["name"] ?: "", e.lat, e.lon))
+                            seenStops.add(Ego.OsmStop(e["ref"], e["name"] ?: "", e.lat, e.lon))
+                        }
                         if (Filters.poi(e.tags)) w.poi(e, e.lat, e.lon)
                     },
                     { e ->
+                        fit()
                         if (!inArea(e.geom!!)) return@run
                         // the streets, so EGO lines without a route shape can follow them
                         if (keepBus && Filters.drivable(e.tags)) work.execSQL("INSERT INTO road VALUES(?)", arrayOf<Any>(Codec.shape(listOf(e.geom))))
@@ -526,6 +586,7 @@ class Sync(
                         }
                     },
                     { e ->
+                        fit()
                         if (!inArea(e)) return@run
                         if (keepBus && Filters.busRoute(e.tags)) {
                             val parts = e.members.orEmpty().filter { it.type == 'w' && it.geom != null }.map { it.geom!! }
@@ -537,9 +598,12 @@ class Sync(
                         } else if (Filters.route(e.tags)) routes.add(e) else w.map(e, !ex.truncated(e.uid))
                     },
                 )
+                fit()
+                // places were read before the area was known
+                if (City.ankara) out.execSQL("DELETE FROM poi WHERE lat<? OR lat>? OR lon<? OR lon>?", arrayOf<Any>(area.s, area.n, area.w, area.e))
                 say(0.53f, "Metro, tram and ferry lines")
                 lines(routes) { m -> if (m.type == 'n') ex.memberNode(m.ref) else null }
-                setMeta("core", (if (City.mapCoversArea) AREA else ex.bbox)?.encode() ?: "")
+                setMeta("core", (if (City.mapCoversArea) area else ex.bbox)?.encode() ?: "")
                 mark("core")
             }
         }
@@ -641,7 +705,7 @@ class Sync(
     /** Returns how many squares could not be loaded. */
     private fun outskirts(): Int {
         val core = BBox.decode(meta("core")) ?: return 0
-        val all = outskirts(core)
+        val all = outskirts(core, area)
         val queue = ArrayDeque(all.filter { !done("out:" + key(it)) }.map { it to 0 })
         var finished = all.size - queue.size
         var failed = 0
@@ -742,7 +806,7 @@ class Sync(
             work.rawQuery("SELECT data FROM coast", null).use { c -> while (c.moveToNext()) ways.addAll(Codec.shape(c.getBlob(0))) }
             // with every outer square loaded the coast is complete for the province, else only for the core
             val core = BBox.decode(meta("core"))
-            val box = if (missing == 0 || core == null) BBox(AREA.w + 0.0005, AREA.s + 0.0005, AREA.e - 0.0005, AREA.n - 0.0005)
+            val box = if (missing == 0 || core == null) BBox(area.w + 0.0005, area.s + 0.0005, area.e - 0.0005, area.n - 0.0005)
             else BBox(core.w + 0.01, core.s + 0.01, core.e - 0.01, core.n - 0.01)
             var land = Coast.land(ways, box.w, box.s, box.e, box.n)
             var landBox = box
@@ -830,7 +894,7 @@ class Sync(
         }
         Store.INDEXES.forEach { out.execSQL(it) }
         setMeta("version", VERSION)
-        setMeta("area", AREA.encode())
+        setMeta("area", area.encode())
         setMeta("synced_at", System.currentTimeMillis().toString())
         setMeta("outskirts_missing", missing.toString())
         out.rawQuery("SELECT count(*) FROM poi WHERE cat<>${Poi.PLACE}", null).use { c -> if (c.moveToFirst()) setMeta("places", c.getLong(0).toString()) }

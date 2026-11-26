@@ -38,11 +38,33 @@ class SearchScreen(private val act: MainActivity) {
     private val selBar = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(4), act.dp(4), act.dp(16), act.dp(4)); visibility = View.GONE }
     private val host = FrameLayout(act)
     private val backBtn = act.icon(R.drawable.ic_back, desc = "Back") { onBack() }
+
+    /** 2.3 app-wide Back history: page pushes and Feed/Search/Lists switches are reported to MainActivity. */
+    var onNav: ((NavStep) -> Unit)? = null
+    var onPagePopped: (() -> Unit)? = null
+    val topSelecting get() = top.selecting
+    fun endTopSelection() = top.endSelection()
+
+    /** Back from the app history: one page back (false = no page open). */
+    fun popPage(): Boolean {
+        if (stack.isEmpty()) return false
+        top.endSelection()
+        cancelNet()
+        stack.removeAt(stack.size - 1)
+        attach()
+        if (shown) top.onShow()
+        return true
+    }
+
+    private fun baseIndex(p: ListPage) = when (p) { searchPage -> 1; listsPage -> 2; else -> 0 }
+
+    fun showBaseIndex(i: Int) = showBase(when (i) { 1 -> searchPage; 2 -> listsPage; else -> feedPage }, record = false)
     private val feedChip: Chip
     private val searchChip: Chip
     private val listsChip: Chip
     private val selCount = act.text("", 15f, C.TEXT, bold = true)
     private val selGo: TextView
+    private lateinit var selMore: View
 
     private val feedPage = FeedPage()
     private val searchPage = SearchPage()
@@ -76,9 +98,10 @@ class SearchScreen(private val act: MainActivity) {
         selBar.addView(selCount, lpL(0, WRAP, 1f))
         selBar.addView(act.pill("All") { top.selectAll() })
         selBar.addView(View(act), lpL(act.dp(8), 1))
-        selGo = act.pill("Download", C.ACCENT, C.ACCENT) { top.let { p -> bulk(p.selectedItems(), p.albumHint, music = p.musicDefault) { p.endSelection() } } }
+        selGo = act.pill("Download", C.ACCENT, C.ACCENT) { top.selGo() }
         selBar.addView(selGo)
-        selBar.addView(act.icon(R.drawable.ic_more, desc = "More for the selection") { selectionMenu() })
+        selMore = act.icon(R.drawable.ic_more, desc = "More for the selection") { selectionMenu() }
+        selBar.addView(selMore)
         view.addView(selBar, lpL(MATCH, WRAP))
         view.addView(host, lpL(MATCH, 0, 1f))
 
@@ -118,19 +141,18 @@ class SearchScreen(private val act: MainActivity) {
         (stack + feedPage + searchPage + listsPage).forEach { it.onCancelled() }
     }
 
+    /** The on-screen ← of a page. */
     fun onBack(): Boolean {
         if (top.selecting) { top.endSelection(); return true }
-        if (stack.isEmpty()) return false
-        cancelNet()
-        stack.removeAt(stack.size - 1)
-        attach()
-        top.onShow()
+        if (!popPage()) return false
+        onPagePopped?.invoke()
         return true
     }
 
-    private fun showBase(p: ListPage) {
+    private fun showBase(p: ListPage, record: Boolean = true) {
         top.endSelection()
         if (p === base && stack.isEmpty()) return
+        if (record && p !== base) onNav?.invoke(NavStep.Base(baseIndex(base)))
         cancelNet()
         stack.clear()
         base = p
@@ -141,6 +163,7 @@ class SearchScreen(private val act: MainActivity) {
 
     private fun push(p: ListPage) {
         top.endSelection()
+        onNav?.invoke(NavStep.Page)
         cancelNet()
         stack += p
         if (stack.size > 12) stack.removeAt(0) // bounded memory on long wanders
@@ -164,7 +187,8 @@ class SearchScreen(private val act: MainActivity) {
         selBar.visibility = if (p.selecting) View.VISIBLE else View.GONE
         val n = p.sel.size
         selCount.text = "$n selected"
-        selGo.text = "Download $n"
+        selGo.text = p.selLabel(n)
+        selMore.visibility = if (p.selMenu) View.VISIBLE else View.GONE
         selGo.isEnabled = n > 0
         selGo.alpha = if (n > 0) 1f else 0.4f
     }
@@ -258,7 +282,7 @@ class SearchScreen(private val act: MainActivity) {
         is NoWifi -> "Not on Wi-Fi (Wi-Fi only is on)"
         is java.net.UnknownHostException -> "No internet connection"
         is java.net.SocketTimeoutException -> "Network timed out"
-        is NotFound, is YtError -> e.message ?: "Not found"
+        is NotFound, is YtError, is AccountExpired -> e.message ?: "Not found"
         else -> "Couldn't load: ${e.message ?: e.javaClass.simpleName}"
     }
 
@@ -322,6 +346,9 @@ class SearchScreen(private val act: MainActivity) {
             .show()
     }
 
+    /** Follows changed elsewhere (subscriptions sync). */
+    fun followsChanged() { if (shown && top === feedPage) feedPage.onShow() else feedPage.updateInfo() }
+
     fun importUri(uri: Uri) {
         io.execute {
             val r = try {
@@ -356,6 +383,43 @@ class SearchScreen(private val act: MainActivity) {
     // ---------------------------------------------------------------------------------------------------------
     // pages
 
+    /**
+     * Members-only video tapped: remembered (its /player then goes straight to the account path). Signed out: the
+     * "import your account" message instead of playing / opening it. True = blocked.
+     */
+    fun membersBlocked(i: Item): Boolean {
+        if (!i.members) return false
+        Store.markMembers(i.id)
+        if (Account.usable) return false
+        act.toast(if (Account.expired) "Members-only — account expired: import new cookies in ⋮ → Account" else Account.SIGNED_OUT)
+        return true
+    }
+
+    /** A channel's members-only videos (its UUMO… playlist), asked with the account (members-tab purpose only). */
+    inner class MembersPage(private val channelId: String, private val name: String) : ListPage() {
+        init {
+            head.addView(act.text("Members-only · ${name.ifEmpty { "Channel" }}", 18f, C.TEXT, bold = true, lines = 2).apply { setPadding(0, act.dp(4), 0, 0) })
+            head.addView(act.text("Asked with your account (only this list and members-only videos use it)", 12f, C.BLUE, lines = 2)
+                .apply { setPadding(0, act.dp(2), 0, act.dp(6)) })
+        }
+
+        private fun mark(p: Page) = Page(p.items.map { if (it.isVideo) it.copy(members = true) else it }, p.continuation)
+
+        override fun firstLoad() {
+            run(true, { g -> AuthHttp.membersPage(act, calls, g, channelId, null) }) { o ->
+                loadedOnce = true
+                items.clear()
+                append(mark(Browse.page(o)))
+                setStatus(if (items.isEmpty()) Browse.alert(o) ?: "No members-only videos here (or this account isn't a member)" else null)
+            }
+        }
+
+        override fun loadMore() {
+            val t = token ?: return
+            run(false, { g -> AuthHttp.membersPage(act, calls, g, channelId, t) }) { append(mark(Browse.page(it))) }
+        }
+    }
+
     abstract inner class ListPage {
         val items = ArrayList<Item>()
         var token: String? = null
@@ -363,8 +427,16 @@ class SearchScreen(private val act: MainActivity) {
         var loading = false
         var loadedOnce = false
         var region: String? = null // fallback region the first page needed (continuations use it too)
-        var selecting = false
-        val sel = LinkedHashSet<String>()
+        val sel = Selection()
+        val selecting get() = sel.active
+
+        /** Rows that can be selected on this page (videos; channels on Following). */
+        open fun selectable(i: Item) = i.isVideo
+        open fun selLabel(n: Int) = "Download $n"
+        open val selMenu get() = true
+        open fun selGo() { bulk(selectedItems(), albumHint, music = musicDefault) { endSelection() } }
+        /** Hold menu of a channel row offers "Select" (Following). */
+        open val channelSelect get() = false
         val adapter = ItemAdapter(this)
         val head = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(16), 0, act.dp(16), act.dp(4)) }
         private val status = act.text("", 13f, C.DIM, lines = 4).apply { setPadding(act.dp(16), act.dp(4), act.dp(16), act.dp(4)); visibility = View.GONE }
@@ -467,43 +539,40 @@ class SearchScreen(private val act: MainActivity) {
         // ---- selection ----
 
         fun startSelection(first: Item) {
-            if (!first.isVideo) return
-            selecting = true
-            sel.clear(); sel += first.id
+            if (!selectable(first)) return
+            sel.start(first.id)
             adapter.notifyDataSetChanged()
             if (top === this) updateSelBar()
         }
 
         fun toggle(i: Item) {
-            if (!i.isVideo) return
-            if (!sel.remove(i.id)) sel += i.id
-            if (sel.isEmpty()) { endSelection(); return }
+            if (!selectable(i)) return
+            if (!sel.toggle(i.id)) { adapter.notifyDataSetChanged(); if (top === this) updateSelBar(); return }
             adapter.notifyDataSetChanged()
             if (top === this) updateSelBar()
         }
 
         fun selectAll() {
-            items.filter { it.isVideo && !it.live }.forEach { sel += it.id }
+            sel.addAll(items.filter { selectable(it) && !it.live }.map { it.id })
             adapter.notifyDataSetChanged()
             if (top === this) updateSelBar()
         }
 
         fun endSelection() {
             if (!selecting) return
-            selecting = false
-            sel.clear()
+            sel.end()
             adapter.notifyDataSetChanged()
             if (top === this) updateSelBar()
         }
 
-        fun selectedItems(): List<Item> = items.filter { it.isVideo && it.id in sel }
+        fun selectedItems(): List<Item> = items.filter { selectable(it) && it.id in sel }
 
         // ---- taps ----
 
         open fun onTap(i: Item) {
             if (selecting) { toggle(i); return }
             when (i.kind) {
-                IKind.VIDEO, IKind.SHORT -> act.openVideo(i.id)
+                IKind.VIDEO, IKind.SHORT -> if (!membersBlocked(i)) act.openVideo(i.id)
                 IKind.CHANNEL -> push(ChannelPage(i.id, i.title))
                 IKind.PLAYLIST -> if (i.id.startsWith("local:")) push(LocalListPage(i.id.removePrefix("local:"))) else push(PlaylistPage(i.id, i.title))
             }
@@ -517,13 +586,13 @@ class SearchScreen(private val act: MainActivity) {
                 IKind.VIDEO, IKind.SHORT -> if (selecting) toggle(i) else Hold.video(act, i, albumHint, { startSelection(i) }, videoExtras(i))
                 IKind.CHANNEL -> {
                     val followed = Store.isFollowed(i.id)
-                    act.menu(i.title, listOf(
+                    act.menu(i.title, listOfNotNull(
+                        if (channelSelect) "Select" to { startSelection(i) } else null,
                         "Open channel" to { push(ChannelPage(i.id, i.title)) },
                         "Download all music…" to { push(ChannelPage(i.id, i.title).apply { autoAll = "music" }) },
                         (if (followed) "Unfollow" else "Follow") to {
-                            if (followed) Store.unfollow(i.id) else Store.follow(i.id, i.title)
-                            act.toast(if (followed) "Unfollowed" else "Following ${i.title}")
-                            onFollowsChanged()
+                            if (followed) UnfollowUi.unfollow(act, listOf(i.id to i.title)) { onFollowsChanged() }
+                            else { Store.follow(i.id, i.title); act.toast("Following ${i.title}"); onFollowsChanged() }
                         },
                     ))
                 }
@@ -558,6 +627,9 @@ class SearchScreen(private val act: MainActivity) {
         private var noWifi = false
         private var dirty = false
         private var renderPosted = false
+        private var ff = Store.feedFilters
+        private val filterFlow = FlowLayout(act).apply { setPadding(0, act.dp(2), 0, act.dp(4)) }
+        private val note = act.text("", 12f, C.LABEL, lines = 3)
 
         init {
             val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(4), 0, act.dp(6)) }
@@ -568,7 +640,39 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(act.pill("Refresh") { refresh(true) })
             head.addView(row, lpL(MATCH, WRAP))
             head.addView(info, lpL(MATCH, WRAP))
+            head.addView(filterFlow, lpL(MATCH, WRAP))
+            head.addView(note, lpL(MATCH, WRAP))
+            renderFilters()
         }
+
+        private fun renderFilters() {
+            filterFlow.removeAllViews()
+            fun toggle(label: String, on: Boolean, set: (Boolean) -> FeedFilters) = filterFlow.addView(filterChip(label, on) { setFF(set(!on)) })
+            toggle("Members only", ff.membersOnly) { ff.copy(membersOnly = it) }
+            toggle("Hide Shorts", ff.hideShorts) { ff.copy(hideShorts = it) }
+            toggle("Hide downloaded", ff.hideDownloaded) { ff.copy(hideDownloaded = it) }
+            toggle("Music only", ff.musicOnly) { ff.copy(musicOnly = it) }
+            val follows = Store.follows()
+            val picked = ff.channels.count { id -> follows.any { it.id == id } }
+            filterFlow.addView(filterChip(if (picked == 0) "All channels" else "$picked channel${if (picked == 1) "" else "s"}", picked > 0) {
+                if (follows.isEmpty()) { act.toast("Not following any channel"); return@filterChip }
+                checks("Channels (none = all)", follows.map { it.title }, follows.map { it.id in ff.channels }.toBooleanArray()) { b ->
+                    setFF(ff.copy(channels = follows.filterIndexed { i, _ -> b[i] }.map { it.id }.toSet()))
+                }
+            })
+            filterFlow.addView(filterChip(ff.age.label, ff.age != FAge.ALL) {
+                act.menu("Age", FAge.values().map { a -> (if (a == ff.age) "✓ " else "   ") + a.label to { setFF(ff.copy(age = a)) } })
+            })
+            filterFlow.addView(filterChip(ff.sort.label, ff.sort != FSort.NEWEST) {
+                act.menu("Sort", FSort.values().map { o -> (if (o == ff.sort) "✓ " else "   ") + o.label to { setFF(ff.copy(sort = o)) } })
+            })
+            if (!ff.isDefault) filterFlow.addView(act.pill("Reset") { setFF(FeedFilters()) })
+            note.text = if (ff.membersOnly) "Members-only uploads aren't in channel RSS: they're found on Refresh, from each channel's public " +
+                "members list (no account needed), so this may lag until you tap Refresh." else ""
+            note.visibility = if (ff.membersOnly) View.VISIBLE else View.GONE
+        }
+
+        private fun setFF(n: FeedFilters) { ff = n; Store.feedFilters = n; renderFilters(); showCache() }
 
         override val canRetry get() = false
 
@@ -584,8 +688,10 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun showCache() {
             items.clear()
-            items += Store.loadFeed().items
+            val all = Store.loadFeed().items
+            items += ff.apply(all, System.currentTimeMillis()) { Store.downloadedAny(it) }
             adapter.notifyDataSetChanged()
+            setStatus(if (all.isNotEmpty() && items.isEmpty()) "Nothing in the feed passes the filters" else null)
             updateInfo()
         }
 
@@ -627,12 +733,19 @@ class SearchScreen(private val act: MainActivity) {
             for (f in due) io.execute {
                 val r = try {
                     calls.check(g)
-                    Result.success(WebApi.rss(act, calls, g, f.id))
+                    val fresh = WebApi.rss(act, calls, g, f.id)
+                    // manual Refresh: also the channel's members-only uploads (public UUMO feed; 404 = no memberships, skipped a week)
+                    var members: List<Item>? = null
+                    val now0 = System.currentTimeMillis()
+                    if (force && Store.noMembersUntil(f.id) < now0) members = try {
+                        WebApi.rssMembers(act, calls, g, f.id) ?: emptyList<Item>().also { Store.setNoMembers(f.id, now0 + 7 * 86_400_000L) }
+                    } catch (e: Cancelled) { throw e } catch (e: NoWifi) { throw e } catch (_: Exception) { null }
+                    Result.success(fresh to members)
                 } catch (e: Throwable) { Result.failure(e) }
                 main.post {
                     if (g != calls.gen) return@post
                     val now = System.currentTimeMillis()
-                    r.fold({ Store.saveFeed(Store.loadFeed().with(f.id, it, now), write = false); dirty = true }, { e ->
+                    r.fold({ Store.saveFeed(Store.loadFeed().with(f.id, it.first, now, it.second), write = false); dirty = true }, { e ->
                         if (e is NoWifi) noWifi = true
                         else { failedN++; Store.saveFeed(Store.loadFeed().tried(f.id, now), write = false); dirty = true }
                     })
@@ -662,16 +775,45 @@ class SearchScreen(private val act: MainActivity) {
             if (refreshing) { refreshing = false; persist(); updateInfo() }
         }
 
-        override fun onFollowsChanged() { showCache() }
+        override fun onFollowsChanged() { renderFilters(); showCache() }
     }
 
     inner class FollowingPage : ListPage() {
+        /** Filter for long lists (Takeout import, subscriptions sync): name, accents and case ignored. */
+        private val filter: EditText by lazy {
+            EditText(act).apply {
+                hint = "Filter channels"
+                setHintTextColor(C.LABEL); setTextColor(C.TEXT); textSize = 14f; isSingleLine = true
+                background = act.outline(act.dpf(18))
+                setPadding(act.dp(14), act.dp(8), act.dp(14), act.dp(8))
+            }
+        }
+
         init {
             head.addView(act.text("Following", 18f, C.TEXT, bold = true).apply { setPadding(0, act.dp(4), 0, act.dp(2)) })
-            head.addView(act.text("Tap to open, long-press to unfollow.", 12f, C.LABEL))
-            val row = LinearLayout(act).apply { gravity = Gravity.END; setPadding(0, act.dp(6), 0, act.dp(4)) }
+            head.addView(act.text("Tap to open; long-press for Unfollow / Select.", 12f, C.LABEL))
+            val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(6), 0, act.dp(4)) }
+            row.addView(filter, lpL(0, WRAP, 1f))
+            row.addView(View(act), lpL(act.dp(8), 1))
+            row.addView(act.pill("Select") { items.firstOrNull()?.let { startSelection(it) } ?: act.toast("Nothing to select") })
+            row.addView(View(act), lpL(act.dp(8), 1))
             row.addView(act.pill("Import…") { importDialog() })
             head.addView(row, lpL(MATCH, WRAP))
+            filter.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) { fill() }
+            })
+        }
+
+        override fun selectable(i: Item) = i.kind == IKind.CHANNEL
+        override fun selLabel(n: Int) = "Unfollow $n"
+        override val selMenu get() = false
+        override val channelSelect get() = true
+        override fun selGo() {
+            val chosen = selectedItems().map { it.id to it.title }
+            if (chosen.isEmpty()) return
+            UnfollowUi.unfollow(act, chosen) { endSelection(); onFollowsChanged() }
         }
 
         override val canRetry get() = false
@@ -680,9 +822,17 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun fill() {
             items.clear()
-            Store.follows().forEach { items += Item(IKind.CHANNEL, it.id, it.title) }
+            val all = Store.follows()
+            val q = filter.text?.toString().orEmpty()
+            UnfollowText.filter(all, q).forEach { items += Item(IKind.CHANNEL, it.id, it.title) }
+            if (selecting) { sel.retain(items.map { it.id }.toSet()); if (top === this) updateSelBar() }
             adapter.notifyDataSetChanged()
-            setStatus(if (items.isEmpty()) "Not following any channel yet." else null)
+            setStatus(when {
+                all.isEmpty() -> "Not following any channel yet."
+                items.isEmpty() -> "No followed channel matches \"$q\"."
+                q.isNotBlank() -> "${items.size} of ${all.size}"
+                else -> null
+            })
         }
 
         override fun onFollowsChanged() { fill(); feedPage.updateInfo() }
@@ -690,12 +840,30 @@ class SearchScreen(private val act: MainActivity) {
 
     // ---- Search ----
 
+    /** Small chip for a filter: amber outline + text when it isn't at its default. */
+    private fun filterChip(label: String, active: Boolean, onClick: () -> Unit) = Chip(act, label) { onClick() }.apply { select(active) }
+
+    /** Multi-choice picker; [done] gets the checked flags. */
+    private fun checks(title: String, labels: List<String>, on: BooleanArray, done: (BooleanArray) -> Unit) {
+        val st = on.copyOf()
+        android.app.AlertDialog.Builder(act).setTitle(title)
+            .setMultiChoiceItems(labels.toTypedArray(), st) { _, i, c -> st[i] = c }
+            .setPositiveButton("Apply") { _, _ -> done(st) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
     inner class SearchPage : ListPage() {
         private val box = EditText(act)
-        private val types = listOf("Videos" to Clients.SEARCH_VIDEOS, "Channels" to Clients.SEARCH_CHANNELS, "Playlists" to Clients.SEARCH_PLAYLISTS)
+        private val types = listOf("Videos", "Channels", "Playlists")
         private val chips = ArrayList<Chip>()
-        private var type = Store.prefs.getInt("searchType", 0).coerceIn(0, 2)
+        private var f = Store.searchFilters
         private var query = ""
+        /** Everything loaded for this query; [items] is the filtered (and maybe re-sorted) view of it. */
+        private val raw = ArrayList<Item>()
+        private val filterFlow = FlowLayout(act).apply { setPadding(0, act.dp(2), 0, act.dp(2)) }
+        private val note = act.text("", 12f, C.LABEL, lines = 3)
+        private var pagesThisRound = 0
+        private var passedThisRound = 0
 
         init {
             contUrl = Clients.SEARCH_URL
@@ -715,24 +883,60 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(act.pill("Search", C.ACCENT, C.ACCENT) { submit() })
             head.addView(row, lpL(MATCH, WRAP))
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(10), 0, act.dp(4)) }
-            types.forEachIndexed { i, (label, _) ->
+            types.forEachIndexed { i, label ->
                 val c = Chip(act, label) { setType(i) }
                 chips += c; flow.addView(c)
             }
-            chips.forEachIndexed { i, c -> c.select(i == type) }
+            chips.forEachIndexed { i, c -> c.select(i == f.type) }
             head.addView(flow, lpL(MATCH, WRAP))
+            head.addView(filterFlow, lpL(MATCH, WRAP))
+            head.addView(note, lpL(MATCH, WRAP))
+            renderFilters()
+        }
+
+        private fun renderFilters() {
+            filterFlow.removeAllViews()
+            if (f.videos) {
+                filterFlow.addView(filterChip(f.date.label, f.date != SDate.ANY) {
+                    act.menu("Upload date", SDate.values().map { d -> (if (d == f.date) "✓ " else "   ") + d.label to { setF(f.copy(date = d)) } })
+                })
+                filterFlow.addView(filterChip(f.dur.label, f.dur != SDur.ANY) {
+                    act.menu("Duration", SDur.values().map { d -> (if (d == f.dur) "✓ " else "   ") + d.label to { setF(f.copy(dur = d)) } })
+                })
+            }
+            val sorts = if (f.videos) SSort.values().toList() else listOf(SSort.RELEVANCE, SSort.POPULAR)
+            filterFlow.addView(filterChip("Sort: " + f.effSort.label, f.effSort != SSort.RELEVANCE) {
+                act.menu("Sort by", sorts.map { s -> (if (s == f.effSort) "✓ " else "   ") + s.label to { setF(f.copy(sort = s)) } })
+            })
+            val feats = listOf(f.hideShorts, f.hideLive, f.membersOnly, f.musicOnly, f.hideDownloaded)
+            val n = feats.count { it }
+            filterFlow.addView(filterChip(if (n == 0) "Features" else "Features ($n)", n > 0) {
+                checks("Features", listOf("Hide Shorts", "Hide live", "Members-only only", "Music only (\"- Topic\" channels)", "Hide downloaded"), feats.toBooleanArray()) { b ->
+                    setF(f.copy(hideShorts = b[0], hideLive = b[1], membersOnly = b[2], musicOnly = b[3], hideDownloaded = b[4]))
+                }
+            })
+            if (!f.isDefault) filterFlow.addView(act.pill("Reset") { setF(SearchFilters(type = f.type)) })
+            val lines = ArrayList<String>()
+            if (f.membersOnly) lines += "Search is always anonymous, and YouTube leaves members-only videos out of it, so this is usually empty: open a channel's Members list instead."
+            if (f.effSort == SSort.NEWEST) lines += "YouTube no longer sorts search by date: the loaded results are sorted here."
+            note.text = lines.joinToString("\n")
+            note.visibility = if (lines.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        private fun setF(n: SearchFilters) {
+            val server = n.sp() != f.sp()
+            f = n
+            Store.searchFilters = n
+            chips.forEachIndexed { k, c -> c.select(k == n.type) }
+            renderFilters()
+            if (query.isEmpty()) return
+            if (server) { cancelNet(); doSearch() } else { reapply(); scanIfNeeded(newRound = true) }
         }
 
         override val canRetry get() = query.isNotEmpty() && !loadedOnce
         override fun firstLoad() { if (query.isNotEmpty()) doSearch() }
 
-        private fun setType(i: Int) {
-            if (i == type) return
-            type = i
-            Store.prefs.edit().putInt("searchType", i).apply()
-            chips.forEachIndexed { k, c -> c.select(k == i) }
-            if (query.isNotEmpty()) { cancelNet(); doSearch() }
-        }
+        private fun setType(i: Int) { if (i != f.type) setF(f.copy(type = i)) }
 
         fun searchFor(q: String) { box.setText(q); query = q; cancelNet(); doSearch() }
 
@@ -746,18 +950,55 @@ class SearchScreen(private val act: MainActivity) {
             }
         }
 
+        private fun reapply() {
+            items.clear()
+            items += ItemFilter.search(raw, f) { Store.downloadedAny(it) }
+            adapter.notifyDataSetChanged()
+            refreshFooter()
+            setStatus(when {
+                !loadedOnce -> null
+                raw.isEmpty() -> "No results"
+                items.isEmpty() -> "None of the ${raw.size} loaded results pass the filters" + (if (token != null) " · Load more scans further" else "")
+                else -> null
+            })
+        }
+
+        private fun addPage(p: Page) {
+            val have = raw.mapTo(HashSet()) { it.kind.name + it.id }
+            val before = items.size
+            for (i in p.items) if (have.add(i.kind.name + i.id)) raw += i
+            token = p.continuation
+            reapply()
+            passedThisRound += maxOf(0, items.size - before)
+            scanIfNeeded(newRound = false)
+        }
+
+        /** With client filters, keep loading pages until enough rows pass or the page budget is spent. */
+        private fun scanIfNeeded(newRound: Boolean) {
+            if (newRound) { pagesThisRound = 0; passedThisRound = items.size }
+            if (!loading && Scan.more(passedThisRound, pagesThisRound, token != null, f.client)) fetchMore()
+        }
+
+        override fun loadMore() { pagesThisRound = 0; passedThisRound = 0; fetchMore() }
+
+        private fun fetchMore() {
+            val t = token ?: return
+            pagesThisRound++
+            run(false, { g -> WebApi.more(act, calls, g, contUrl, t, region) }) { addPage(Browse.page(it)) }
+        }
+
         private fun doSearch() {
             endSelection()
-            items.clear(); token = null; loadedOnce = false
+            items.clear(); raw.clear(); token = null; loadedOnce = false
             adapter.notifyDataSetChanged()
             list.setSelection(0)
             val q = query
-            val params = types[type].second
+            val params = f.sp()
+            pagesThisRound = 1; passedThisRound = 0
             run(true, { g -> WebApi.search(act, calls, g, q, params) }) { o ->
                 loadedOnce = true
                 region = o.optString("_gl").ifEmpty { null }
-                append(Browse.page(o))
-                setStatus(if (items.isEmpty()) "No results" else null)
+                addPage(Browse.page(o))
             }
         }
     }
@@ -798,6 +1039,8 @@ class SearchScreen(private val act: MainActivity) {
                 tabChips[k] = c; flow.addView(c)
             }
             flow.addView(act.pill("Download all…", C.ACCENT, C.ACCENT) { downloadAllMenu() })
+            // members-only videos of this channel: only offered with an account (the list is asked with it)
+            if (Account.usable) flow.addView(act.pill("Members", C.BLUE, C.BLUE) { push(MembersPage(channelId, name)) })
             head.addView(flow, lpL(MATCH, WRAP))
             val crow = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL }
             crow.addView(collectV, lpL(0, WRAP, 1f)); crow.addView(stopBtn)
@@ -823,7 +1066,7 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         private fun toggleFollow() {
-            if (Store.isFollowed(channelId)) { Store.unfollow(channelId); act.toast("Unfollowed") }
+            if (Store.isFollowed(channelId)) { UnfollowUi.unfollow(act, listOf(channelId to name)) { updateHead(); feedPage.updateInfo() }; return }
             else { Store.follow(channelId, name); act.toast("Following ${name.ifEmpty { "channel" }}: its new videos show up in Feed") }
             updateHead()
             feedPage.updateInfo()
@@ -1308,6 +1551,7 @@ class SearchScreen(private val act: MainActivity) {
         private val check = act.text("", 18f, C.ACCENT).apply { gravity = Gravity.CENTER }
         private var thumbBox: FrameLayout? = null
         private val playMark = act.text("▶", 14f, C.TEXT).apply { gravity = Gravity.CENTER; background = oval(0x99000000.toInt()) }
+        private val membersMark = act.membersBadge()
         private val normalBg = ripple(null)
         private val selBg = ripple(act.outline(act.dpf(10), C.ACCENT))
 
@@ -1318,6 +1562,7 @@ class SearchScreen(private val act: MainActivity) {
                 box.addView(thumb, FrameLayout.LayoutParams(thumbW, thumbW * 9 / 16))
                 box.addView(playMark, FrameLayout.LayoutParams(act.dp(30), act.dp(30), Gravity.CENTER))
                 box.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.END or Gravity.BOTTOM).margins(0, 0, act.dp(4), act.dp(4)))
+                box.addView(membersMark, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.START or Gravity.TOP).margins(act.dp(4), act.dp(4), 0, 0))
                 view.addView(box, lpL(thumbW, thumbW * 9 / 16))
             } else {
                 view.addView(avatar, lpL(act.dp(44), act.dp(44)).apply { marginStart = act.dp(4); marginEnd = act.dp(4) })
@@ -1369,14 +1614,18 @@ class SearchScreen(private val act: MainActivity) {
             } else mark.text = ""
             mark.visibility = if (mark.text.isNullOrEmpty()) View.GONE else View.VISIBLE
 
-            val selected = page.selecting && i.isVideo && i.id in page.sel
+            val selected = page.selecting && page.selectable(i) && i.id in page.sel
             view.background = if (selected) selBg else normalBg
             // thumbnail = play (Watch/Listen decided by the player), ♪ = listen only; title area = download options
             playMark.visibility = if (i.isVideo && !page.selecting && !i.live) View.VISIBLE else View.GONE
-            thumbBox?.setOnClickListener { if (page.selecting || !i.isVideo || i.live) page.onTap(i) else PlayerActivity.stream(act, i.id, i.title, i.channel, album = page.albumHint) }
+            membersMark.visibility = if (i.members) View.VISIBLE else View.GONE
+            thumbBox?.setOnClickListener {
+                if (page.selecting || !i.isVideo || i.live) page.onTap(i)
+                else if (!membersBlocked(i)) PlayerActivity.stream(act, i.id, i.title, i.channel, album = page.albumHint)
+            }
             thumbBox?.setOnLongClickListener { page.onLongTap(i); true }
             if (page.selecting || !i.isVideo || i.live) {
-                check.text = if (!page.selecting || !i.isVideo) "" else if (selected) "●" else "○"
+                check.text = if (!page.selecting || !page.selectable(i)) "" else if (selected) "●" else "○"
                 check.setTextColor(if (selected) C.ACCENT else C.FAINT)
                 check.setOnClickListener(null); check.isClickable = false
                 check.contentDescription = null
@@ -1385,7 +1634,7 @@ class SearchScreen(private val act: MainActivity) {
                 check.setTextColor(C.DIM)
                 check.contentDescription = "Listen"
                 check.setPadding(0, act.dp(12), 0, act.dp(12))
-                check.setOnClickListener { PlayerActivity.stream(act, i.id, i.title, i.channel, mode = PlayMode.LISTEN, album = page.albumHint) }
+                check.setOnClickListener { if (!membersBlocked(i)) PlayerActivity.stream(act, i.id, i.title, i.channel, mode = PlayMode.LISTEN, album = page.albumHint) }
             }
             view.setOnClickListener { page.onTap(i) }
             view.setOnLongClickListener { page.onLongTap(i); true }

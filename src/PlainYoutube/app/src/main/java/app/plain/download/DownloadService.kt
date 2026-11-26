@@ -23,6 +23,8 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Store.init(this)
+        Account.init(this)
+        PlayService.channel(this)
         // once per start, off the main thread: complete private caches become public Cached/ files (migration too)
         Thread({ try { CachePublisher.publishAll(this) } catch (_: Exception) {} }, "cache-publish").start()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -198,9 +200,11 @@ class DownloadService : Service() {
             if (job.cache) { runCacheJob(id, job, net); finishedOk++; lastDoneTitle = Store.get(id)?.title.orEmpty(); return }
             if (job.art) { runArtJob(id, job); finishedOk++; return }
             val skip = HashSet<String>()
+            var membersTries = 0
             while (true) {
                 val info = InnerTube.info(job.videoId, net, skip)
                 Store.update(id) {
+                    if (info.members) it.members = true
                     if (it.title.isBlank()) it.title = info.title
                     if (it.channel.isBlank()) it.channel = Naming.channel(info.author)
                     if (it.durationSec <= 0) it.durationSec = info.durationSec
@@ -211,6 +215,7 @@ class DownloadService : Service() {
                 } catch (e: Expired) {
                     // 403 from googlevideo: this client's URLs are refused (or expired). Ask another client.
                     skip += info.client
+                    if (info.members && ++membersTries > 1) throw IOException("YouTube refused the members-only streams (HTTP 403)")
                     if (skip.size >= Clients.ORDER.size) throw IOException("YouTube refused the streams (HTTP 403) for every client")
                 }
             }
@@ -350,7 +355,7 @@ class DownloadService : Service() {
         val info = InnerTube.info(job.videoId, net, order = Clients.PLAY_ORDER)
         val title = job.title.ifBlank { info.title }
         val channel = Naming.channel(info.author)
-        Store.update(id) { if (it.title.isBlank()) it.title = info.title; if (it.channel.isBlank()) it.channel = channel; if (it.durationSec <= 0) it.durationSec = info.durationSec }
+        Store.update(id) { if (info.members) it.members = true; if (it.title.isBlank()) it.title = info.title; if (it.channel.isBlank()) it.channel = channel; if (it.durationSec <= 0) it.durationSec = info.durationSec }
         var listen = job.kind == Kind.AUDIO
         if (!listen && Store.mode(job.videoId) == null) {
             // no choice made for this video: the same default as the player (music -> Listen)

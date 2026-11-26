@@ -272,20 +272,45 @@ class MainActivity : Activity() {
             visibility = View.GONE
             isClickable = true
         }
+        // grab handle: tap or swipe up to make the sheet taller, swipe down to make it small again
+        val handle = object : View(this) {
+            val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FFFFFF }
+            override fun onDraw(c: android.graphics.Canvas) {
+                val w = dpf(36); val h = dpf(4)
+                c.drawRoundRect(width / 2f - w / 2, height / 2f - h / 2, width / 2f + w / 2, height / 2f + h / 2, h, h, p)
+            }
+        }
+        var downY = 0f
+        handle.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> downY = e.rawY
+                android.view.MotionEvent.ACTION_UP -> {
+                    val dy = e.rawY - downY
+                    expanded = when {
+                        dy < -dpf(24) -> true
+                        dy > dpf(24) -> false
+                        else -> !expanded
+                    }
+                    sizeSheet()
+                    v.performClick()
+                }
+            }
+            true
+        }
+        sheet.addView(handle, lpL(MATCH, dp(18)))
         sheetHead = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(6), dp(6), dp(2))
-            setOnClickListener { expanded = !expanded; sizeSheet() }
+            setPadding(dp(6), 0, dp(6), dp(2))
         }
         sheetBack = Icon(this, Icon.BACK).apply { background = ripple(null); setOnClickListener { back() } }
-        sheetHead.addView(sheetBack, lpL(dp(40), dp(40)))
+        sheetHead.addView(sheetBack, lpL(dp(36), dp(36)))
         sheetTitle = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), 0, dp(4), 0) }
         sheetHead.addView(sheetTitle, lpL(0, WRAP, 1f))
-        sheetHead.addView(Icon(this, Icon.CLOSE).apply { background = ripple(null); setOnClickListener { closeSheet() } }, lpL(dp(40), dp(40)))
+        sheetHead.addView(Icon(this, Icon.CLOSE).apply { background = ripple(null); setOnClickListener { closeSheet() } }, lpL(dp(36), dp(36)))
         sheet.addView(sheetHead, lpL(MATCH, WRAP))
         sheetScroll = ScrollView(this).apply { isFillViewport = false; isVerticalScrollBarEnabled = false }
-        sheetBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(2), dp(10), dp(12)) }
+        sheetBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, dp(10), dp(10)) }
         sheetScroll.addView(sheetBody, FrameLayout.LayoutParams(MATCH, WRAP))
         sheet.addView(sheetScroll, lpL(MATCH, WRAP))
         bottom.addView(sheet, lpL(MATCH, WRAP))
@@ -340,7 +365,13 @@ class MainActivity : Activity() {
 
     private fun sizeSheet() {
         val h = resources.displayMetrics.heightPixels
-        sheet.maxH = if (expanded) (h * 0.85).toInt() else (h * 0.48).toInt()
+        val top = stack.lastOrNull()
+        val frac = when {
+            expanded -> 0.70
+            top is Screen.Settings || top is Screen.Welcome -> 0.50
+            else -> 0.34
+        }
+        sheet.maxH = (h * frac).toInt()
     }
 
     private fun hideKeyboard() {
@@ -383,7 +414,7 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ navigation
     private fun show(s: Screen, replaceAll: Boolean = false) {
-        if (replaceAll) stack.clear()
+        if (replaceAll) { stack.clear(); expanded = false } // a new selection starts small
         // a new search replaces the previous one
         if (s is Screen.Search && stack.lastOrNull() is Screen.Search) stack.removeAt(stack.size - 1)
         stack.add(s)
@@ -397,6 +428,7 @@ class MainActivity : Activity() {
 
     private fun closeSheet() {
         stack.clear()
+        expanded = false
         token++
         sheet.visibility = View.GONE
         applyInsets()
@@ -415,6 +447,7 @@ class MainActivity : Activity() {
         val s = stack.lastOrNull() ?: return closeSheet()
         val t = ++token
         openSheet()
+        sizeSheet()
         when (s) {
             is Screen.Area -> renderArea(s, t)
             is Screen.StopS -> renderStop(s, t)
@@ -440,9 +473,9 @@ class MainActivity : Activity() {
         sheetTitle.removeAllViews()
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         if (badge != null) row.addView(badge, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
-        row.addView(text(title, 17f, bold = true, lines = 2), lpL(0, WRAP, 1f))
+        row.addView(text(title, 16f, bold = true, lines = 1), lpL(0, WRAP, 1f))
         sheetTitle.addView(row)
-        if (!sub.isNullOrEmpty()) sheetTitle.addView(text(sub, 13f, C.DIM, lines = 2))
+        if (!sub.isNullOrEmpty()) sheetTitle.addView(text(sub, 12.5f, C.DIM, lines = 1))
     }
 
     private fun body(vararg v: View) {
@@ -1335,15 +1368,15 @@ class MainActivity : Activity() {
         val r = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(7), dp(6), dp(7))
+            setPadding(dp(6), dp(5), dp(6), dp(5))
             background = ripple(null)
             setOnClickListener { onClick() }
         }
         if (leadSize > 0) r.addView(lead, lpL(leadSize, leadSize).apply { rightMargin = dp(12); leftMargin = dp(4) })
         else r.addView(lead, lpL(WRAP, WRAP).apply { rightMargin = dp(10) })
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(text(title, 15f, lines = 1))
-        if (!sub.isNullOrEmpty()) col.addView(text(sub, 12.5f, C.DIM, lines = 2))
+        col.addView(text(title, 14f, lines = 1))
+        if (!sub.isNullOrEmpty()) col.addView(text(sub, 12f, C.DIM, lines = 2))
         r.addView(col, lpL(0, WRAP, 1f))
         return r
     }
@@ -1363,13 +1396,13 @@ class MainActivity : Activity() {
                 val x = width / 2f; val y = height / 2f
                 p.color = color; p.strokeWidth = dpf(4)
                 c.drawLine(x, if (i == 0) y else 0f, x, if (i == n - 1) y else height.toFloat(), p)
-                p.color = 0xFFFFFFFF.toInt(); c.drawCircle(x, y, dpf(if (focus) 6 else 4.5f), p)
-                p.color = color; c.drawCircle(x, y, dpf(if (focus) 3.5f else 2.2f), p)
+                p.color = 0xFFFFFFFF.toInt(); c.drawCircle(x, y, dpf(if (focus) 5.5f else 4f), p)
+                p.color = color; c.drawCircle(x, y, dpf(if (focus) 3.2f else 2f), p)
             }
         }
-        r.addView(track, lpL(dp(24), dp(40)))
-        r.addView(text(name, 14.5f, if (focus) C.HIGHLIGHT else C.TEXT, bold = focus, lines = 1).apply { setPadding(dp(8), 0, 0, 0) }, lpL(0, WRAP, 1f))
-        if (time.isNotEmpty()) r.addView(text(time, 13f, C.DIM).apply { typeface = Typeface.MONOSPACE })
+        r.addView(track, lpL(dp(22), dp(30)))
+        r.addView(text(name, 13.5f, if (focus) C.HIGHLIGHT else C.TEXT, bold = focus, lines = 1).apply { setPadding(dp(8), 0, 0, 0) }, lpL(0, WRAP, 1f))
+        if (time.isNotEmpty()) r.addView(text(time, 12f, C.DIM).apply { typeface = Typeface.MONOSPACE })
         return r
     }
 

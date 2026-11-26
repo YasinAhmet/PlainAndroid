@@ -83,6 +83,22 @@ object InnerTube {
      * "region for blocked videos" (⋮, default US); such videos are remembered and asked that way directly next time.
      */
     fun info(videoId: String, net: Network?, skip: Set<String> = emptySet(), order: List<Client> = Clients.ORDER): VideoInfo {
+        // members-only (2.0): known ones go straight to the signed-in path; everything else is asked anonymously
+        if (Store.isMembers(videoId)) return members(videoId, net)
+        return try { anon(videoId, net, skip, order) } catch (e: YtError) {
+            if (!e.members) throw e
+            Store.markMembers(videoId)
+            members(videoId, net)
+        }
+    }
+
+    /** The only place a /player request may use the account: a video YouTube itself called members-only. */
+    private fun members(videoId: String, net: Network?): VideoInfo {
+        if (!Account.usable) throw YtError(if (Account.expired) "Members-only — account expired: import new cookies in ⋮ → Account" else Account.SIGNED_OUT, false, members = true)
+        return AuthPlayer.info(Account.ctx, videoId, net)
+    }
+
+    private fun anon(videoId: String, net: Network?, skip: Set<String>, order: List<Client>): VideoInfo {
         val alt = Store.altRegion
         val known = alt.isNotEmpty() && Store.isBlocked(videoId)
         try {

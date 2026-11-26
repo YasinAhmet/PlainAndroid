@@ -108,6 +108,56 @@ object Store {
         val s = prefs.getStringSet("trash", emptySet())!!.toSet(); if (s.isNotEmpty()) prefs.edit().remove("trash").apply(); return s
     }
 
+    /** Videos YouTube called members-only: their /player goes through the account directly (no anonymous try first). */
+    @Synchronized fun isMembers(videoId: String) = prefs.getStringSet("members", emptySet())!!.contains(videoId)
+    @Synchronized fun markMembers(videoId: String) {
+        val s = HashSet(prefs.getStringSet("members", emptySet())!!)
+        if (s.add(videoId)) { while (s.size > 2000) s.remove(s.first()); prefs.edit().putStringSet("members", s).apply() }
+    }
+
+    /** Channels whose members-only videos played with the account (= the account is a member). */
+    @Synchronized fun isMemberChannel(id: String) = prefs.getStringSet("memberCh", emptySet())!!.contains(id)
+    @Synchronized fun markMemberChannel(id: String) {
+        val s = HashSet(prefs.getStringSet("memberCh", emptySet())!!)
+        if (s.add(id)) prefs.edit().putStringSet("memberCh", s).apply()
+    }
+
+    var searchFilters: SearchFilters
+        get() = SearchFilters.decode(prefs.getString("searchFilters", null)).let { f ->
+            if (prefs.contains("searchFilters")) f else f.copy(type = prefs.getInt("searchType", 0).coerceIn(0, 2))
+        }
+        set(v) { prefs.edit().putString("searchFilters", v.encode()).putInt("searchType", v.type).apply() }
+
+    var feedFilters: FeedFilters
+        get() = FeedFilters.decode(prefs.getString("feedFilters", null))
+        set(v) { prefs.edit().putString("feedFilters", v.encode()).apply() }
+
+    /** Channels whose members feed answered 404 (no memberships): skipped for a week. */
+    @Synchronized fun noMembersUntil(id: String): Long =
+        prefs.getStringSet("noMembers", emptySet())!!.firstOrNull { it.startsWith("$id@") }?.substringAfter('@')?.toLongOrNull() ?: 0L
+    @Synchronized fun setNoMembers(id: String, until: Long) {
+        val s = HashSet(prefs.getStringSet("noMembers", emptySet())!!).apply { removeAll { it.startsWith("$id@") }; if (until > 0) add("$id@$until") }
+        prefs.edit().putStringSet("noMembers", s).apply()
+    }
+
+    /** 2.3 player: the mini window's corner, and picture-in-picture when pressing Home (off by default). */
+    var miniCorner: String
+        get() = prefs.getString("miniCorner", Corner.TOP_RIGHT.name)!!
+        set(v) { prefs.edit().putString("miniCorner", v).apply() }
+    var pipAuto: Boolean
+        get() = prefs.getBoolean("pipAuto", false)
+        set(v) { prefs.edit().putBoolean("pipAuto", v).apply() }
+
+    /** 2.5: the open player's item and position, to resume after the process was gone (cleared on Close). */
+    var lastPlay: String?
+        get() = prefs.getString("lastPlay", null)
+        set(v) { prefs.edit().apply { if (v == null) remove("lastPlay") else putString("lastPlay", v) }.apply() }
+
+    /** "Also unsubscribe on YouTube" checkbox: last choice, default on. */
+    var unsubDefault: Boolean
+        get() = prefs.getBoolean("unsubDefault", true)
+        set(v) { prefs.edit().putBoolean("unsubDefault", v).apply() }
+
     @Synchronized fun isBlockedChannel(id: String) = prefs.getStringSet("blockedCh", emptySet())!!.contains(id)
     @Synchronized fun markBlockedChannel(id: String) {
         val s = HashSet(prefs.getStringSet("blockedCh", emptySet())!!)

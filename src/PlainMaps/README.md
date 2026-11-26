@@ -59,8 +59,14 @@ Metro, tram and ferry lines have no timetables (OpenStreetMap has none). Public 
 | Bus lines, stop order, departure times | ego.gov.tr/tr/hareketsaatleri | About 660 lines. The page lists them, and posting `hat_no1=<code>` returns a line's name, trip length (minutes), weekday/Saturday/Sunday departures and its stops in order with EGO stop numbers. Fetched three at a time. EGO runs Saturday times on holidays. |
 | Stop positions | OpenStreetMap bus stops | OSM stops carry the EGO stop number as `ref`, which places about 59 % of the stops. Others are matched by name near their placed neighbours on the line, or estimated between those neighbours. About 91 % of stops get a position; stops without one are left out of their lines (`ego_stats` in Settings says how many). |
 | Route shapes | OSM bus route relations | Matched by EGO line code (about 340 lines). Other lines are drawn stop to stop. |
-| Map, places, metro, Ankaray, Başkentray, cable car | openstreetmap.fr `central_anatolia-latest.osm.pbf` (daily, about 120 MB) | Cut down to 31.85–33.55 E, 39.35–40.55 N while it is read. Peak memory is about 230 MB. |
+| Map, places, metro, Ankaray, Başkentray, cable car | openstreetmap.fr `central_anatolia-latest.osm.pbf` (daily, about 120 MB) | Cut down while it is read to the box EGO's stops span, plus 3 km (about 38.9–40.55 N, 31.85–33.57 E; see below). Peak memory is about 230 MB. |
 | Announcements | ego.gov.tr/tr/duyurular | The line numbers a title starts with get a ⚠ notice. "NNNNN NUMARALI EGO DURAĞI" titles go to that stop. |
+
+**The map is as big as the transit.** Each sync works out the map's area from the stops:
+- **Ankara:** the sync first reads EGO's lines. It then reads OSM bus stops across Ankara province and places EGO's stops. The area becomes the box around every placed stop, plus 3 km. A stop only counts if it lies within 15 km of a neighbour on its line, so a stop number that also exists in another city can't stretch the map. The rest of the extract is cut to that box.
+- **Istanbul:** the box grows to every İETT stop, plus 3 km, and is never smaller than the province box.
+
+Lines without an OSM route shape follow the streets: the shortest drivable path between their known stops (`RoadGraph.kt`). Stops EGO lists without a position are spread along that path in stop order.
 
 EGO line codes are grouped by number: 102-1 and 102-2 are two variants of line 102, and the code is shown in the headsign.
 

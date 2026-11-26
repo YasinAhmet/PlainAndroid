@@ -7,7 +7,8 @@ Android app that searches, plays and saves YouTube audio and video from a pasted
 flights), like the free YouTube-download websites do, but on the phone and without ads or trackers.
 
 - Kotlin, plain Android framework (`HttpURLConnection`, `MediaExtractor`, `MediaMuxer`, `MediaStore`, Views).
-  **No AndroidX, no third-party libraries, no yt-dlp/ffmpeg/NewPipe.** The release APK is ~210 KB.
+  **No AndroidX, no third-party libraries, no ffmpeg/NewPipe.** The only borrowed code is yt-dlp's ejs signature
+  solver (JavaScript asset, Unlicense/ISC/MIT), used for members-only videos. The release APK is ~0.5 MB.
 - minSdk 30, target 35. Package `app.plain.download` (debug build: `app.plain.download.dev`).
 - OLED style shared with LocalMusic: pure black, 1 dp #333 outlines, text #E4E4E4 / #A6A6A6 / #747474, amber accent
   #E6B422. Colours live in `C` (`Ui.kt`).
@@ -51,7 +52,340 @@ with the local debug key. `local.properties` must use forward slashes (`sdk.dir=
   remembered one doesn't exist).
 - Downloads list (history in `files/history.json`, last 200): progress, Cancel, Retry (resumes partial streams),
   Remove, Open, Show in Music (opens LocalMusic if installed). Long-press for more.
-- Clear errors for age-restricted, members-only, private and live videos (no sign-in support, on purpose).
+- Clear errors for age-restricted, private and live videos. Members-only videos play and download only with the
+  optional account (⋮ → Account, 2.0; see below); everything else is anonymous.
+
+## Playback survives the app being swiped away (2.5)
+
+**One player per process.** `PlayerPanel` is a singleton created with the **application context**
+(`PlayerPanel.get`), so nothing in it refers to an Activity.
+- **Kept alive while playing by `PlayService`.** The player owns everything that plays: MediaPlayer, caching proxy,
+  queue, audio focus, the background audio/video switch, MediaSession and notification.
+- **Shown by whichever MainActivity is alive.** On create, MainActivity calls `attach(this)` and adds the player's
+  views (built once with the application context) to its window. On destroy it calls `detach(this)`, which removes
+  them from the old window, drops the surface (`setDisplay(null)`) and forgets the activity. Dialogs opened from the
+  player (speed, quality, queue, Save) use the attached activity; without one they simply don't open.
+- **Honest note:** this is one class with a strict attach/detach boundary rather than two classes. The views are kept
+  and re-hosted instead of being rebuilt.
+
+**Rules** (`EngineRule`, unit-tested):
+- **Destroyed while playing** (swipe from recents, or the system): the player goes on audio-only under the
+  foreground service, exactly like the background case.
+  - Watch streams switch to the audio stream after 5 s.
+  - The item, position, mode and queue flag are saved (`lastPlay`).
+- **Destroyed while paused:** everything closes, as a swipe always did.
+- **Reopened** (launcher or notification): the new MainActivity reattaches. It shows the mini window, or full if it
+  was full, in the current state, and Watch switches back to the video stream at the current position.
+- **Paused with no window:** player, proxy and read-ahead are released; the saved state is enough to resume.
+- **A notification button or headset press when the process was gone** rebuilds the player from the saved state and
+  acts. Play starts the service first, then the source; a Watch item plays audio-only.
+- **The next app open after process death** shows the saved item paused at its position (mini window). Close or
+  swiping the paused notification away clears the saved state.
+
+## Background audio (2.4)
+
+**Watch and Listen both keep playing audio** when the app goes to the background or the screen turns off.
+
+**Service lifecycle** (`PlayService.kt`, the pattern of LocalMusic's PlaybackService).
+- **What it is.** A `mediaPlayback` foreground service with no work of its own; the player stays in MainActivity's
+  `PlayerPanel`.
+- **Foreground** while the player wants to play, including buffering, the next queue item and the audio/video
+  switch. It starts when playback starts, while the app is visible.
+- **On pause:** `stopForeground(DETACH)` + `stopSelf()` at once. The paused notification stays, can be swiped away,
+  and its buttons still work. A pause while in the background also releases the player, proxy and read-ahead, so
+  nothing runs. Play resumes from the same place: the service is started first, inside the notification tap's
+  permission window, then the source.
+- **Close** (notification, ✕, or MediaSession stop) stops and removes everything.
+- **The notification** shows the thumbnail (low-res, Wi-Fi only respected), title and channel, with ⏮ −10 s ▶/❚❚
+  +10 s ⏭ (queue only) and Close. A framework `MediaSession` drives the lock screen, quick settings and
+  Bluetooth/headset buttons.
+- **Wake lock:** `MediaPlayer.setWakeMode(PARTIAL_WAKE_LOCK)`, held by MediaPlayer only while it plays.
+- **The caching proxy and read-ahead** keep running while playing and stop with playback.
+- **Swiping the app out of recents** closes a paused player. A playing one goes on until Close, even when the activity
+  is destroyed (2.5).
+
+**How Watch drops the video in the background** (`BgVideo`, unit-tested).
+- **Saved files and complete caches:** the surface is detached (`setDisplay(null)`), so the same MediaPlayer plays
+  audio only and the video decoder stops.
+- **Streamed video** (HLS, or a members-only MP4):
+  - The surface is detached at once.
+  - After **5 s** still in the background, the player switches to the audio-only stream at the same position (itag
+    140/251, the Listen path, cached under the Music cache rules), so no more video segments are fetched.
+  - Back in the app, it switches back to the video stream at the current position, with the surface attached.
+  - The gap is kept short: the new source is resolved (cache, YouTube's answer) while the old one keeps playing.
+    Only then is the old player released and the new one prepared.
+- **PiP:** video stays while visible. Screen off in PiP is handled like the background (audio only after 5 s);
+  screen on brings the video back.
+- **Queue:** auto-advances in the background. Listen items play as audio; Watch items start audio-only and switch
+  to video when the app is shown again.
+
+**Plain Music and other apps.**
+- **Audio focus:** `AUDIOFOCUS_GAIN` on play. Loss → pause (so starting Plain Music pauses Plain Youtube; Plain
+  Music also takes and handles focus, so it works the other way round).
+- **Transient loss** (a call) → pause, then resume on gain.
+- **Can-duck** → volume 25 %.
+- **Unplugged headphones / Bluetooth gone** (`ACTION_AUDIO_BECOMING_NOISY`) → pause. That receiver is registered only
+  while playing.
+
+**Battery.**
+- Paused or closed: no service, no wake lock, no proxy, no read-ahead, no receivers except the media session.
+- In the background: no video decoding and no video segment downloads after the 5 s switch.
+- The only new timer is that 5 s delay (once per trip to the background).
+
+**Permissions:** `FOREGROUND_SERVICE_MEDIA_PLAYBACK` is new (needed for the mediaPlayback service). Nothing else
+changed.
+
+## Player overlay, mini window, picture-in-picture, Back history (2.3)
+
+**One player for the whole app.** `PlayerPanel` (`PlayerPanel.kt`) owns the MediaPlayer, the caching proxy and the
+queue, and lives as an overlay inside MainActivity (the separate PlayerActivity is gone; `PlayerActivity.stream/queue/
+local` still exist as entry points and route into the overlay). States (`PlayerUi`, unit-tested):
+
+- **Full**: the player screen.
+  - The ⌄ button, Back, a swipe down, or opening anything from the player (Channel, Download…, the channel line)
+    **minimises** it. Navigating never stops playback.
+  - Tap shows or hides the controls; while a video plays they hide after 3 s (one delayed post, only while the
+    player is full).
+  - Double-tap the left or right half to seek ∓10 s, with a short "« 10 s" mark.
+  - The seek bar is bigger; its grey part is what's cached.
+  - Speed 0.5–2× uses `PlaybackParams`. A paused player gets the new speed when it next plays, because setting it
+    would start playback.
+  - "Rotate: auto/locked" and Full screen.
+  - Title, plus a channel line that opens the channel.
+  - "Up next" peek of the play queue.
+- **Mini**: a 16:9 video window (40 % of the width, 30 % in landscape), outlined, pinned to a corner of the app above
+  every tab and page.
+  - Tap → full. ▶/❚❚, ✕ (stop) and the PiP button sit in its corners.
+  - Drag it to any corner; top-right by default, and the corner is remembered.
+  - Listen shows a compact card instead: cover, title, ▶, ✕.
+- **PiP**: the activity in picture-in-picture with only the video.
+  - Actions: −10 s, play/pause, +10 s (`RemoteAction`s → a broadcast receiver that isn't exported).
+  - Expanding PiP returns to the app exactly as it was (mini or full, same page).
+  - Closing the PiP window stops the player.
+  - **Where the window goes is Android's decision.** It usually starts bottom-right and the user can drag it. The
+    app only passes the aspect ratio and a `sourceRectHint`; the window animates out of the top-right mini window,
+    which is what the app minimises to first.
+  - Auto-enter on Home is a ⋮ setting, off by default: `setAutoEnterEnabled` on Android 12+, `onUserLeaveHint` on 11.
+  - Manifest: `supportsPictureInPicture` and `resizeableActivity` on MainActivity, whose `configChanges` already
+    covered size and orientation. No new permission.
+- **Closed.**
+
+**Volume.** On the full player there's a speaker icon and a horizontal bar for the media stream
+(`STREAM_MUSIC` via `setStreamVolume(…, 0)`, so no system panel appears).
+- The speaker icon mutes; tapping it again brings back the remembered level.
+- The bar follows the hardware keys through a `VOLUME_CHANGED_ACTION` receiver. That receiver is registered only
+  while the full player is shown and the app is in front.
+- `setVolumeControlStream(STREAM_MUSIC)`: the volume keys change media volume anywhere in the app.
+
+**Battery (2.3; changed in 2.4, see "Background audio"):** playback ran only while something of it was visible.
+
+**Back = one step back** (`NavHistory` + `BackRule`, unit-tested).
+- Dialogs and menus close first by themselves.
+- Then, in this order: end a selection, leave the player's full screen, minimise the full player, pop the history.
+- The history records tab switches, Feed/Search/Lists switches, opened pages (channel → playlist → … and Following),
+  and the Cached folder. Pages keep their scroll position because the page objects stay alive.
+- At the start, Back shows "Press back again to exit"; a second Back within 2 s moves the app to the background.
+- The mini player stays while you go back.
+- `OnBackInvokedCallback` (API 33+) and `onBackPressed` (API 30–32 and as a fallback) share one handler; a second
+  call for the same press is ignored. Predictive back stays off.
+
+## Filters, Following selection, members-only in Search and Feed (2.2)
+
+**Search filters.** Under the search box there's a "Filters" row of chips (amber = active, **Reset** clears them).
+They are remembered.
+
+| Filter | Options | Where it's done |
+|---|---|---|
+| Type | Videos / Channels / Playlists | YouTube (`sp`) |
+| Upload date (videos) | Any / Today / This week / This month / This year | YouTube (`sp`) |
+| Duration (videos) | Any / Under 4 min / 4–20 min / Over 20 min | YouTube (`sp`) |
+| Sort | Relevance / View count | YouTube (`sp`) |
+| Sort: Upload date | newest first | **here**: YouTube ignores its date sort now, so the loaded results are sorted by their "3 days ago" text |
+| Features | Hide Shorts, Hide live, Members-only only, Music only ("- Topic" channels), Hide downloaded | **here**, over the loaded pages |
+
+- **How `sp` is built.** `sp` is YouTube's protobuf `SearchParams {1: sort, 2: {1: date, 2: type, 3: duration}}`,
+  built by `SearchParams`. All 44 combinations the app can build (videos 5×4×2, channels and playlists ×2 sorts) were
+  sent to YouTube on 2026-11-26. Every one returned results, with durations inside the asked range. That list is the
+  test fixture `sp_expected.txt`.
+- **What YouTube ignores.** Sort 2 (upload date) gave the same answer as relevance, so it isn't sent. Date and
+  duration are dropped for channels and playlists.
+- **Client filters scan further.** With a client-side filter on, the app keeps loading pages until 10 new rows pass or
+  5 pages were scanned. Load more continues the same way.
+- **"Music only" is cheap on purpose.** It only checks for "- Topic" channels. Checking each video for YouTube
+  Music's ATV type would cost one request per video.
+- **Shorts detection.** Search Shorts are recognised by their Shorts-player link, RSS Shorts by their `/shorts/` link.
+
+**Members-only in Search: YouTube leaves them out.** Checked live: anonymous search never returns members-only videos,
+even for their exact titles, and no members badge appeared in any search answer. Search stays anonymous, so "Members-only
+only" there is usually empty and says so. The badge code does render them if YouTube ever includes them
+(`metadataBadgeRenderer` / `badgeViewModel`). A channel's **Members** list shows them.
+
+**Feed filters** (all local): Members only, Hide Shorts, Hide downloaded, Music only, channel picker (one or several
+followed channels; none = all), age (24 h / week / month / any), sort (newest / by channel). They are remembered.
+
+**Members-only in the Feed.**
+- **Channel RSS leaves them out.** Checked live with hololive channels: none of the badge-marked members-only videos
+  were in `feeds/videos.xml?channel_id=…`.
+- **A public feed lists them.** `feeds/videos.xml?playlist_id=UUMO…` lists a channel's 15 newest members-only uploads,
+  **anonymously**. It answers 404 for channels without memberships.
+- **So no account is used here.** On a manual **Refresh** the app also reads that feed for each followed channel. Those
+  uploads get the MEMBERS badge and are added to the feed even though they're missing from the channel RSS. A 404 skips
+  that channel for a week. Automatic refreshes keep the members-only uploads found earlier.
+- **Signed out:** the badge still shows; tapping one gives the sign-in hint.
+
+**Following list.**
+- **Filter box:** matches the name; accents and case are ignored.
+- **Select:** a header button, or hold a channel → Select. The selection bar shows "N selected", All and **Unfollow N**.
+  Back or ✕ ends selection.
+- **One confirmation:** the count, up to 5 names and "+K more". When signed in it adds "Also unsubscribe on YouTube"
+  (remembered) and the paid-membership warning for known memberships.
+- **Unfollow:** the local unfollow happens at once and shows an 8 s **Undo** bar. Undo restores the follows only; the
+  bar says "YouTube unsubscribes can't be undone here" when that option was used. Unsubscribes then run one after
+  another, 0.8 s apart: "Unsubscribed N of M", Retry for failures.
+
+## Account for members-only videos (2.0)
+
+Plain Youtube stays anonymous. An account can be added for **one thing only**: members-only videos of channels you're
+a member of. It also powers a manual **Sync subscriptions**. Everything else (search, feeds/RSS, channels, playlists,
+music pages, every other video and all thumbnails) is still asked with no account and no cookies.
+
+**What you see**
+- Members-only videos have a **blue MEMBERS badge** (#4A90E2) on list rows, in the player's top bar, on the info card
+  and in the downloads list. YouTube marks them in listings (`metadataBadgeRenderer.style =
+  BADGE_STYLE_TYPE_MEMBERS_ONLY`, `badgeViewModel.badgeStyle = BADGE_MEMBERS_ONLY`, "Members only"/"Members first"),
+  and the player answer says "Join this channel to get access to members-only content…".
+- Signed out: tapping one shows "Members-only — import your account in ⋮ → Account".
+- Signed in: Watch, Listen, Cache and Download work as for any video. On a channel page a blue **Members** button
+  opens the channel's members-only list (its `UUMO…` playlist, asked with the account).
+- ⋮ → **Account…**: Sync subscriptions, Test the account, Sign in to YouTube (on this phone), Import cookies.txt…,
+  How to get cookies.txt…, Sign out, and what the account is used for.
+
+**Three ways to add the account**
+- **A. Sign in on the phone, inside the app.** ⋮ → Account → Sign in to YouTube opens Google's sign-in page in
+  Android's WebView **exactly as it comes**: the user agent isn't changed, `X-Requested-With` isn't removed, nothing
+  hides the WebView. Only JavaScript and DOM storage are switched on (the page can't work without them).
+  - **Usually refused.** Google tends to refuse embedded browsers with "This browser or app may not be secure" /
+    "Couldn't sign you in". That's a security control and the app doesn't get around it. It spots the refusal by the
+    page address (`/signin/rejected`, `disallowed_useragent`, …) and by the page text (one read-only `innerText`
+    check), wipes the WebView and explains B and C.
+  - **Other apps disguise the WebView.** Apps that make WebView sign-in "work" (e.g. YTDLnis sets a desktop Chrome user
+    agent in its WebView sign-in screen) do so that way. Plain Youtube doesn't.
+  - **If Google accepts it.** Once back on youtube.com with `LOGIN_INFO` + `SAPISID`, the app reads the youtube.com
+    cookies with `CookieManager.getCookie`. That includes HttpOnly cookies; if a WebView doesn't hand over
+    `LOGIN_INFO`, the app says so and offers B/C. It keeps the sign-in ones, then clears **all** WebView cookies, DOM
+    storage, cache, history and form data.
+- **B. Phone only, with Firefox for Android.** Install Firefox and add the **"cookies.txt"** add-on by Lennon Hill
+  (<https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/>). It works on Firefox for Android 121+, is GPL-3.0,
+  says "no data collected", and exports Netscape cookies.txt. Then:
+  1. Open a **private tab** and sign in on youtube.com.
+  2. In the add-on, export the current site. It saves `cookies.txt` to Downloads.
+  3. **Close the private tab.** Otherwise YouTube keeps rotating that session's cookies and the exported ones expire
+     sooner.
+  4. ⋮ → Account → Import cookies.txt…, then delete the file. The app offers to delete it if the file's provider
+     allows it.
+- **C. PC.**
+  1. Sign in on youtube.com in a private/incognito window.
+  2. Export with a local-only extension, e.g. "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox). Export
+     youtube.com only.
+  3. Close the private window.
+  4. Copy the file to the phone by cable, import it, and delete it on both devices.
+
+**Security**
+- **What's kept.** Only YouTube's sign-in cookies on `youtube.com`: `SID HSID SSID APISID SAPISID LOGIN_INFO SIDCC
+  __Secure-1PSID __Secure-3PSID __Secure-1PAPISID __Secure-3PAPISID __Secure-1PSIDTS __Secure-3PSIDTS
+  __Secure-1PSIDCC __Secure-3PSIDCC`.
+- **What's dropped.** Every other line of a cookies.txt: other sites, `google.com` (never sent anywhere, so not
+  worth keeping), and tracking or preference cookies (`VISITOR_INFO1_LIVE`, `PREF`, `YSC`, …). The import only
+  reports a count of dropped lines.
+- **Encryption.** The cookies are stored AES-256-GCM encrypted in `files/account.bin`, with a non-exportable Android
+  Keystore key (`plain_youtube_account`, hardware-backed where the phone has it).
+- **No copies leave the phone.** `allowBackup=false`, `fullBackupContent=false`, and `dataExtractionRules` excludes
+  everything from cloud backup and device transfer. A copied file would be useless anyway, because the key never
+  leaves the phone.
+- **Sign out** deletes the file, the key, the in-memory copy and any WebView cookies/storage.
+- **Never logged.** Cookie values never go to logcat, history, notifications, error text or test fixtures. Even
+  `Cookie.toString()` hides the value. The unit tests use made-up values only.
+- **Rotation and expiry.** `Set-Cookie` headers on authenticated answers from youtube.com are applied to the stored
+  jar (YouTube rotates `__Secure-*PSIDTS` / `SIDCC`) and re-encrypted. A `401`, a `loggedOut: true` answer or an
+  account check without a name marks the account **expired**: "Account expired — import new cookies".
+
+**Separation guarantee.** Two layers keep the account off ordinary requests:
+- **One decision function.** `AuthRule.useAccount(purpose, url, signedIn, membersOnly)` (`Account.kt`, unit-tested)
+  allows the account for exactly four purposes:
+  - `ACCOUNT_CHECK` (Test, and the name after sign-in or import);
+  - `SUBSCRIPTIONS_SYNC`;
+  - `MEMBERS_PLAYER`, only for a video YouTube called members-only;
+  - `MEMBERS_TAB`, only for the Members list you opened.
+
+  It also requires https on `www.youtube.com` / `youtube.com` / `music.youtube.com` / `m.youtube.com`.
+- **One sender.** `AuthHttp` is the only code that sets a `Cookie` or `Authorization` header (`grep` confirms it). It
+  refuses before sending if the rule says no, and doesn't follow redirects, so a cookie can't travel to another host.
+  Every other request (`InnerTube.anon`, `WebApi`, `Fetcher`, thumbnails, RSS) uses code that has no access to the
+  jar. No global `CookieHandler` is installed.
+- **googlevideo.com gets no cookies.** The signed stream URL is its own authorization.
+- **The player JS is public.** `iframe_api` and the player JS are fetched without the account.
+
+**Members-only playback path** (`Auth.kt` → `AuthPlayer`), used only for members-only videos:
+1. `GET https://www.youtube.com/iframe_api` (anonymous) gives the player id. `tv-player-ias.js` (~2.5 MB) is
+   downloaded once per player version into the app cache, and its `signatureTimestamp` is read.
+2. Authenticated `POST /youtubei/v1/player` uses the **TVHTML5** client: yt-dlp's `tv` / `tv_samsung`, version
+   `5.20260707`, which supports cookies and has no PO-token policy for streams. The headers are `Cookie`,
+   `Authorization: SAPISIDHASH … SAPISID1PHASH … SAPISID3PHASH …` (sha1 of `"<ts> <SAPISID> https://www.youtube.com"`,
+   as yt-dlp builds it), `X-Origin` and `X-Goog-AuthUser: 0`. The body carries
+   `playbackContext.contentPlaybackContext.signatureTimestamp`, and a bot check gets one retry with `visitorData`.
+3. The stream URLs' **`n`** parameter (and **`s`** of `signatureCipher`) are solved by **yt-dlp's ejs solver**
+   (`assets/ejs/yt.solver.lib.min.js` + `yt.solver.core.min.js`, ejs 0.8.0, SHA3-512 checked against yt-dlp's
+   `_vendor/_info.py`). The solver runs in an **off-screen WebView** with no network (`blockNetworkLoads`), no
+   file/content access and no page. It is destroyed right after, and only loaded for members-only videos.
+   **Licences:** ejs is Unlicense (public domain); it bundles **meriyah** (ISC) and **astring** (MIT). Their licence
+   texts stay in the file headers.
+4. The rewritten answer goes through the normal parser. Formats whose `n` wasn't solved are dropped, because they
+   would be throttled or refused.
+5. Download and Listen use the adaptive streams as usual. The TV client gives no HLS, so in-app **Watch** of a
+   members-only video plays and caches the muxed 360p MP4 (itag 18) as one file in the Video cache. **Download** gets
+   any height, merged as usual.
+6. A 403 on the streams asks again once. Videos YouTube called members-only are remembered (`members` in settings),
+   so their `/player` goes straight to this path.
+
+**Depends on:**
+- the TV client version in `TvPlayer` (`Account.kt`);
+- yt-dlp's ejs solver handling the current player (update the two asset files from a new ejs release when YouTube
+  changes the player);
+- the player-id regex on `iframe_api`.
+
+The end-to-end chain (iframe_api → TV player JS → sts → TV `/player` → solver → 206 byte ranges) was verified from a PC
+**anonymously** on 2026-11-26 with node. The exact script the app builds also ran in a clean JS context (1 s, both `n`
+challenges solved). **Not verified:** an authenticated request with real cookies (none on the PC; on purpose), the
+solver inside an Android WebView on the phone, and WebView sign-in on the phone.
+
+**Sync subscriptions** (manual only): an authenticated `browse` of `FEchannels` plus continuations (at most 40
+pages). The channels (`channelRenderer`, also channel lockups) are merged into Follows. The result reads
+"Added N, already followed M". Followed channels that aren't subscribed on YouTube are listed, and the app asks:
+**Keep** (default) or Unfollow. The feed itself stays anonymous RSS. A membership badge in the Following list was
+skipped: the subscriptions answer doesn't say which channels you're a member of.
+
+**Unfollow → unsubscribe on YouTube (2.1).** When signed in, unfollowing a channel (channel page button, or hold →
+Unfollow in Following/search) asks once:
+- **The confirmation** has a checkbox **"Also unsubscribe on YouTube"**. It remembers your last choice and starts on.
+- **The local unfollow** happens at once. The unsubscribe is then one authenticated request on a plain thread of
+  that action (no service).
+- **The endpoint** is `POST /youtubei/v1/subscription/unsubscribe` with the WEB context and `channelIds: ["UC…"]`,
+  the web client's `unsubscribeEndpoint`. Its `params` is only UI-source context, and YouTube Music's own endpoint
+  omits it, so none is sent.
+- **The rule:** purpose `UNSUBSCRIBE` in `AuthRule`, https `youtube.com` / `www.youtube.com` only, sent only through
+  `AuthHttp`.
+- **The result:** a toast, "Unsubscribed on YouTube", or "Couldn't unsubscribe on YouTube: <reason>" plus a small
+  dialog with **Retry** (a toast can't hold a button).
+- **Several channels:** one confirmation, then requests one after another with 0.8 s between them, ending with
+  "Unsubscribed N of M".
+- **Paid memberships:** if the account could play a channel's members-only videos (so it's a member), the
+  confirmation warns that unsubscribing does **not** cancel the paid membership; that's managed on YouTube.
+- **Signed out or expired:** no checkbox, local unfollow only, as before. Nothing is ever unsubscribed without that
+  confirmation.
+- **The sync's "not subscribed on YouTube" list** only unfollows locally, because those channels aren't subscribed
+  there.
+
+Not verified live: there's no account on the PC, so no real unsubscribe was sent.
 
 ## Tags and cover art in the files (1.9)
 
@@ -335,7 +669,8 @@ a PO token** are used, because their stream URLs are direct (no `signatureCipher
 | 3 | `IOS_PRODUCER` 0.147.945 | player OK + stream bytes OK | H.264 + AAC only (no Opus, no itag 18). Worked even without `visitorData`. Added to yt-dlp in Nov 2026. |
 
 Not used: `IOS` (0 direct URLs in the test, SABR only), `ANDROID` (only itag 18 direct), `TVHTML5` variants (need the
-JS player; `tv_samsung` answered "The page needs to be reloaded"), `WEB*` (PO token).
+JS player; `tv_samsung` answered "The page needs to be reloaded" in 1.0), `WEB*` (PO token). 2.0 uses `TVHTML5` with
+the JS player only for members-only videos with the account (see "Account for members-only videos").
 
 Fallback: clients are tried in order; "not a bot", "unavailable" and network errors move on to the next client,
 while age-restricted / members-only / private / live stop at once with a message. If googlevideo answers **403** to a
@@ -424,9 +759,11 @@ client name, id, version, user agent and device fields of clients with `REQUIRE_
 
 `INTERNET`, `ACCESS_NETWORK_STATE` (Wi-Fi only), `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`,
 `POST_NOTIFICATIONS` (asked once, at the first download), `WAKE_LOCK` (only during a download). Nothing else — no
-storage permission, no account. A `<queries>` entry for `app.localmusic` lets "Show in Music" find LocalMusic.
+storage permission. A `<queries>` entry for `app.localmusic` lets "Show in Music" find LocalMusic.
 Unchanged in 1.1–1.3 (the player needs no permission; public cached files are the app's own MediaStore entries; plain HTTP is allowed only to 127.0.0.1): the Search tab needs nothing new (the Takeout file is picked with the system file picker,
 `ACTION_OPEN_DOCUMENT`, which grants access to that one file).
+Unchanged in 2.0: the account needs no permission (no `GET_ACCOUNTS`, no `USE_CREDENTIALS`; cookies.txt is picked with
+`ACTION_OPEN_DOCUMENT`, the sign-in page and the solver are WebViews inside the app).
 
 ## Legal
 
@@ -438,14 +775,20 @@ Creative Commons, public domain, or where the rights holder allows it). You are 
 
 | File | What |
 |---|---|
+| `Account.kt` | 2.0 pure logic: cookies.txt parsing, cookie jar + Set-Cookie, SAPISIDHASH, `AuthRule` (the separation rule), members-only detection, TV player challenges/rewrite, subscriptions parsing |
+| `Auth.kt` | 2.0 Android side: Keystore-encrypted `Account` store, `AuthHttp` (the only cookie sender), `AuthPlayer`, `JsSolver` (off-screen WebView) |
+| `AccountUi.kt`, `SignInActivity.kt`, `UnfollowUi.kt` | ⋮ → Account, cookies.txt import, in-app sign-in (unmodified WebView), subscriptions sync |
 | `Clients.kt` | InnerTube clients + request bodies/headers + Search tab constants — **update this when YouTube breaks it** |
 | `Browse.kt` | Search/browse answer parsing (recursive renderer walk, continuations), channel/playlist heads, link classification |
+| `Filters.kt`, `Select.kt` | 2.2 search `sp` builder, Search/Feed filters, selection model, unfollow texts |
 | `Feed.kt` | Follows, Takeout csv/zip import, RSS parsing, feed cache (30-min staleness per channel), bulk plan |
 | `Web.kt` | Search-tab network: cancellable InnerTube WEB / RSS calls, thumbnail loader |
 | `SearchUi.kt` | Search tab UI: Feed/Search, channel/playlist pages, rows, selection, bulk dialog |
 | `Cache.kt` | Range bookkeeping, cache entries + LRU, cache folders, Watch/Listen decision, HLS parsing, ID3 strip |
 | `Player.kt` | Caching sources (progressive audio, HLS), the 127.0.0.1 proxy, Save from cache |
-| `PlayerActivity.kt` | Player screen (MediaPlayer + SurfaceView) |
+| `PlayerPanel.kt`, `PlayerActivity.kt` | The app-level player overlay (full / mini / PiP; MediaPlayer + SurfaceView) and its entry points |
+| `PlayService.kt` | 2.4 mediaPlayback foreground service + media notification buttons (only while playing) |
+| `Nav.kt` | 2.3 Back history, Back order, player overlay states, mini corners, volume/mute model |
 | `Yt.kt` | Link parsing, `/player` response parsing, error classification, format choice (`Pick`) |
 | `Naming.kt` | Channel/title clean-up, file names, folder layout |
 | `Model.kt` | Download jobs + JSON history codec, text helpers |

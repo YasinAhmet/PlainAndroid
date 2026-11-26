@@ -294,3 +294,36 @@ class EgoRoadTest {
         assertTrue(r.onRoad > 2000)
     }
 }
+
+class EgoExtentTest {
+    @Test
+    fun howFar() {
+        val dir = System.getenv("EGO_DIR")?.let(::File); val f = System.getenv("ANKARA_PBF")?.let(::File)
+        assumeTrue(dir != null && dir.isDirectory && f != null && f.isFile)
+        val codes = Ego.lineCodes(File(dir!!, "_index.html").readText())
+        val lines = codes.mapNotNull { (c, _) -> File(dir, c.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".html").takeIf { it.isFile }?.let { Ego.parseLine(c, it.readText()) } }
+        val ex = PbfExtract(f!!)
+        ex.wantNode = { Filters.busStop(it) }
+        val osm = ArrayList<Ego.OsmStop>()
+        ex.run({ e -> osm.add(Ego.OsmStop(e["ref"], e["name"] ?: "", e.lat, e.lon)) }, { }, { })
+        val placed = Ego.place(lines, osm, interpolate = false)
+        val egoStops = lines.flatMap { l -> l.stops.map { it.first } }.toSet()
+        val pts = egoStops.mapNotNull { placed.pos[it] }
+        println("EGO stops placed anywhere: ${pts.size} of ${egoStops.size}; lat ${pts.minOf { it[0] }}..${pts.maxOf { it[0] }} lon ${pts.minOf { it[1] }}..${pts.maxOf { it[1] }}")
+        val box = BBox(31.85, 39.35, 33.55, 40.55)
+        val outside = pts.filter { !(it[0] in box.s..box.n && it[1] in box.w..box.e) }
+        println("outside the current box: ${outside.size}")
+        val far = lines.filter { l -> l.stops.any { s -> placed.pos[s.first]?.let { !(it[0] in box.s..box.n && it[1] in box.w..box.e) } == true } }
+        println("lines reaching outside: " + far.map { it.code + " " + it.name.take(40) })
+        // percentiles, to see whether a few far stops stretch the box
+        val la = pts.map { it[0] }.sorted(); val lo = pts.map { it[1] }.sorted()
+        fun pc(l: List<Double>, p: Double) = l[((l.size - 1) * p).toInt()]
+        println("lat 0.1%..99.9%: ${pc(la, 0.001)}..${pc(la, 0.999)}  lon: ${pc(lo, 0.001)}..${pc(lo, 0.999)}")
+        val province = BBox(30.75, 38.55, 34.15, 40.80)
+        val inProv = osm.filter { it.lat in province.s..province.n && it.lon in province.w..province.e }
+        val p2 = Ego.place(lines, inProv, interpolate = false)
+        println("extent from province stops: ${Ego.extent(lines, p2.pos)}")
+        val enc = lines.take(5).map { Ego.decode(Ego.encode(it))!! }
+        assertTrue(enc.zip(lines.take(5)).all { (a, b) -> a.code == b.code && a.stops == b.stops && a.weekday.contentEquals(b.weekday) && a.minutes == b.minutes })
+    }
+}

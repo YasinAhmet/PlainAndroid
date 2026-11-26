@@ -118,13 +118,14 @@ object Rss {
         var feedAuthor = ""
         var inEntry = false
         var inAuthor = false
-        var id = ""; var title = ""; var author = ""; var cid = ""; var published = 0L; var views = ""
+        var id = ""; var title = ""; var author = ""; var cid = ""; var published = 0L; var views = ""; var short = false
         while (true) {
             val ev = p.next()
             if (ev == XmlPullParser.END_DOCUMENT) break
             val name = p.name?.substringAfter(':')
             if (ev == XmlPullParser.START_TAG) when (name) {
-                "entry" -> { inEntry = true; id = ""; title = ""; author = ""; cid = ""; published = 0; views = "" }
+                "entry" -> { inEntry = true; id = ""; title = ""; author = ""; cid = ""; published = 0; views = ""; short = false }
+                "link" -> if (inEntry && p.getAttributeValue(null, "href")?.contains("/shorts/") == true) short = true
                 "author" -> inAuthor = true
                 "videoId" -> if (inEntry) id = p.nextText().trim()
                 "channelId" -> if (inEntry) cid = p.nextText().trim()
@@ -137,7 +138,7 @@ object Rss {
                 "entry" -> {
                     inEntry = false
                     if (id.length == 11) out += Item(
-                        IKind.VIDEO, id, title, channel = author.ifEmpty { feedAuthor },
+                        if (short) IKind.SHORT else IKind.VIDEO, id, title, channel = author.ifEmpty { feedAuthor },
                         channelId = cid.takeIf { it.startsWith("UC") } ?: channelId, views = views, thumbId = id, published = published,
                     )
                 }
@@ -185,10 +186,16 @@ class FeedCache(val items: List<Item>, val fetched: Map<String, Long>) {
     fun due(follows: List<Follow>, now: Long, force: Boolean): List<Follow> =
         if (force) follows else follows.filter { now - (fetched[it.id] ?: 0L) >= MAX_AGE || (fetched[it.id] ?: 0L) > now }
 
-    /** Replace one channel's items with a fresh RSS answer. */
-    fun with(channelId: String, fresh: List<Item>, now: Long): FeedCache {
+    /**
+     * Replace one channel's items with a fresh RSS answer. [members] = that channel's members-only uploads (its
+     * public UUMO… feed, fetched on a manual Refresh; the channel RSS leaves them out); null = not asked this time,
+     * so the ones found earlier stay.
+     */
+    fun with(channelId: String, fresh: List<Item>, now: Long, members: List<Item>? = null): FeedCache {
         val keep = items.filter { it.channelId != channelId }
-        return FeedCache(sortFeed(keep + fresh), fetched + (channelId to now))
+        val m = members?.map { it.copy(members = true) } ?: items.filter { it.channelId == channelId && it.members }
+        val ids = m.map { it.id }.toSet()
+        return FeedCache(sortFeed(keep + m + fresh.filter { it.id !in ids }), fetched + (channelId to now))
     }
 
     /** A failed fetch still counts as "tried now" (deleted channels don't get hammered); items stay. */
@@ -226,6 +233,7 @@ object ItemCodec {
             i.thumbId?.let { put("th", it) }
             if (i.published > 0) put("p", i.published)
             if (i.live) put("l", true)
+            if (i.members) put("m", true)
         })
         return a
     }
@@ -239,7 +247,7 @@ object ItemCodec {
             out += Item(
                 kind, id, o.optString("t"), o.optString("c"), o.optString("ci").ifEmpty { null }, o.optLong("d"),
                 o.optString("v"), o.optString("a"), o.optString("n"), o.optString("h"), o.optString("th").ifEmpty { null },
-                o.optLong("p"), o.optBoolean("l"),
+                o.optLong("p"), o.optBoolean("l"), o.optBoolean("m"),
             )
         }
         return out

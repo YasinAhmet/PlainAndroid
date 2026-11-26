@@ -131,7 +131,8 @@ class ProgressiveSource(
     @Volatile private var target = 0L
     private var tries = 0
     private var refreshes = 0
-    val mime get() = if (meta.ext == "webm") "audio/webm" else "audio/mp4"
+    // VIDEO kind here = a members-only video's muxed 360p MP4 (itag 18): the signed-in TV client gives no HLS
+    val mime get() = if (meta.kind == CacheKind.VIDEO) "video/mp4" else if (meta.ext == "webm") "audio/webm" else "audio/mp4"
 
     override fun close() {
         super.close()
@@ -444,6 +445,8 @@ object CachePublisher {
                 val plan = SavePlan.audio(fmt, Store.originalAudio)
                 if (plan.mode == SavePlan.Mode.COPY) File(dir, "data.bin") // YouTube's original .m4a, as-is
                 else { Mux.audio(File(dir, "data.bin"), tmpOut, fmt == AudioFmt.OPUS, { false }); tmpOut }
+            } else if (m.ext == "mp4") {
+                File(dir, "data.bin") // members-only progressive MP4 (itag 18): as-is
             } else {
                 val hasA = File(dir, "a_0.aac").exists()
                 tmpV.outputStream().use { o -> for (i in 0 until m.total) File(dir, "v_$i.ts").inputStream().use { x -> x.copyTo(o, 1 shl 20) } }
@@ -559,8 +562,30 @@ object Sources {
         return ProgressiveSource(ctx, meta, f.url, ua(info), refresh)
     }
 
+    /**
+     * Members-only Watch: the muxed 360p MP4 (itag 18) as one progressive file in the Video cache (ext "mp4"). The
+     * signed-in TV client returns no HLS master, and higher qualities are separate video/audio streams (Download
+     * merges those).
+     */
+    fun membersVideo(ctx: Context, info: VideoInfo, title: String, channel: String): ProgressiveSource {
+        val f = info.formats.firstOrNull { it.itag == 18 } ?: info.formats.filter { it.muxed && it.mime == "video/mp4" }.maxByOrNull { it.p }
+            ?: throw YtError("No single-file video stream for this members-only video: use Download (or Listen)", false)
+        val key = "${info.id}_m${f.itag}"
+        val meta = Store.cache.get(CacheKind.VIDEO, key)?.takeIf { !it.published && (it.total == f.contentLength || f.contentLength <= 0) }
+            ?: CacheMeta(CacheKind.VIDEO, info.id, f.p, title, channel, info.durationSec, total = maxOf(0L, f.contentLength), ext = "mp4")
+                .also { Store.cache.forget(CacheKind.VIDEO, key) }
+        meta.resolution = "${f.width}x${f.height}"
+        val refresh = {
+            val i2 = InnerTube.info(info.id, Net.network(ctx, Store.wifiOnly))
+            val nf = i2.formats.firstOrNull { it.itag == f.itag } ?: throw YtError("Stream no longer offered", false)
+            nf.url to ua(i2)
+        }
+        return ProgressiveSource(ctx, meta, f.url, ua(info), refresh)
+    }
+
     /** Watch = one HLS quality (best H.264 up to [height]) into the Video cache. */
-    fun video(ctx: Context, calls: Calls, info0: VideoInfo, title: String, channel: String, height: Int): HlsSource {
+    fun video(ctx: Context, calls: Calls, info0: VideoInfo, title: String, channel: String, height: Int): CachedSource {
+        if (info0.members && info0.hls == null) return membersVideo(ctx, info0, title, channel)
         fun load(inf0: VideoInfo): Triple<Hls.Variant, Pair<String, String?>, String> {
             var inf = inf0
             if (inf.hls == null) inf = InnerTube.info(inf0.id, Net.network(ctx, Store.wifiOnly), order = Clients.HLS_ORDER)

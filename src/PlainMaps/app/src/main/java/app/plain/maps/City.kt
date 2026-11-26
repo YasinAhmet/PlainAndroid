@@ -15,6 +15,13 @@ object City {
     val area: BBox
         get() = if (ankara) BBox(31.85, 39.35, 33.55, 40.55) else BBox(27.95, 40.78, 29.95, 41.60)
 
+    /**
+     * Where to look for the city's stops. The map's final area is the box its transit spans
+     * (worked out during each sync), never smaller than [area].
+     */
+    val searchArea: BBox
+        get() = if (ankara) BBox(30.75, 38.55, 34.15, 40.80) else BBox(27.0, 40.3, 30.6, 41.9)
+
     /** Where the map opens the first time. */
     val centerLat get() = if (ankara) 39.92 else 41.03
     val centerLon get() = if (ankara) 32.85 else 28.98

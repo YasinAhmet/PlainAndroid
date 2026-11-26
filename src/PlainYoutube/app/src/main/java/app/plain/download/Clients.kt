@@ -75,7 +75,7 @@ object Clients {
     const val REMIX_ID = 67
     const val REMIX_VERSION = "1.20260707.12.00" // yt-dlp 'web_music'
 
-    fun byKey(key: String?): Client? = ORDER.firstOrNull { it.key == key }
+    fun byKey(key: String?): Client? = ORDER.firstOrNull { it.key == key } ?: TvPlayer.CLIENT.takeIf { it.key == key }
 
     /** JSON body for POST /youtubei/v1/player. No account, no cookies; visitorData only if YouTube handed us one. */
     /**
@@ -138,6 +138,7 @@ object Clients {
     const val BROWSE_URL = "$HOST/youtubei/v1/browse?prettyPrint=false"
     const val RESOLVE_URL = "$HOST/youtubei/v1/navigation/resolve_url?prettyPrint=false"
     const val RSS_URL = "$HOST/feeds/videos.xml?channel_id=" // + UC… : 15 newest uploads, public, no API key
+    const val RSS_PLAYLIST_URL = "$HOST/feeds/videos.xml?playlist_id=" // + UUMO… : a channel's members-only uploads
 
     const val SEARCH_VIDEOS = "EgIQAQ%3D%3D" // Type: Video
     const val SEARCH_CHANNELS = "EgIQAg%3D%3D" // Type: Channel
