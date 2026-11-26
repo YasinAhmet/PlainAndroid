@@ -1,6 +1,6 @@
 {
   "repo": "YasinAhmet/PlainAndroid",
-  "updated": "2026-11-26T19:04:08Z",
+  "updated": "2026-11-26T19:11:51Z",
   "apps": [
     {
       "key": "music",
@@ -429,17 +429,26 @@
       "key": "setup",
       "name": "Plain Setup",
       "package": "app.plain.setup",
-      "versionCode": 6,
-      "versionName": "1.5",
+      "versionCode": 7,
+      "versionName": "1.6",
       "file": "PlainSetup.apk",
-      "tag": "setup-v1.5",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.5/PlainSetup.apk",
-      "size": 1972663,
-      "sha256": "4d2047cd15c1d0cc35c67dfd1d327630a37a6439c939df62f80342684dd640f7",
+      "tag": "setup-v1.6",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.6/PlainSetup.apk",
+      "size": 1989199,
+      "sha256": "67a2a03fbfdbe5009a6e50486898a81d5d7d0c994016a823dc8b0dcf2848b1b8",
       "minSdk": 26,
       "summary": "Installs and updates the Plain apps.",
       "summary_tr": "Plain uygulamalarını yükler ve günceller.",
       "history": [
+        {
+          "versionCode": 6,
+          "versionName": "1.5",
+          "tag": "setup-v1.5",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.5/PlainSetup.apk",
+          "size": 1972663,
+          "sha256": "4d2047cd15c1d0cc35c67dfd1d327630a37a6439c939df62f80342684dd640f7",
+          "minSdk": 26
+        },
         {
           "versionCode": 5,
           "versionName": "1.4",

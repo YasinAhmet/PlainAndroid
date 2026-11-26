@@ -17,7 +17,8 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
- * Installs a queue of offers one by one through PackageInstaller sessions.
+ * Installs a queue of offers one by one: quietly through Shizuku (`pm install`) when it is set up,
+ * else through PackageInstaller sessions.
  * Bundled APKs stream straight from assets; online ones are downloaded to the cache, checked
  * (SHA-256 from apps.json + signed with the same key as Setup) and then installed.
  * Before replacing an installed app, its current APK is saved by [Backups] (one per app).
@@ -84,11 +85,12 @@ object Installer {
                 if (!f.isFile) throw IOException(tr("The saved copy is gone", "Kaydedilen kopya artık yok"))
                 verify(app, f, e.pkg, deleteOnFail = false)
                 status(installing(e))
-                f.inputStream().use { commit(app, e, it, f.length()) }
+                deliver(app, e, { f.inputStream() }, f.length())
             }
             Source.BUNDLED -> {
                 status(installing(e))
-                app.assets.openFd("apks/${e.file}").use { fd -> fd.createInputStream().use { commit(app, e, it, fd.length) } }
+                val len = app.assets.openFd("apks/${e.file}").use { it.length }
+                deliver(app, e, { app.assets.openFd("apks/${e.file}").createInputStream() }, len)
             }
             Source.ONLINE -> {
                 val dir = File(app.cacheDir, "apks").apply { mkdirs() }
@@ -100,7 +102,7 @@ object Installer {
                 if (e.sha256.isNotEmpty() && sha != e.sha256) { f.delete(); throw IOException(tr("Download damaged (checksum mismatch)", "İndirme bozuk (sağlama toplamı tutmuyor)")) }
                 verify(app, f, e.pkg)
                 status(installing(e))
-                f.inputStream().use { commit(app, e, it, f.length()) }
+                deliver(app, e, { f.inputStream() }, f.length())
             }
         }
     }
@@ -131,6 +133,28 @@ object Installer {
         } else info.signatures
         return sigs.orEmpty().map { Net.hex(md.digest(it.toByteArray())) }.toSet()
     }
+
+    /** Through Shizuku when it's set up (no dialogs), else a PackageInstaller session. */
+    private fun deliver(app: Context, e: Entry, open: () -> InputStream, size: Long) {
+        if (quietReady(app)) {
+            status(tr("Installing ${e.name} ${e.versionName} quietly (Shizuku)…", "${e.name} ${e.versionName} sessizce yükleniyor (Shizuku)…"))
+            val r = open().use { Shiz.install(it, size, app.packageName) }
+            if (r.ok) { main.post { finish(app, e.pkg, true, tr("Installed ${e.versionName}", "${e.versionName} yüklendi")) }; return }
+            val why = r.text
+            if (why.contains("VERIFICATION", true) || why.contains("BLOCKED", true)) {
+                main.post { finish(app, e.pkg, false, tr("Blocked, likely by Play Protect", "Engellendi, büyük olasılıkla Play Protect") + " ($why)", blocked = true) }
+                return
+            }
+            if (why.contains("INSTALL_FAILED", true)) { main.post { finish(app, e.pkg, false, why) }; return }
+            // Shizuku itself failed (stopped mid-way…): the normal install still works.
+            status(installing(e))
+        }
+        open().use { commit(app, e, it, size) }
+    }
+
+    /** Quiet installs are on unless turned off in Setup, and Shizuku has allowed Setup. */
+    fun quietReady(app: Context) =
+        app.getSharedPreferences("setup", Context.MODE_PRIVATE).getBoolean("quiet", true) && Shiz.state(app) == Shiz.State.READY
 
     private fun commit(app: Context, e: Entry, input: InputStream, size: Long) {
         val pi = app.packageManager.packageInstaller

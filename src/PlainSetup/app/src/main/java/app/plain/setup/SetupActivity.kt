@@ -21,6 +21,7 @@ import android.widget.Toast
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import rikka.shizuku.Shizuku
 import java.util.concurrent.Executors
 
 /**
@@ -30,7 +31,10 @@ import java.util.concurrent.Executors
  */
 class SetupActivity : Activity(), Installer.Listener {
 
-    private companion object { const val REQ_UNINSTALL = 41 }
+    private companion object {
+        const val REQ_UNINSTALL = 41
+        const val SHIZUKU_URL = "https://shizuku.rikka.app/download/"
+    }
 
     private object C {
         const val BG = 0xFF000000.toInt()
@@ -69,6 +73,14 @@ class SetupActivity : Activity(), Installer.Listener {
     private lateinit var checkBtn: TextView
     private lateinit var installBtn: TextView
     private lateinit var updateAllBtn: TextView
+    private lateinit var quietLine: TextView
+
+    // Quiet installs (Shizuku): state cached for the header line, re-read on resume and on Shizuku events.
+    private var shiz = Shiz.State.NOT_INSTALLED
+    private var adbVerify: Boolean? = null
+    private val onBinder = Shizuku.OnBinderReceivedListener { runOnUiThread { refreshQuiet() } }
+    private val onBinderDead = Shizuku.OnBinderDeadListener { runOnUiThread { refreshQuiet() } }
+    private val onShizPermission = Shizuku.OnRequestPermissionResultListener { _, _ -> runOnUiThread { refreshQuiet() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         PlainLang.init(this)
@@ -77,6 +89,11 @@ class SetupActivity : Activity(), Installer.Listener {
         buildUi()
         handle(intent)
         Installer.listener = this
+        try {
+            Shizuku.addBinderReceivedListenerSticky(onBinder)
+            Shizuku.addBinderDeadListener(onBinderDead)
+            Shizuku.addRequestPermissionResultListener(onShizPermission)
+        } catch (_: Throwable) {}
         rebuild()
         checkOnline()
     }
@@ -103,11 +120,17 @@ class SetupActivity : Activity(), Installer.Listener {
         waitingPermission?.let { w ->
             if (canInstall()) { waitingPermission = null; begin(w) }
         }
+        refreshQuiet()
         rebuild()
     }
 
     override fun onDestroy() {
         if (Installer.listener === this) Installer.listener = null
+        try {
+            Shizuku.removeBinderReceivedListener(onBinder)
+            Shizuku.removeBinderDeadListener(onBinderDead)
+            Shizuku.removeRequestPermissionResultListener(onShizPermission)
+        } catch (_: Throwable) {}
         worker.shutdownNow()
         super.onDestroy()
     }
@@ -174,13 +197,14 @@ class SetupActivity : Activity(), Installer.Listener {
         val chosen = only ?: offers.filter { it.entry.pkg in selected && stateOf(it).let { s -> s == Catalog.State.NOT_INSTALLED || s == Catalog.State.UPDATE } }
         if (chosen.isEmpty()) { say(tr("Nothing to install: tick an app that isn't installed or has an update.",
             "Yüklenecek bir şey yok: yüklü olmayan ya da güncellemesi olan bir uygulama seçin.")); return }
+        val quiet = Installer.quietReady(this)
         // The first install from a phone with Play Protect: say beforehand what its warning means.
-        if (!prefs.getBoolean("protect_seen", false)) {
+        if (!quiet && !prefs.getBoolean("protect_seen", false)) {
             prefs.edit().putBoolean("protect_seen", true).apply()
             playProtect(onContinue = { install(chosen) })
             return
         }
-        if (!canInstall()) {
+        if (!quiet && !canInstall()) {
             waitingPermission = chosen
             AlertDialog.Builder(this)
                 .setTitle(tr("Allow installs", "Yüklemeye izin verin"))
@@ -351,6 +375,11 @@ class SetupActivity : Activity(), Installer.Listener {
                 setPadding(0, dp(8), 0, dp(2))
                 setOnClickListener { playProtect() }
             }, LinearLayout.LayoutParams(-2, -2))
+            quietLine = text("", 14f, C.ACCENT, bold = true).apply {
+                setPadding(0, dp(6), 0, dp(2))
+                setOnClickListener { quietTapped() }
+            }
+            addView(quietLine, LinearLayout.LayoutParams(-2, -2))
         }
         status = text("", 13f, C.ACCENT).apply { setPadding(dp(20), dp(4), dp(20), dp(4)) }
         skip = text(tr("Skip this app", "Bu uygulamayı atla"), 13f, C.TEXT, bold = true).apply {
@@ -490,6 +519,98 @@ class SetupActivity : Activity(), Installer.Listener {
             }
             alpha = if (st == Catalog.State.TOO_OLD_ANDROID) 0.5f else 1f
         }
+    }
+
+    // ------------------------------------------------------------------ quiet installs (Shizuku)
+
+    private val quietOn get() = prefs.getBoolean("quiet", true)
+
+    private fun refreshQuiet() {
+        if (!::quietLine.isInitialized || isDestroyed) return
+        shiz = Shiz.state(this)
+        showQuiet()
+        if (shiz == Shiz.State.READY) worker.execute {
+            val v = Shiz.verifiesAdbInstalls()
+            runOnUiThread { if (!isDestroyed) { adbVerify = v; showQuiet() } }
+        }
+    }
+
+    private fun showQuiet() {
+        val (s, color) = when {
+            !quietOn -> tr("Quiet installs off ›", "Sessiz yükleme kapalı ›") to C.FAINT
+            shiz == Shiz.State.NOT_INSTALLED -> tr("No prompts at all? Quiet installs with Shizuku ›", "Hiç onay sorulmasın mı? Shizuku ile sessiz yükleme ›") to C.ACCENT
+            shiz == Shiz.State.NOT_RUNNING -> tr("Quiet installs: Shizuku isn't running ›", "Sessiz yükleme: Shizuku çalışmıyor ›") to C.ACCENT
+            shiz == Shiz.State.TOO_OLD -> tr("Quiet installs: Shizuku is too old ›", "Sessiz yükleme: Shizuku çok eski ›") to C.RED
+            shiz != Shiz.State.READY -> tr("Quiet installs: allow Plain Setup in Shizuku ›", "Sessiz yükleme: Shizuku'da Plain Setup'a izin verin ›") to C.ACCENT
+            else -> tr("✓ Quiet installs on (Shizuku): no prompts ›", "✓ Sessiz yükleme açık (Shizuku): onay yok ›") to C.GREEN
+        }
+        quietLine.text = s
+        quietLine.setTextColor(color)
+    }
+
+    private fun quietTapped() {
+        if (quietOn && shiz == Shiz.State.NO_PERMISSION) {
+            if (!Shiz.requestPermission()) say(tr("Shizuku didn't answer. Open it and try again.", "Shizuku yanıt vermedi. Açıp yeniden deneyin."))
+            return
+        }
+        val intro = tr("Quiet installs: Setup installs and updates Plain apps with no confirm dialog and no Play Protect prompt. " +
+            "It uses Shizuku, a free helper app with the same rights as a computer connected over USB.\n\n",
+            "Sessiz yükleme: Setup, Plain uygulamalarını onay penceresi ve Play Protect sorusu olmadan yükler ve günceller. " +
+            "Bunun için USB ile bağlı bir bilgisayarla aynı yetkilere sahip ücretsiz yardımcı uygulama Shizuku kullanılır.\n\n")
+        val b = AlertDialog.Builder(this).setTitle(tr("Quiet installs", "Sessiz yükleme"))
+        when {
+            !quietOn -> {
+                b.setMessage(intro + tr("They are turned off. Setup asks Android (and Play Protect) for each app.",
+                    "Şu an kapalı. Setup her uygulama için Android'e (ve Play Protect'e) sorar."))
+                b.setPositiveButton(tr("Turn on", "Aç")) { _, _ -> prefs.edit().putBoolean("quiet", true).apply(); refreshQuiet() }
+            }
+            shiz == Shiz.State.NOT_INSTALLED -> {
+                b.setMessage(intro + tr("1. Install Shizuku.\n2. Start it over Wireless debugging (once after every phone restart).\n" +
+                    "3. Come back here and allow Plain Setup.\n\nPlain Uninstaller's Setup tab walks you through steps 1 and 2.",
+                    "1. Shizuku'yu yükleyin.\n2. Kablosuz hata ayıklama ile başlatın (her telefon yeniden başlatmasından sonra bir kez).\n" +
+                    "3. Buraya dönüp Plain Setup'a izin verin.\n\nPlain Uninstaller'ın Kurulum sekmesi 1. ve 2. adımlarda size yol gösterir."))
+                b.setPositiveButton(tr("Get Shizuku", "Shizuku'yu indir")) { _, _ -> openUrl(SHIZUKU_URL) }
+                if (installedCode("app.plain.uninstaller") != null)
+                    b.setNeutralButton(tr("Open Plain Uninstaller", "Plain Uninstaller'ı aç")) { _, _ -> openApp("app.plain.uninstaller") }
+            }
+            shiz == Shiz.State.NOT_RUNNING -> {
+                b.setMessage(intro + tr("Shizuku is installed but not running: it stops whenever the phone restarts. Open it and tap Start " +
+                    "(Wireless debugging must be on), then come back.",
+                    "Shizuku yüklü ama çalışmıyor: telefon her yeniden başladığında durur. Açın ve Başlat'a dokunun " +
+                    "(Kablosuz hata ayıklama açık olmalı), sonra geri dönün."))
+                b.setPositiveButton(tr("Open Shizuku", "Shizuku'yu aç")) { _, _ -> openApp(Shiz.PKG) }
+            }
+            shiz == Shiz.State.TOO_OLD -> {
+                b.setMessage(intro + tr("This Shizuku is too old. Install the current one.", "Bu Shizuku çok eski. Güncel sürümü yükleyin."))
+                b.setPositiveButton(tr("Get Shizuku", "Shizuku'yu indir")) { _, _ -> openUrl(SHIZUKU_URL) }
+            }
+            shiz != Shiz.State.READY -> {
+                b.setMessage(intro + tr("Plain Setup was denied in Shizuku. Open Shizuku and allow Plain Setup in its app list.",
+                    "Plain Setup'a Shizuku'da izin verilmedi. Shizuku'yu açıp uygulama listesinde Plain Setup'a izin verin."))
+                b.setPositiveButton(tr("Open Shizuku", "Shizuku'yu aç")) { _, _ -> openApp(Shiz.PKG) }
+            }
+            else -> b.setMessage(intro + tr("Everything is set: installs and updates from Setup go through without any prompt. " +
+                "If Shizuku stops (after a restart), Setup falls back to the normal install with Android's dialogs.",
+                "Her şey hazır: Setup'tan yapılan yüklemeler ve güncellemeler hiç soru sormadan geçer. " +
+                "Shizuku durursa (yeniden başlatmadan sonra), Setup Android'in pencereleriyle normal yüklemeye döner.") +
+                (if (adbVerify == true) tr("\n\nPlay Protect still glances at each install (silently). If it ever blocks one, turn off " +
+                    "\"Verify apps over USB\" in Developer options: that skips the check for USB and Shizuku installs only.",
+                    "\n\nPlay Protect her yüklemeye yine sessizce bakar. Bir gün birini engellerse Geliştirici seçeneklerinde " +
+                    "\"USB üzerinden uygulamaları doğrula\" seçeneğini kapatın: bu yalnızca USB ve Shizuku yüklemelerinde denetimi atlar.") else ""))
+        }
+        if (quietOn && shiz == Shiz.State.READY)
+            b.setNeutralButton(tr("Turn quiet installs off", "Sessiz yüklemeyi kapat")) { _, _ -> prefs.edit().putBoolean("quiet", false).apply(); refreshQuiet() }
+        b.setNegativeButton(tr("Close", "Kapat"), null).show()
+    }
+
+    private fun openApp(pkg: String) {
+        val i = packageManager.getLaunchIntentForPackage(pkg)
+        if (i == null) { say(tr("Couldn't open it.", "Açılamadı.")); return }
+        try { startActivity(i) } catch (e: Exception) { say(e.message ?: "") }
+    }
+
+    private fun openUrl(url: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (e: Exception) { say(tr("No browser: ${e.message}", "Tarayıcı yok: ${e.message}")) }
     }
 
     // ------------------------------------------------------------------ Play Protect

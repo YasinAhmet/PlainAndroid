@@ -13,8 +13,8 @@ android {
         applicationId = "app.plain.setup"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).
@@ -35,7 +35,7 @@ android {
             // Optimised build, signed with the shared Plain key (see signingConfigs) for sideloading.
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("plain") ?: signingConfigs.getByName("debug")
         }
     }
@@ -55,7 +55,14 @@ kotlin {
     compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
 
+// Shizuku (quiet installs, see Shiz.kt). Its only transitive extra, androidx.annotation, is
+// compile-time annotations; left out so the app stays AndroidX-free.
+configurations.all { exclude(group = "androidx.annotation") }
+
 dependencies {
+    val shizuku = "13.1.5"
+    implementation("dev.rikka.shizuku:api:$shizuku")
+    implementation("dev.rikka.shizuku:provider:$shizuku")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // Android's org.json is a stub in local unit tests
 }
