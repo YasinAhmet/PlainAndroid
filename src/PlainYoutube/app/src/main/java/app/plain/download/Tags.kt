@@ -5,6 +5,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import app.plain.lang.tr
 
 /** What gets embedded: title, artist (= the channel folder), album when known, cover art (JPEG) when wanted. */
 class TagSet(val title: String, val artist: String, val album: String?, val jpeg: ByteArray?)
@@ -356,8 +357,10 @@ object Jpeg {
 }
 
 /** Cover-art sizes for the ⋮ setting. */
-enum class ArtQuality(val px: Int, val jpegQ: Int, val label: String) {
-    NONE(0, 0, "None"), LOW(300, 80, "Low (300 px)"), HIGH(720, 85, "High (720 px)");
+enum class ArtQuality(val px: Int, val jpegQ: Int, private val en: String, private val trk: String) {
+    NONE(0, 0, "None", "Yok"), LOW(300, 80, "Low (300 px)", "Düşük (300 px)"), HIGH(720, 85, "High (720 px)", "Yüksek (720 px)");
+
+    val label: String get() = tr(en, trk)
 
     /** A square YouTube Music cover URL (`…=w226-h226-l90-rj`) at this size. */
     fun coverUrl(url: String): String = url.replace(Regex("=w\\d+-h\\d+[^/]*$"), "=w$px-h$px-l90-rj")

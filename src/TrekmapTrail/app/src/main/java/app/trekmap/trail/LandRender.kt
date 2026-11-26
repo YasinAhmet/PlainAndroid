@@ -1,5 +1,6 @@
 package app.trekmap.trail
 
+import app.plain.lang.tr
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
@@ -25,11 +26,11 @@ object LandRender {
     private const val MILITARY = 0x99B71C1C.toInt()
     private const val FENCE = 0xE6C62828.toInt()
 
-    val legend = listOf(
-        FIELD or (0xFF shl 24) to "Fields, orchards, vineyards — usually someone's land",
-        HOME or (0xFF shl 24) to "Houses, yards, farmyards, private areas — keep out",
-        MILITARY or (0xFF shl 24) to "Military zone (hatched) — entry forbidden",
-        FENCE or (0xFF shl 24) to "Fences & walls · dashed: private road",
+    fun legend() = listOf(
+        FIELD or (0xFF shl 24) to tr("Fields, orchards, vineyards — usually someone's land", "Tarla, bahçe, bağ — genelde birinin arazisi"),
+        HOME or (0xFF shl 24) to tr("Houses, yards, farmyards, private areas — keep out", "Ev, avlu, çiftlik, özel alan — girmeyin"),
+        MILITARY or (0xFF shl 24) to tr("Military zone (hatched) — entry forbidden", "Askeri bölge (taralı) — girmek yasak"),
+        FENCE or (0xFF shl 24) to tr("Fences & walls · dashed: private road", "Çit ve duvar · kesikli: özel yol"),
     )
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {

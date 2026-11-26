@@ -33,6 +33,8 @@ import android.widget.MediaController
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -80,6 +82,7 @@ class ViewerActivity : Activity() {
     private var pendingRestore: Pair<Item, Int>? = null
 
     override fun onCreate(b: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(b)
         maxPx = resources.displayMetrics.let { max(it.widthPixels, it.heightPixels) }.coerceIn(1024, 2560)
         buildUi()
@@ -173,7 +176,7 @@ class ViewerActivity : Activity() {
 
         playBtn = label("▶", 34f).apply {
             background = outline(BTN_LINE, dp(40).toFloat(), dp(1))
-            contentDescription = "Play video"
+            contentDescription = tr("Play video", "Videoyu oynat")
             visibility = View.GONE
             setOnClickListener { play() }
         }
@@ -184,7 +187,7 @@ class ViewerActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             setPadding(dp(4), dp(4), dp(12), dp(4))
         }
-        topBar.addView(label("‹", 26f).apply { contentDescription = "Back"; setOnClickListener { if (playing) stopVideo() else finish() } },
+        topBar.addView(label("‹", 26f).apply { contentDescription = tr("Back", "Geri"); setOnClickListener { if (playing) stopVideo() else finish() } },
             LinearLayout.LayoutParams(dp(48), dp(48)))
         caption = label("", 14f, TEXT2).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START; maxLines = 2 }
         topBar.addView(caption, LinearLayout.LayoutParams(0, -2, 1f))
@@ -196,12 +199,12 @@ class ViewerActivity : Activity() {
             setPadding(dp(8), dp(10), dp(8), dp(14))
         }
         val lp = { LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(6); marginEnd = dp(6) } }
-        bottomBar.addView(button("Share") { share() }, lp())
-        deleteBtn = button("Delete") { delete() }
+        bottomBar.addView(button(tr("Share", "Paylaş")) { share() }, lp())
+        deleteBtn = button(tr("Delete", "Sil")) { delete() }
         bottomBar.addView(deleteBtn, lp())
-        catBtn = button("Category") { categorize() }.apply { contentDescription = "Categories" }
+        catBtn = button(tr("Category", "Kategori")) { categorize() }.apply { contentDescription = tr("Categories", "Kategoriler") }
         bottomBar.addView(catBtn, lp())
-        bottomBar.addView(button("Details") { details() }, lp())
+        bottomBar.addView(button(tr("Details", "Ayrıntılar")) { details() }, lp())
         for (k in 0 until bottomBar.childCount) (bottomBar.getChildAt(k) as TextView).apply {
             setPadding(dp(2), dp(8), dp(2), dp(8))
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -229,13 +232,13 @@ class ViewerActivity : Activity() {
         bottomBar.visibility = if (playing) View.GONE else v
     }
 
-    private val dateFmt get() = SimpleDateFormat("EEE d MMM yyyy, HH:mm", Locale.getDefault())
+    private val dateFmt get() = SimpleDateFormat("EEE d MMM yyyy, HH:mm", PlainLang.locale)
 
     private fun updateCaption() {
         val it = items.getOrNull(i) ?: return
         val pos = if (items.size > 1) "${Paging.count(i + 1)} / ${Paging.count(items.size)}" else ""
         val date = if (it.time > 0) dateFmt.format(Date(it.time)) else ""
-        caption.text = listOf(if (cameraRoll) "Camera" else "", date, pos).filter { s -> s.isNotEmpty() }.joinToString("  ·  ")
+        caption.text = listOf(if (cameraRoll) tr("Camera", "Kamera") else "", date, pos).filter { s -> s.isNotEmpty() }.joinToString("  ·  ")
         deleteBtn.visibility = if (it.inStore) View.VISIBLE else View.GONE
         catBtn.visibility = if (it.inStore && it.id >= 0 && getSharedPreferences("gallery", MODE_PRIVATE).getBoolean("categories", false)) View.VISIBLE else View.GONE
     }
@@ -246,7 +249,7 @@ class ViewerActivity : Activity() {
 
     private fun step(d: Int) {
         val k = i + d
-        if (k in items.indices) showAt(k) else toast(if (k < 0) "Newest item" else "Oldest item")
+        if (k in items.indices) showAt(k) else toast(if (k < 0) tr("Newest item", "En yeni öğe") else tr("Oldest item", "En eski öğe"))
     }
 
     private fun showAt(k: Int) {
@@ -282,7 +285,7 @@ class ViewerActivity : Activity() {
         } catch (_: Throwable) { null }
         main.post {
             if (closed) return@post
-            if (b == null) { if (show && isCurrent(it) && !it.video) toast("Couldn't open this item."); return@post }
+            if (b == null) { if (show && isCurrent(it) && !it.video) toast(tr("Couldn't open this item.", "Bu öğe açılamadı.")); return@post }
             full.put(key(it), b)
             if (isCurrent(it) && level < 2) { level = 2; iv.setBitmap(b) }
         }
@@ -323,7 +326,7 @@ class ViewerActivity : Activity() {
         video.setMediaController(controller)
         video.setOnPreparedListener { video.start(); controller.show(2500) }
         video.setOnCompletionListener { controller.show(0) }
-        video.setOnErrorListener { _, _, _ -> toast("Can't play this video."); stopVideo(); true }
+        video.setOnErrorListener { _, _, _ -> toast(tr("Can't play this video.", "Bu video oynatılamıyor.")); stopVideo(); true }
         video.setVideoURI(it.uri)
     }
 
@@ -345,13 +348,13 @@ class ViewerActivity : Activity() {
         val send = Intent(Intent.ACTION_SEND).setType(it.mime).putExtra(Intent.EXTRA_STREAM, it.uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         send.clipData = ClipData.newRawUri("", it.uri)
-        try { startActivity(Intent.createChooser(send, null)) } catch (_: Exception) { toast("No app to share with.") }
+        try { startActivity(Intent.createChooser(send, null)) } catch (_: Exception) { toast(tr("No app to share with.", "Paylaşacak uygulama yok.")) }
     }
 
     private fun categorize() {
         val it = items.getOrNull(i) ?: return
         if (it.id < 0) return
-        Categories.choose(this, listOf(it.id), { toast("Categories saved.") })
+        Categories.choose(this, listOf(it.id), { toast(tr("Categories saved.", "Kategoriler kaydedildi.")) })
     }
 
     /**
@@ -376,7 +379,7 @@ class ViewerActivity : Activity() {
                 }
             }
         } catch (e: Exception) {
-            toast("Couldn't delete: ${e.message}")
+            toast(tr("Couldn't delete: ${e.message}", "Silinemedi: ${e.message}"))
         }
     }
 
@@ -391,7 +394,7 @@ class ViewerActivity : Activity() {
             if (items.none { x -> x === it }) items = items.toMutableList().apply { add(at.coerceIn(0, size), it) }
             listMode = listMode || items.size > 1
             showAt(items.indexOf(it))
-            toast("Restored.")
+            toast(tr("Restored.", "Geri yüklendi."))
             return
         }
         if (rc != RC_DELETE) return
@@ -407,13 +410,13 @@ class ViewerActivity : Activity() {
         full.remove(key(it))
         val at = items.indexOf(it)
         items = items.filter { x -> x !== it }
-        if (items.isEmpty()) { toast("Moved to trash."); listMode = false; super.finish(); return }
+        if (items.isEmpty()) { toast(tr("Moved to trash.", "Çöpe taşındı.")); listMode = false; super.finish(); return }
         showAt(i.coerceAtMost(items.size - 1))
         if (Build.VERSION.SDK_INT >= 30) {
             (undo.layoutParams as FrameLayout.LayoutParams).bottomMargin = (if (bottomBar.visibility == View.VISIBLE) bottomBar.height else 0) + dp(8)
             undo.requestLayout()
-            undo.show("Moved to trash") { restore(it, at) }
-        } else toast("Deleted.")
+            undo.show(tr("Moved to trash", "Çöpe taşındı")) { restore(it, at) }
+        } else toast(tr("Deleted.", "Silindi."))
     }
 
     @Suppress("DEPRECATION")
@@ -424,7 +427,7 @@ class ViewerActivity : Activity() {
             startIntentSenderForResult(pi.intentSender, RC_RESTORE, null, 0, 0, 0)
         } catch (e: Exception) {
             pendingRestore = null
-            toast("Couldn't restore: ${e.message}")
+            toast(tr("Couldn't restore: ${e.message}", "Geri yüklenemedi: ${e.message}"))
         }
     }
 
@@ -434,7 +437,7 @@ class ViewerActivity : Activity() {
             val text = describe(this, it)
             main.post {
                 if (closed) return@post
-                AlertDialog.Builder(this).setTitle("Details").setMessage(text).setPositiveButton("OK", null).show()
+                AlertDialog.Builder(this).setTitle(tr("Details", "Ayrıntılar")).setMessage(text).setPositiveButton(tr("OK", "Tamam"), null).show()
             }
         }
     }
@@ -455,7 +458,7 @@ class ViewerActivity : Activity() {
                 if (c.moveToFirst()) {
                     fun s(n: String) = c.getColumnIndex(n).let { k -> if (k >= 0 && !c.isNull(k)) c.getString(k) else null }
                     fun l(n: String) = c.getColumnIndex(n).let { k -> if (k >= 0 && !c.isNull(k)) c.getLong(k) else 0L }
-                    s(OpenableColumns.DISPLAY_NAME)?.let { v -> rows += "Name" to v }
+                    s(OpenableColumns.DISPLAY_NAME)?.let { v -> rows += tr("Name", "Ad") to v }
                     if (it.inStore) {
                         val t = l(MediaStore.MediaColumns.DATE_TAKEN)
                         taken = if (t > 0) t else l(MediaStore.MediaColumns.DATE_MODIFIED) * 1000
@@ -463,12 +466,12 @@ class ViewerActivity : Activity() {
                         h = l(MediaStore.MediaColumns.HEIGHT).toInt()
                         val o = l(MediaStore.MediaColumns.ORIENTATION).toInt()
                         if (o == 90 || o == 270) { val x = w; w = h; h = x }
-                        s(MediaStore.MediaColumns.RELATIVE_PATH)?.let { v -> rows += "Folder" to v.trimEnd('/') }
+                        s(MediaStore.MediaColumns.RELATIVE_PATH)?.let { v -> rows += tr("Folder", "Klasör") to v.trimEnd('/') }
                         val dur = l(MediaStore.MediaColumns.DURATION)
-                        if (it.video && dur > 0) rows += "Length" to Paging.duration(dur)
+                        if (it.video && dur > 0) rows += tr("Length", "Süre") to Paging.duration(dur)
                     }
                     val size = l(OpenableColumns.SIZE)
-                    if (size > 0) rows += "Size" to Paging.bytes(size)
+                    if (size > 0) rows += tr("Size", "Boyut") to Paging.bytes(size)
                 }
             }
         } catch (_: Exception) {}
@@ -477,9 +480,9 @@ class ViewerActivity : Activity() {
             ctx.contentResolver.openInputStream(it.uri)?.use { s -> BitmapFactory.decodeStream(s, null, o) }
             w = o.outWidth; h = o.outHeight
         } catch (_: Exception) {}
-        if (taken > 0) rows.add(minOf(1, rows.size), "Date" to dateFmt.format(Date(taken)))
-        if (w > 0 && h > 0) rows += "Resolution" to "$w × $h  (${String.format(Locale.US, "%.1f", w.toLong() * h / 1e6)} MP)"
-        rows += "Type" to it.mime
+        if (taken > 0) rows.add(minOf(1, rows.size), tr("Date", "Tarih") to dateFmt.format(Date(taken)))
+        if (w > 0 && h > 0) rows += tr("Resolution", "Çözünürlük") to "$w × $h  (${String.format(Locale.US, "%.1f", w.toLong() * h / 1e6)} MP)"
+        rows += tr("Type", "Tür") to it.mime
         return rows.joinToString("\n") { (k, v) -> "$k:  $v" }
     }
 

@@ -18,6 +18,8 @@ import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import kotlin.concurrent.thread
 
@@ -47,6 +49,7 @@ class MainActivity : Activity() {
     var exportEntry: Entry? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("app", MODE_PRIVATE)
         edgeToEdge()
@@ -56,8 +59,8 @@ class MainActivity : Activity() {
         content = FrameLayout(this)
         root.addView(content, lpL(MATCH, 0, 1f))
         tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(0xFF0E0E0E.toInt()) }
-        tabPlan = tab("Plan") { showPlan() }
-        tabTrail = tab("Trail") { showTrail() }
+        tabPlan = tab(tr("Plan", "Plan")) { showPlan() }
+        tabTrail = tab(tr("Trail", "Rota")) { showTrail() }
         tabs.addView(tabPlan, lpL(0, dp(44), 1f))
         tabs.addView(tabTrail, lpL(0, dp(44), 1f))
         root.addView(tabs, lpL(MATCH, WRAP))
@@ -194,7 +197,7 @@ class MainActivity : Activity() {
 
     fun pickFile() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-        try { startActivityForResult(i, RC_IMPORT) } catch (e: Exception) { toast("No file picker available") }
+        try { startActivityForResult(i, RC_IMPORT) } catch (e: Exception) { toast(tr("No file picker available", "Dosya seçici bulunamadı")) }
     }
 
     fun exportFile(e: Entry) {
@@ -202,7 +205,7 @@ class MainActivity : Activity() {
         prefs.edit().putString("exportKind", e.kind.name).putString("exportId", e.id).apply()
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/gpx+xml").putExtra(Intent.EXTRA_TITLE, ShareProvider.fileName(e.name))
-        try { startActivityForResult(i, RC_EXPORT) } catch (ex: Exception) { toast("No file picker available") }
+        try { startActivityForResult(i, RC_EXPORT) } catch (ex: Exception) { toast(tr("No file picker available", "Dosya seçici bulunamadı")) }
     }
 
     // ------------------------------------------------------------------ trail photos
@@ -228,7 +231,7 @@ class MainActivity : Activity() {
             startActivityForResult(i, RC_PHOTO)
             Trail.devEvent("photo", "camera opened $name" + if (i.`package` != null) " (${i.`package`})" else "")
         } catch (e: android.content.ActivityNotFoundException) {
-            toast("No camera app found.")
+            toast(tr("No camera app found.", "Kamera uygulaması bulunamadı."))
         }
     }
 
@@ -252,10 +255,11 @@ class MainActivity : Activity() {
                 Photos.makeThumb(f, Photos.thumbFile(dir, p))
                 Photos.add(dir, p)
                 Trail.devEvent("photo", "saved $name ${f.length() / 1024} KB at ${p.lat};${p.lon} gallery=${media.isNotEmpty()} in ${System.currentTimeMillis() - t0} ms", alsoApp = true)
-                if (media.isNotEmpty()) "Photo saved to the trail and your Gallery." else "Photo saved to the trail."
+                if (media.isNotEmpty()) tr("Photo saved to the trail and your Gallery.", "Fotoğraf rotaya ve Galeri'ye kaydedildi.")
+                else tr("Photo saved to the trail.", "Fotoğraf rotaya kaydedildi.")
             } catch (e: Exception) {
                 Dev.event("photo", "save failed: $e")
-                "Could not save the photo: ${e.message}"
+                tr("Could not save the photo: ${e.message}", "Fotoğraf kaydedilemedi: ${e.message}")
             }
             runOnUiThread {
                 toast(msg)
@@ -283,7 +287,7 @@ class MainActivity : Activity() {
             .putExtra(Intent.EXTRA_STREAM, ShareProvider.debugUri(f))
             .putExtra(Intent.EXTRA_SUBJECT, "Plain Trekking debug logs")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, "Share debug logs"))
+        startActivity(Intent.createChooser(i, tr("Share debug logs", "Hata ayıklama kayıtlarını paylaş")))
     }
 
     fun share(e: Entry) {
@@ -292,7 +296,7 @@ class MainActivity : Activity() {
             .putExtra(Intent.EXTRA_STREAM, ShareProvider.uri(e))
             .putExtra(Intent.EXTRA_SUBJECT, e.name)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, "Share GPX"))
+        startActivity(Intent.createChooser(i, tr("Share GPX", "GPX paylaş")))
     }
 
     @Deprecated("Deprecated in Java")
@@ -313,9 +317,9 @@ class MainActivity : Activity() {
                 thread {
                     val msg = try {
                         contentResolver.openOutputStream(uri)!!.use { out -> Store.gpx(e.kind, e.id).inputStream().use { it.copyTo(out) } }
-                        "Saved ${ShareProvider.fileName(e.name)}"
+                        tr("Saved ${ShareProvider.fileName(e.name)}", "Kaydedildi: ${ShareProvider.fileName(e.name)}")
                     } catch (ex: Exception) {
-                        "Could not save: ${ex.message}"
+                        tr("Could not save: ${ex.message}", "Kaydedilemedi: ${ex.message}")
                     }
                     runOnUiThread { toast(msg) }
                 }
@@ -324,19 +328,19 @@ class MainActivity : Activity() {
     }
 
     fun importUri(uri: Uri) {
-        if (Trail.active) { toast("Stop the trail first, then import."); return }
+        if (Trail.active) { toast(tr("Stop the trail first, then import.", "Önce rotayı durdurun, sonra içe aktarın.")); return }
         val display = displayName(uri)
         thread {
             val msg = try {
                 val r = contentResolver.openInputStream(uri)!!.use { GpxIo.parse(it) }
                 val name = r.name?.takeIf { it.isNotBlank() }
-                    ?: display.substringBeforeLast('.').ifBlank { "Imported trail" }
+                    ?: display.substringBeforeLast('.').ifBlank { tr("Imported trail", "İçe aktarılan rota") }
                 val e = Store.save(Kind.PLAN, r, name)
                 Dev.event("import", "“$display” → plan “${e.name}” · ${r.segs.size} segments · ${r.points} points · ${Fmt.dist(e.distM)}")
-                "Added plan “${e.name}” · ${Fmt.dist(e.distM)}"
+                tr("Added plan “${e.name}” · ${Fmt.dist(e.distM)}", "Plan eklendi: “${e.name}” · ${Fmt.dist(e.distM)}")
             } catch (ex: Exception) {
                 Dev.event("import", "“$display” failed: $ex")
-                "Could not import: ${ex.message}"
+                tr("Could not import: ${ex.message}", "İçe aktarılamadı: ${ex.message}")
             }
             runOnUiThread {
                 toast(msg)
@@ -381,7 +385,7 @@ class MainActivity : Activity() {
         val cb = permCb
         permCb = null
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) cb?.invoke()
-        else toast("Trail recording needs Precise location permission.")
+        else toast(tr("Trail recording needs Precise location permission.", "Rota kaydı için Hassas konum izni gerekir."))
     }
 
     /** Settings: the three toggles. [onApplied] runs after any change so screens can react immediately. */
@@ -399,41 +403,81 @@ class MainActivity : Activity() {
             box.addView(cb)
             box.addView(text(desc, 12f, C.DIM).apply { setPadding(dp(32), 0, 0, dp(10)) })
         }
-        option("snap", true, "Snap planned trails to paths",
-            "While drawing a plan, each tap is routed along OpenStreetMap footpaths and tracks — the dashed paths on the topo map. Needs Wi-Fi; off = straight lines.")
-        option("longHike", false, "Long hike mode",
-            "In your pocket GPS takes a fix every 5 s instead of 2 s and hands them over every 2 minutes, so the GPS chip and phone sleep more. Tracks stay detailed: a point every ~7 m at walking pace.")
-        option("dim", false, "Dim map",
-            "Darkens the map but keeps your track, plan and position bright. Your screen is AMOLED, so darker pixels use less power.")
-        option("land", true, "Show private land",
-            "Colours land you'd better not cross on maps downloaded with the private-land layer: fields & orchards (amber), " +
-                "houses & yards (red), military zones (hatched). From OpenStreetMap and ESA satellite land cover — a guide, not the land registry.")
-        option("stats", false, "Statistics overlay",
-            "Thin text on the map: GPS accuracy, satellites, the direction you face, speed, and how detailed the map really is where you are.")
-        AlertDialog.Builder(this).setTitle("Settings")
+        option("snap", true, tr("Snap planned trails to paths", "Planlanan rotaları patikalara oturt"),
+            tr("While drawing a plan, each tap is routed along OpenStreetMap footpaths and tracks — the dashed paths on the topo map. Needs Wi-Fi; off = straight lines.",
+                "Plan çizerken her dokunuş OpenStreetMap patika ve yollarını izler (topo haritadaki kesikli yollar). Wi-Fi gerekir; kapalıysa düz çizgi."))
+        option("longHike", false, tr("Long hike mode", "Uzun yürüyüş modu"),
+            tr("In your pocket GPS takes a fix every 5 s instead of 2 s and hands them over every 2 minutes, so the GPS chip and phone sleep more. Tracks stay detailed: a point every ~7 m at walking pace.",
+                "Cepteyken GPS 2 sn yerine 5 sn'de bir konum alır ve bunları 2 dakikada bir iletir; böylece GPS yongası ve telefon daha çok uyur. İz yine ayrıntılı kalır: yürüme hızında ~7 m'de bir nokta."))
+        option("dim", false, tr("Dim map", "Haritayı karart"),
+            tr("Darkens the map but keeps your track, plan and position bright. Your screen is AMOLED, so darker pixels use less power.",
+                "Haritayı karartır ama izinizi, planınızı ve konumunuzu parlak tutar. Ekranınız AMOLED; koyu pikseller daha az güç harcar."))
+        option("land", true, tr("Show private land", "Özel araziyi göster"),
+            tr("Colours land you'd better not cross on maps downloaded with the private-land layer: fields & orchards (amber), " +
+                "houses & yards (red), military zones (hatched). From OpenStreetMap and ESA satellite land cover — a guide, not the land registry.",
+                "Özel arazi katmanıyla indirilen haritalarda girmemeniz gereken yerleri boyar: tarla ve bahçeler (turuncu), " +
+                "evler ve avlular (kırmızı), askeri bölgeler (taralı). OpenStreetMap ve ESA uydu arazi örtüsünden — tapu kaydı değil, yalnızca bir rehber."))
+        option("stats", false, tr("Statistics overlay", "İstatistik katmanı"),
+            tr("Thin text on the map: GPS accuracy, satellites, the direction you face, speed, and how detailed the map really is where you are.",
+                "Harita üzerinde ince yazı: GPS doğruluğu, uydular, baktığınız yön, hız ve bulunduğunuz yerde haritanın gerçek ayrıntısı."))
+        // language: a dropdown under this row; a change rebuilds the screens (never touches a recording)
+        val lang = text(PlainLang.label(), 15f).apply {
+            setPadding(dp(4), dp(12), dp(4), dp(12))
+            background = ripple(roundRect(0x00000000, dpf(6)))
+        }
+        box.addView(lang, lpL(MATCH, WRAP))
+        val d = AlertDialog.Builder(this).setTitle(tr("Settings", "Ayarlar"))
             .setView(android.widget.ScrollView(this).apply { addView(box) })
-            .setPositiveButton("Done", null)
+            .setPositiveButton(tr("Done", "Bitti"), null)
             .setNeutralButton(PlainUpdate.label(this)) { _, _ -> PlainUpdate.check(this) }
             .show()
+        lang.setOnClickListener {
+            PlainLang.choose(this, lang) {
+                Dev.event("settings", "language=${PlainLang.choice}")
+                d.dismiss()
+                languageChanged()
+            }
+        }
+    }
+
+    /**
+     * After a language change: rebuild the tab labels and the visible screen in place instead of
+     * recreating the activity. The recording lives in Trail/TrailService and is not touched; the
+     * screen is rebuilt exactly as on a tab switch (the Trail screen re-attaches to the recording).
+     */
+    private fun languageChanged() {
+        try { Notif.channels(this) } catch (_: Exception) {} // channel names follow the language
+        tabPlan.text = tr("Plan", "Plan")
+        tabTrail.text = tr("Trail", "Rota")
+        val onTrail = trail != null
+        plan?.destroy()
+        trail?.destroy()
+        plan = null
+        trail = null
+        if (onTrail || Trail.active) showTrail() else showPlan()
+        Trail.ensureService(this) // re-posts the recording notification in the new language (no-op when idle)
     }
 
     /** What the private-land colours mean. */
     fun showLandLegend() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        for ((color, label) in LandRender.legend) {
+        for ((color, label) in LandRender.legend()) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(5), 0, dp(5)) }
             row.addView(View(this).apply { background = roundRect(color, dpf(4)) }, lpL(dp(22), dp(16)).apply { marginEnd = dp(12) })
             row.addView(text(label, 14f), lpL(0, WRAP, 1f))
             box.addView(row)
         }
         box.addView(text(
-            "Built from OpenStreetMap and ESA WorldCover satellite land cover, so it's a guide, not the land registry: " +
+            tr("Built from OpenStreetMap and ESA WorldCover satellite land cover, so it's a guide, not the land registry: " +
                 "unmapped fields and houses won't show. Walking across open, unfenced land is usually tolerated; " +
                 "fenced land near houses is not. In summer, governors often ban entering forests (fire season) — check before you go.",
+                "OpenStreetMap ve ESA WorldCover uydu arazi örtüsünden üretilir; tapu kaydı değil, bir rehberdir: " +
+                "haritada olmayan tarla ve evler görünmez. Açık, çitsiz araziden geçmek genelde hoş görülür; " +
+                "evlerin yanındaki çitli arazi ise hoş görülmez. Yazın valilikler çoğu zaman ormana girişi yasaklar (yangın sezonu) — yola çıkmadan kontrol edin."),
             12f, C.DIM,
         ).apply { setPadding(0, dp(10), 0, 0) })
-        AlertDialog.Builder(this).setTitle("Private land").setView(android.widget.ScrollView(this).apply { addView(box) })
-            .setPositiveButton("OK", null).show()
+        AlertDialog.Builder(this).setTitle(tr("Private land", "Özel arazi")).setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setPositiveButton(tr("OK", "Tamam"), null).show()
     }
 
     /** One-time guidance so HiOS doesn't kill tracking in the pocket (one step per trail start). */
@@ -445,21 +489,27 @@ class MainActivity : Activity() {
         }
         prefs.edit().putBoolean("askedBattery", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("Keep tracking in your pocket")
+            .setTitle(tr("Keep tracking in your pocket", "Cepteyken kayıt sürsün"))
             .setMessage(
-                "Tecno's HiOS can stop apps in the background, which leaves gaps in your track.\n\n" +
+                tr("Tecno's HiOS can stop apps in the background, which leaves gaps in your track.\n\n" +
                     "1. Tap Continue and choose Allow (ignore battery optimisation).\n" +
                     "2. In Settings › Battery / app launch management, let Plain Trekking run in the background " +
                     "(the menu names differ between HiOS versions).\n" +
                     "3. In Recent apps, lock Plain Trekking.\n\n" +
-                    "The app still saves battery itself: GPS turns off while you rest and the map only draws while you look at it."
+                    "The app still saves battery itself: GPS turns off while you rest and the map only draws while you look at it.",
+                    "Tecno'nun HiOS sistemi arka plandaki uygulamaları durdurabilir; bu da izinizde boşluk bırakır.\n\n" +
+                    "1. Devam'a dokunun ve İzin ver'i seçin (pil optimizasyonunu yok say).\n" +
+                    "2. Ayarlar › Pil / uygulama başlatma yönetimi bölümünde Plain Trekking'in arka planda çalışmasına izin verin " +
+                    "(menü adları HiOS sürümüne göre değişir).\n" +
+                    "3. Son uygulamalar ekranında Plain Trekking'i kilitleyin.\n\n" +
+                    "Uygulama yine de pil tasarrufu yapar: dinlenirken GPS kapanır, harita yalnızca baktığınızda çizilir.")
             )
-            .setPositiveButton("Continue") { _, _ ->
+            .setPositiveButton(tr("Continue", "Devam")) { _, _ ->
                 try {
                     startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
                 } catch (_: Exception) {}
             }
-            .setNegativeButton("Later", null)
+            .setNegativeButton(tr("Later", "Sonra"), null)
             .show()
     }
 
@@ -468,19 +518,22 @@ class MainActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED) return
         // only remembered once a button is chosen; dismissing asks again next time
         AlertDialog.Builder(this)
-            .setTitle("Auto-resume recording")
+            .setTitle(tr("Auto-resume recording", "Kaydı otomatik sürdür"))
             .setMessage(
-                "If HiOS ever closes Plain Trekking mid-hike, Android can restart the recording by itself — " +
+                tr("If HiOS ever closes Plain Trekking mid-hike, Android can restart the recording by itself — " +
                     "but only with location set to “Allow all the time”.\n\n" +
-                    "Location is still used only while a trail is recording. Without this, recording resumes when you reopen the app."
+                    "Location is still used only while a trail is recording. Without this, recording resumes when you reopen the app.",
+                    "HiOS yürüyüş sırasında Plain Trekking'i kapatırsa Android kaydı kendiliğinden yeniden başlatabilir — " +
+                    "ama yalnızca konum izni “Her zaman izin ver” ise.\n\n" +
+                    "Konum yine yalnızca rota kaydedilirken kullanılır. Bu olmadan kayıt, uygulamayı yeniden açtığınızda sürer.")
             )
-            .setPositiveButton("Set it") { _, _ ->
+            .setPositiveButton(tr("Set it", "Ayarla")) { _, _ ->
                 prefs.edit().putBoolean("askedBgLoc", true).apply()
                 Dev.event("permission", "background location: user chose Set it")
                 permCb = null
                 requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), RC_PERMS + 1)
             }
-            .setNegativeButton("No thanks") { _, _ ->
+            .setNegativeButton(tr("No thanks", "Hayır, kalsın")) { _, _ ->
                 prefs.edit().putBoolean("askedBgLoc", true).apply()
                 Dev.event("permission", "background location: user chose No thanks")
             }

@@ -14,6 +14,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -69,20 +71,25 @@ class SyncService : Service() {
         }
     }
 
+    override fun onCreate() {
+        PlainLang.init(this)
+        super.onCreate()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_CANCEL) { cancel.set(true); return START_NOT_STICKY }
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CH, "Sync", NotificationManager.IMPORTANCE_LOW))
-        val n = note("Starting…", 0f)
+        nm.createNotificationChannel(NotificationChannel(CH, tr("Sync", "Eşitleme"), NotificationManager.IMPORTANCE_LOW))
+        val n = note(tr("Starting…", "Başlıyor…"), 0f)
         if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(ID, n)
         if (SyncState.running) return START_NOT_STICKY
         SyncState.running = true
         SyncState.error = null
         SyncState.progress = 0f
-        SyncState.text = "Starting…"
+        SyncState.text = tr("Starting…", "Başlıyor…")
         SyncState.changed()
         log(if (intent?.getBooleanExtra("situational", false) == true) "situational sync started" else "sync started")
         cancel.set(false)
@@ -111,11 +118,11 @@ class SyncService : Service() {
                 SyncState.generation++
                 log("done")
             } catch (_: InterruptedException) {
-                SyncState.text = "Stopped. Progress is kept for the next sync."
+                SyncState.text = tr("Stopped. Progress is kept for the next sync.", "Durduruldu. İlerleme bir sonraki eşitleme için saklanır.")
                 log("stopped")
             } catch (t: Throwable) {
                 SyncState.error = t.message ?: t.javaClass.simpleName
-                SyncState.text = "Sync failed"
+                SyncState.text = tr("Sync failed", "Eşitleme başarısız")
                 log("FAILED: " + android.util.Log.getStackTraceString(t))
                 try {
                     java.io.File(filesDir, "sync/last-error.txt").writeText(android.util.Log.getStackTraceString(t))
@@ -138,13 +145,13 @@ class SyncService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, SyncService::class.java).setAction(ACTION_CANCEL), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CH)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle("Plain ${City.name} Map sync")
+            .setContentTitle(tr("Plain ${City.name} Map sync", "Plain ${City.name} Map eşitlemesi"))
             .setContentText(text)
             .setProgress(1000, (f * 1000).toInt(), false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(null, tr("Stop", "Durdur"), stop).build())
             .build()
     }
 }

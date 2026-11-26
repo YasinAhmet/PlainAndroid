@@ -1,5 +1,7 @@
 package app.plain.download
 
+import app.plain.lang.tr
+
 /** Where a RUNNING job is: downloading its streams, waiting for the saver, converting (remux/merge) or copying. */
 enum class Phase { DOWNLOAD, WAIT_SAVE, CONVERT, COPY }
 
@@ -48,26 +50,26 @@ object Pipeline {
     /** "4 s", "2:41", "1:02:03". */
     fun took(ms: Long): String {
         val s = Math.round(ms / 1000.0)
-        return if (s < 60) "$s s" else Text.duration(s)
+        return if (s < 60) tr("$s s", "$s sn") else Text.duration(s)
     }
 
     /** The status line of a downloads-list row. */
     fun status(j: Job): String {
         val pct = if (j.total > 0) (j.done * 100 / j.total).toInt().coerceIn(0, 100) else 0
         return when (j.state) {
-            State.QUEUED -> "Queued"
+            State.QUEUED -> tr("Queued", "Sırada")
             State.RUNNING -> when (j.phase) {
-                Phase.WAIT_SAVE -> "Downloaded · waiting to " + if (j.saveConverts) "convert" else "save"
-                Phase.CONVERT -> "Converting ${j.savePct}%" + (j.etaSec.takeIf { it >= 0 }?.let { " · about ${took(it * 1000)} left" } ?: "")
-                Phase.COPY -> "Saving ${j.savePct}%"
-                else -> if (j.done > 0 && j.total > 0) "Downloading $pct% · ${Text.size(j.done)} of ${Text.size(j.total)}" else "Starting…"
+                Phase.WAIT_SAVE -> tr("Downloaded · waiting to ", "İndirildi · ") + if (j.saveConverts) tr("convert", "dönüştürme bekleniyor") else tr("save", "kaydetme bekleniyor")
+                Phase.CONVERT -> tr("Converting ${j.savePct}%", "Dönüştürülüyor %${j.savePct}") + (j.etaSec.takeIf { it >= 0 }?.let { tr(" · about ${took(it * 1000)} left", " · yaklaşık ${took(it * 1000)} kaldı") } ?: "")
+                Phase.COPY -> tr("Saving ${j.savePct}%", "Kaydediliyor %${j.savePct}")
+                else -> if (j.done > 0 && j.total > 0) tr("Downloading $pct% · ${Text.size(j.done)} of ${Text.size(j.total)}", "İndiriliyor %$pct · ${Text.size(j.done)} / ${Text.size(j.total)}") else tr("Starting…", "Başlatılıyor…")
             }
-            State.DONE -> if (j.media == Media.TRASHED) "In trash · Restore from the menu or ⋮ → Trash"
-            else if (j.media == Media.GONE) "Removed (the file was deleted)"
-            else "Saved · ${(j.relPath ?: "") + (j.fileName ?: "")}" +
-                (if (j.saveMs > 0) " · " + (if (j.savedConverted) "converted" else "saved") + " in " + took(j.saveMs) else "")
-            State.FAILED -> "Failed: ${j.error ?: "unknown error"}"
-            State.CANCELED -> "Canceled"
+            State.DONE -> if (j.media == Media.TRASHED) tr("In trash · Restore from the menu or ⋮ → Trash", "Çöpte · Menüden ya da ⋮ → Çöp kutusu'ndan geri yükleyin")
+            else if (j.media == Media.GONE) tr("Removed (the file was deleted)", "Kaldırıldı (dosya silinmiş)")
+            else tr("Saved", "Kaydedildi") + " · ${(j.relPath ?: "") + (j.fileName ?: "")}" +
+                (if (j.saveMs > 0) " · " + (if (j.savedConverted) tr("converted", "dönüştürüldü") else tr("saved", "kaydedildi")) + tr(" in ", ", süre: ") + took(j.saveMs) else "")
+            State.FAILED -> tr("Failed: ", "Başarısız: ") + (j.error ?: tr("unknown error", "bilinmeyen hata"))
+            State.CANCELED -> tr("Canceled", "İptal edildi")
         }
     }
 
@@ -75,10 +77,10 @@ object Pipeline {
     fun summary(jobs: List<Job>): String {
         val run = jobs.filter { it.state == State.RUNNING }
         val parts = ArrayList<String>()
-        run.count { it.phase == Phase.DOWNLOAD }.takeIf { it > 0 }?.let { parts += "$it downloading" }
-        run.count { it.phase == Phase.CONVERT || it.phase == Phase.COPY }.takeIf { it > 0 }?.let { parts += "$it converting" }
-        run.count { it.phase == Phase.WAIT_SAVE }.takeIf { it > 0 }?.let { parts += "$it waiting to convert" }
-        jobs.count { it.state == State.QUEUED }.takeIf { it > 0 }?.let { parts += "$it queued" }
+        run.count { it.phase == Phase.DOWNLOAD }.takeIf { it > 0 }?.let { parts += tr("$it downloading", "$it indiriliyor") }
+        run.count { it.phase == Phase.CONVERT || it.phase == Phase.COPY }.takeIf { it > 0 }?.let { parts += tr("$it converting", "$it dönüştürülüyor") }
+        run.count { it.phase == Phase.WAIT_SAVE }.takeIf { it > 0 }?.let { parts += tr("$it waiting to convert", "$it dönüştürme bekliyor") }
+        jobs.count { it.state == State.QUEUED }.takeIf { it > 0 }?.let { parts += tr("$it queued", "$it sırada") }
         return parts.joinToString(" · ")
     }
 

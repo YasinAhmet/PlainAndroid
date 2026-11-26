@@ -25,6 +25,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.util.Calendar
 import java.util.concurrent.Executors
 
@@ -91,7 +93,9 @@ class MainActivity : Activity() {
     private val syncListener: () -> Unit = { onSyncChanged() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
+        reopenSettings = savedInstanceState?.getBoolean("lang_settings") == true
         edgeToEdge()
         store = Store(Sync.dataFile(this))
         map = MapView(this)
@@ -126,6 +130,15 @@ class MainActivity : Activity() {
 
     private var lastSaved = 0L
 
+    /** Set after a language change: the recreated activity opens the settings again, scrolled to the language row. */
+    private var reopenSettings = false
+    private var langRow: View? = null
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (stack.lastOrNull() is Screen.Settings) outState.putBoolean("lang_settings", true)
+    }
+
     private fun rememberFix(lat: Double, lon: Double, acc: Float, time: Long) {
         val now = System.currentTimeMillis()
         if (now - lastSaved < 5000) return
@@ -141,7 +154,11 @@ class MainActivity : Activity() {
             main.post {
                 generation = SyncState.generation
                 map.invalidate()
-                if (!ok) { if (stack.isEmpty() || stack.last() !is Screen.Settings) show(Screen.Welcome, replaceAll = true) }
+                if (reopenSettings) {
+                    reopenSettings = false
+                    show(Screen.Settings, replaceAll = true)
+                    sheetScroll.postDelayed({ langRow?.let { r -> sheetScroll.scrollTo(0, maxOf(0, r.top - dp(80))) } }, 200)
+                } else if (!ok) { if (stack.isEmpty() || stack.last() !is Screen.Settings) show(Screen.Welcome, replaceAll = true) }
                 else if (stack.lastOrNull() is Screen.Welcome) closeSheet()
             }
         }
@@ -212,7 +229,7 @@ class MainActivity : Activity() {
         }
         box.addView(Icon(this, Icon.SEARCH).apply { color = C.DIM }, lpL(dp(24), dp(24)))
         search = EditText(this).apply {
-            hint = "Line, stop, place or street"
+            hint = tr("Line, stop, place or street", "Hat, durak, yer veya sokak")
             setHintTextColor(C.DIM)
             setTextColor(C.TEXT)
             textSize = 15f
@@ -398,7 +415,7 @@ class MainActivity : Activity() {
     private fun startGps() {
         gotFix = false
         if (!gps.start()) {
-            android.widget.Toast.makeText(this, "Location is switched off in Android", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this, tr("Location is switched off in Android", "Android'de konum kapalı"), android.widget.Toast.LENGTH_LONG).show()
         }
         updateGpsBtn()
     }
@@ -486,7 +503,7 @@ class MainActivity : Activity() {
 
     private fun note(s: String, color: Int = C.DIM) = text(s, 13f, color).apply { setPadding(dp(6), dp(8), dp(6), dp(8)) }
 
-    private fun loading() = body(note("Loading…"))
+    private fun loading() = body(note(tr("Loading…", "Yükleniyor…")))
 
     // ------------------------------------------------------------------ time helpers
     private class Now(val sec: Int, val today: Int, val yesterday: Int)
@@ -564,7 +581,8 @@ class MainActivity : Activity() {
     private fun lineColor(v: Store.Variant, i: Int) = if (v.mode == Mode.BUS) C.PALETTE[i % C.PALETTE.size] else v.color
 
     private fun nearRows(rows: List<Near>, now: Int, fromLat: Double, fromLon: Double): List<View> {
-        if (rows.isEmpty()) return listOf(note("No lines stop within this circle. Tap closer to a street, or zoom out and tap again."))
+        if (rows.isEmpty()) return listOf(note(tr("No lines stop within this circle. Tap closer to a street, or zoom out and tap again.",
+            "Bu dairede duran hat yok. Bir sokağa daha yakın dokunun ya da uzaklaştırıp yeniden dokunun.")))
         return rows.mapIndexed { i, r ->
             val col = lineColor(r.v, i)
             row(badge(r.v.ref, col), "→ " + r.v.headsign.ifEmpty { r.v.lineName },
@@ -580,14 +598,14 @@ class MainActivity : Activity() {
     /** "Route from here" / "Route to here" for a stop, place or tapped point. */
     private fun routeButtons(p: Pt): View {
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(2), 0, dp(6)) }
-        bar.addView(button("Route from here") { from = p; prefer = null; openRoute() }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
-        bar.addView(button("Route to here") { to = p; prefer = null; openRoute() }, lpL(WRAP, WRAP))
+        bar.addView(button(tr("Route from here", "Buradan rota")) { from = p; prefer = null; openRoute() }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
+        bar.addView(button(tr("Route to here", "Buraya rota")) { to = p; prefer = null; openRoute() }, lpL(WRAP, WRAP))
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
     }
 
     private fun times(next: List<Int>, now: Int, v: Store.Variant): String = when {
-        v.ntrips == 0 -> if (v.mode == Mode.BUS) "" else " · no timetable offline"
-        next.isEmpty() -> " · no more today"
+        v.ntrips == 0 -> if (v.mode == Mode.BUS) "" else tr(" · no timetable offline", " · çevrimdışı saat yok")
+        next.isEmpty() -> tr(" · no more today", " · bugün sefer kalmadı")
         else -> " · " + next.joinToString(", ") { Times.mins(it, now) }
     }
 
@@ -600,15 +618,17 @@ class MainActivity : Activity() {
     }
 
     private fun renderArea(s: Screen.Area, t: Int) {
-        header("Lines near here", "Within ${Fmt.dist(s.r)} · tap a line to see its route and stops")
+        header(tr("Lines near here", "Yakındaki hatlar"), tr("Within ${Fmt.dist(s.r)} · tap a line to see its route and stops",
+            "${Fmt.dist(s.r)} içinde · güzergâh ve duraklar için bir hatta dokunun"))
         loading()
         map.circle = doubleArrayOf(Geo.mx(s.lon), Geo.my(s.lat), s.r)
         map.lines = emptyList(); map.dots = emptyList()
         val n = now()
         load(t, { nearby(s.lat, s.lon, s.r) }) { rows ->
             showWeb(rows, Geo.mx(s.lon), Geo.my(s.lat))
-            header("Lines near here", "${rows.size} lines and directions within ${Fmt.dist(s.r)}")
-            body(routeButtons(Pt(s.lat, s.lon, rows.firstOrNull()?.stop?.name?.let { "Near $it" } ?: "Point on map")), *nearRows(rows, n.sec, s.lat, s.lon).toTypedArray())
+            header(tr("Lines near here", "Yakındaki hatlar"), tr("${rows.size} lines and directions within ${Fmt.dist(s.r)}",
+                "${Fmt.dist(s.r)} içinde ${rows.size} hat ve yön"))
+            body(routeButtons(Pt(s.lat, s.lon, rows.firstOrNull()?.stop?.name?.let { tr("Near $it", "$it yakını") } ?: tr("Point on map", "Haritada nokta"))), *nearRows(rows, n.sec, s.lat, s.lon).toTypedArray())
         }
     }
 
@@ -616,7 +636,7 @@ class MainActivity : Activity() {
     private class StopData(val stop: Store.StopR, val rows: List<Triple<Store.Variant, Int, List<Int>>>, val geoms: List<List<DoubleArray>>, val notices: List<Store.Notice>)
 
     private fun renderStop(s: Screen.StopS, t: Int) {
-        header("Stop", null)
+        header(tr("Stop", "Durak"), null)
         loading()
         map.circle = null
         val n = now()
@@ -633,8 +653,10 @@ class MainActivity : Activity() {
                 if (st.code.isNotEmpty()) store.notices("durak:" + st.code) else emptyList())
         }) { d ->
             val st = d.stop
-            val sub = (if (st.mode == Mode.BUS) "Bus stop" + (if (st.code.isNotEmpty()) " ${st.code}" else "") else Mode.name(st.mode) + " station") +
-                " · ${d.rows.map { it.first.line }.distinct().size} lines"
+            val nLines = d.rows.map { it.first.line }.distinct().size
+            val sub = (if (st.mode == Mode.BUS) tr("Bus stop", "Otobüs durağı") + (if (st.code.isNotEmpty()) " ${st.code}" else "")
+                else tr(Mode.name(st.mode) + " station", if (st.mode == Mode.FERRY) "İskele" else Mode.name(st.mode) + " istasyonu")) +
+                tr(" · $nLines lines", " · $nLines hat")
             header(st.name, sub)
             val lines = ArrayList<MapView.Line>()
             d.rows.forEachIndexed { i, r -> if (i < d.geoms.size) lines.add(MapView.Line(d.geoms[i], lineColor(r.first, i), 2.4f, casing = false)) }
@@ -648,7 +670,7 @@ class MainActivity : Activity() {
                 setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundRect(0x33FF9800, dpf(8))
                 layoutParams = lpL(MATCH, WRAP).apply { bottomMargin = dp(6) }
             })
-            if (d.rows.isEmpty()) views.add(note("No departures from this stop in the timetable."))
+            if (d.rows.isEmpty()) views.add(note(tr("No departures from this stop in the timetable.", "Saat çizelgesinde bu duraktan kalkış yok.")))
             d.rows.forEachIndexed { i, r ->
                 val v = r.first
                 views.add(row(badge(v.ref, lineColor(v, i)), "→ " + v.headsign.ifEmpty { v.lineName }, warn(v) + times(r.third, n.sec, v).removePrefix(" · ").ifEmpty { v.lineName }) {
@@ -663,7 +685,7 @@ class MainActivity : Activity() {
     private class LineData(val v: Store.Variant, val others: List<Store.Variant>, val stops: Map<Int, Store.StopR>, val geom: List<DoubleArray>, val trips: IntArray, val notices: List<Store.Notice>)
 
     private fun renderLine(s: Screen.LineS, t: Int) {
-        header("Line", null)
+        header(tr("Line", "Hat"), null)
         loading()
         map.circle = null
         val n = now()
@@ -676,7 +698,7 @@ class MainActivity : Activity() {
             val col = if (v.mode == Mode.BUS) C.HIGHLIGHT else v.color
             val tripsToday = run { var k = 0; var i = 0; while (i < d.trips.size) { if (d.trips[i] and n.today != 0) k++; i += 3 }; k }
             header("→ " + v.headsign.ifEmpty { v.lineName }, v.lineName + " · " + Mode.name(v.mode) +
-                (if (v.mode == Mode.BUS) " · $tripsToday trips today" else ""), badge(v.ref, col))
+                (if (v.mode == Mode.BUS) tr(" · $tripsToday trips today", " · bugün $tripsToday sefer") else ""), badge(v.ref, col))
             // map: the route, its stops, the focused stop
             map.lines = listOf(MapView.Line(d.geom, col, 4.5f))
             val dots = ArrayList<MapView.Dot>()
@@ -690,13 +712,13 @@ class MainActivity : Activity() {
             val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, dp(6)) }
             val opposite = d.others.filter { it.id != v.id && it.dir != v.dir }.maxByOrNull { it.ntrips }
                 ?: d.others.firstOrNull { it.id != v.id && it.headsign != v.headsign }
-            if (opposite != null) bar.addView(button("⇄ Other direction") {
+            if (opposite != null) bar.addView(button(tr("⇄ Other direction", "⇄ Diğer yön")) {
                 s.variant = opposite.id
                 s.focus = nearestStopIn(opposite, d.stops[s.focus])
                 render()
             }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
-            if (d.others.size > 2) bar.addView(button("Variants (${d.others.size})") { chooseVariant(s, d) }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
-            if (v.ntrips > 0) bar.addView(button(if (s.timetable) "Stops" else "Timetable") {
+            if (d.others.size > 2) bar.addView(button(tr("Variants (${d.others.size})", "Güzergâhlar (${d.others.size})")) { chooseVariant(s, d) }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
+            if (v.ntrips > 0) bar.addView(button(if (s.timetable) tr("Stops", "Duraklar") else tr("Timetable", "Saatler")) {
                 s.timetable = !s.timetable
                 if (s.day == 0) s.day = n.today
                 render()
@@ -704,7 +726,7 @@ class MainActivity : Activity() {
             views.add(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) })
 
             for (nt in d.notices) {
-                views.add(text("⚠ İETT notice · ${nt.kind} · ${nt.at}\n${nt.msg}", 13f, 0xFFFFCC80.toInt()).apply {
+                views.add(text(tr("⚠ İETT notice", "⚠ İETT duyurusu") + " · ${nt.kind} · ${nt.at}\n${nt.msg}", 13f, 0xFFFFCC80.toInt()).apply {
                     setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundRect(0x33FF9800, dpf(8))
                     layoutParams = lpL(MATCH, WRAP).apply { bottomMargin = dp(6) }
                 })
@@ -713,7 +735,8 @@ class MainActivity : Activity() {
             if (s.timetable) {
                 views.addAll(timetable(s, d))
             } else {
-                if (v.mode != Mode.BUS && v.ntrips == 0) views.add(note("Metro, tram and ferry lines come from OpenStreetMap, without timetables."))
+                if (v.mode != Mode.BUS && v.ntrips == 0) views.add(note(tr("Metro, tram and ferry lines come from OpenStreetMap, without timetables.",
+                    "Metro, tramvay ve vapur hatları OpenStreetMap'ten gelir; saatleri yoktur.")))
                 v.stops.forEachIndexed { i, sid ->
                     val st = d.stops[sid] ?: return@forEachIndexed
                     val next = if (v.ntrips > 0 && i < v.stops.size - 1) Times.next(d.trips, v.dists, i, n.sec, n.today, n.yesterday, 1).firstOrNull() else null
@@ -738,8 +761,9 @@ class MainActivity : Activity() {
     }
 
     private fun chooseVariant(s: Screen.LineS, d: LineData) {
-        val items = d.others.map { o -> "→ ${o.headsign} · ${o.stops.size} stops" + (if (o.ntrips > 0) " · ${o.ntrips} trips/week" else "") }
-        android.app.AlertDialog.Builder(this).setTitle(d.v.ref + " variants")
+        val items = d.others.map { o -> "→ ${o.headsign} · " + tr("${o.stops.size} stops", "${o.stops.size} durak") +
+            (if (o.ntrips > 0) tr(" · ${o.ntrips} trips/week", " · haftada ${o.ntrips} sefer") else "") }
+        android.app.AlertDialog.Builder(this).setTitle(tr(d.v.ref + " variants", d.v.ref + " · güzergâhlar"))
             .setItems(items.toTypedArray()) { _, i ->
                 val o = d.others[i]
                 bg.execute {
@@ -762,7 +786,7 @@ class MainActivity : Activity() {
         val out = ArrayList<View>()
         val days = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, dp(6)) }
         val sat = 1 shl 5; val sun = 1 shl 6; val weekday = 0x1F
-        for ((label, mask) in listOf("Weekdays" to weekday, "Saturday" to sat, "Sunday" to sun)) {
+        for ((label, mask) in listOf(tr("Weekdays", "Hafta içi") to weekday, tr("Saturday", "Cumartesi") to sat, tr("Sunday", "Pazar") to sun)) {
             val on = s.day and mask != 0
             days.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.TEXT) {
                 s.day = if (mask == weekday) 1 else mask
@@ -770,10 +794,11 @@ class MainActivity : Activity() {
             }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
         }
         out.add(days)
-        out.add(note("Departures at ${st?.name ?: "the first stop"}" + if (idx > 0) " (estimated from the first stop's times)" else ""))
+        out.add(note(tr("Departures at ${st?.name ?: "the first stop"}", "Kalkışlar: ${st?.name ?: "ilk durak"}") +
+            if (idx > 0) tr(" (estimated from the first stop's times)", " (ilk durağın saatlerinden tahmini)") else ""))
         val dayMask = if (s.day and weekday != 0 && s.day and (sat or sun) == 0) (s.day and weekday).let { if (it == 0) 1 else it } else s.day
         val times = Times.all(d.trips, v.dists, idx, dayMask)
-        if (times.isEmpty()) { out.add(note("No trips on this day.")); return out }
+        if (times.isEmpty()) { out.add(note(tr("No trips on this day.", "Bu gün sefer yok."))); return out }
         val byHour = times.groupBy { (it / 3600) }
         for ((h, l) in byHour.toSortedMap()) {
             val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(6), dp(3), dp(6), dp(3)) }
@@ -786,7 +811,7 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ place
     private fun renderPlace(s: Screen.PlaceS, t: Int) {
-        header("Place", null)
+        header(tr("Place", "Yer"), null)
         loading()
         map.circle = null
         val n = now()
@@ -812,21 +837,21 @@ class MainActivity : Activity() {
                 listOfNotNull(tags["addr:street"], tags["addr:housenumber"]).joinToString(" ").ifEmpty { null },
                 tags["addr:neighbourhood"] ?: tags["addr:suburb"], tags["addr:district"], tags["addr:city"],
             ).joinToString(", ")
-            info("Address", addr)
-            info("Opening hours", tags["opening_hours"]?.replace(";", "\n"))
+            info(tr("Address", "Adres"), addr)
+            info(tr("Opening hours", "Çalışma saatleri"), tags["opening_hours"]?.replace(";", "\n"))
             val phone = tags["phone"] ?: tags["contact:phone"] ?: tags["mobile"] ?: tags["contact:mobile"]
-            info("Phone", phone) { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone!!.split(';').first().replace(" ", "")))) }
+            info(tr("Phone", "Telefon"), phone) { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone!!.split(';').first().replace(" ", "")))) }
             val web = tags["website"] ?: tags["contact:website"] ?: tags["url"]
-            info("Website", web) { open(web!!) }
+            info(tr("Website", "Web sitesi"), web) { open(web!!) }
             info("Instagram", tags["contact:instagram"]) { open(tags["contact:instagram"]!!.let { if (it.startsWith("http")) it else "https://instagram.com/$it" }) }
-            info("Email", tags["email"] ?: tags["contact:email"])
-            info("Cuisine", tags["cuisine"]?.split(';')?.joinToString(", ") { Poi.pretty(it) })
-            info("Brand / operator", tags["brand"] ?: tags["operator"])
-            info("Wheelchair", tags["wheelchair"])
-            info("Description", tags["description"])
-            info("Name in English", tags["name:en"])
+            info(tr("Email", "E-posta"), tags["email"] ?: tags["contact:email"])
+            info(tr("Cuisine", "Mutfak"), tags["cuisine"]?.split(';')?.joinToString(", ") { Poi.pretty(it) })
+            info(tr("Brand / operator", "Marka / işletmeci"), tags["brand"] ?: tags["operator"])
+            info(tr("Wheelchair", "Tekerlekli sandalye"), tags["wheelchair"])
+            info(tr("Description", "Açıklama"), tags["description"])
+            info(tr("Name in English", "İngilizce adı"), tags["name:en"])
             if (rows.isNotEmpty()) {
-                views.add(text("Lines within 400 m", 14f, C.TEXT, bold = true).apply { setPadding(dp(6), dp(12), dp(6), dp(4)) })
+                views.add(text(tr("Lines within 400 m", "400 m içindeki hatlar"), 14f, C.TEXT, bold = true).apply { setPadding(dp(6), dp(12), dp(6), dp(4)) })
                 views.addAll(nearRows(rows, n.sec, p.lat, p.lon))
             }
             body(*views.toTypedArray())
@@ -871,8 +896,8 @@ class MainActivity : Activity() {
             Found(hits, gl)
         }) { f ->
             val hits = f.hits
-            header("“${s.q}”", if (hits.isEmpty()) "Nothing found" else "${hits.size} results" +
-                (if (kinds != Store.Kinds.ALL || cats != null) " · filtered" else ""))
+            header("“${s.q}”", if (hits.isEmpty()) tr("Nothing found", "Sonuç yok") else tr("${hits.size} results", "${hits.size} sonuç") +
+                (if (kinds != Store.Kinds.ALL || cats != null) tr(" · filtered", " · filtreli") else ""))
             val views = ArrayList<View>()
             views.add(searchFilters(kinds, cats))
             var lastKind = -1
@@ -881,7 +906,10 @@ class MainActivity : Activity() {
             for (h in hits) {
                 if (h.kind != lastKind) {
                     lastKind = h.kind
-                    val label = when (h.kind) { Store.HitKind.LINE -> "Lines"; Store.HitKind.STOP -> "Stops"; Store.HitKind.PLACE -> "Places"; else -> "Streets" }
+                    val label = when (h.kind) {
+                        Store.HitKind.LINE -> tr("Lines", "Hatlar"); Store.HitKind.STOP -> tr("Stops", "Duraklar")
+                        Store.HitKind.PLACE -> tr("Places", "Yerler"); else -> tr("Streets", "Sokaklar")
+                    }
                     views.add(text(label, 13f, C.DIM, bold = true).apply { setPadding(dp(6), dp(10), dp(6), dp(2)) })
                 }
                 val x = Geo.mx(h.lon); val y = Geo.my(h.lat)
@@ -891,7 +919,7 @@ class MainActivity : Activity() {
                     else glowDots.add(MapView.Dot(x, y, h.color, 4.5f, 0xFF000000.toInt(), glow = true))
                 }
                 val lead: View = if (h.badge != null) badge(h.badge, h.color) else View(this).apply { background = oval(h.color) }
-                views.add(row(lead, h.title, h.sub + if (visible) " · in view" else "", leadSize = if (h.badge != null) 0 else dp(12)) {
+                views.add(row(lead, h.title, h.sub + if (visible) tr(" · in view", " · görünümde") else "", leadSize = if (h.badge != null) 0 else dp(12)) {
                     hideKeyboard(); search.clearFocus()
                     pick(h)
                 })
@@ -902,18 +930,23 @@ class MainActivity : Activity() {
         }
     }
 
-    private val placeCats = listOf(
-        Poi.FOOD to "Food & drink", Poi.GROCERY to "Groceries & bakeries", Poi.SHOP to "Other shops", Poi.HEALTH to "Health & pharmacies",
-        Poi.MONEY to "Banks & ATMs", Poi.TRANSPORT to "Transport & fuel", Poi.CULTURE to "Culture & sights", Poi.LODGING to "Hotels",
-        Poi.WORSHIP to "Places of worship", Poi.EDUCATION to "Schools & libraries", Poi.PUBLIC to "Public services", Poi.LEISURE to "Parks & sport",
-        Poi.PLACE to "Neighbourhoods & towns", Poi.OTHER to "Other",
+    // a getter, so the names follow the language chosen after the activity was created
+    private val placeCats get() = listOf(
+        Poi.FOOD to tr("Food & drink", "Yeme içme"), Poi.GROCERY to tr("Groceries & bakeries", "Market ve fırınlar"),
+        Poi.SHOP to tr("Other shops", "Diğer dükkânlar"), Poi.HEALTH to tr("Health & pharmacies", "Sağlık ve eczaneler"),
+        Poi.MONEY to tr("Banks & ATMs", "Banka ve ATM'ler"), Poi.TRANSPORT to tr("Transport & fuel", "Ulaşım ve akaryakıt"),
+        Poi.CULTURE to tr("Culture & sights", "Kültür ve gezilecek yerler"), Poi.LODGING to tr("Hotels", "Oteller"),
+        Poi.WORSHIP to tr("Places of worship", "İbadet yerleri"), Poi.EDUCATION to tr("Schools & libraries", "Okul ve kütüphaneler"),
+        Poi.PUBLIC to tr("Public services", "Kamu hizmetleri"), Poi.LEISURE to tr("Parks & sport", "Park ve spor"),
+        Poi.PLACE to tr("Neighbourhoods & towns", "Mahalle ve ilçeler"), Poi.OTHER to tr("Other", "Diğer"),
     )
 
     /** Toggle chips for what the search looks for, plus a list to pick place types. */
     private fun searchFilters(kinds: Int, cats: Set<Int>?): View {
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(2), 0, dp(4)) }
-        for ((label, bit) in listOf("Lines" to Store.Kinds.LINES, "Stops" to Store.Kinds.STOPS, "Places" to Store.Kinds.PLACES, "Streets" to Store.Kinds.STREETS)) {
+        for ((label, bit) in listOf(tr("Lines", "Hatlar") to Store.Kinds.LINES, tr("Stops", "Duraklar") to Store.Kinds.STOPS,
+            tr("Places", "Yerler") to Store.Kinds.PLACES, tr("Streets", "Sokaklar") to Store.Kinds.STREETS)) {
             val on = kinds and bit != 0
             bar.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.DIM) {
                 val k = kinds xor bit
@@ -921,18 +954,19 @@ class MainActivity : Activity() {
                 render()
             }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
         }
+        val placeCats = placeCats
         val n = cats?.size ?: placeCats.size
-        bar.addView(button("Place types ($n/${placeCats.size})", if (cats != null) C.ACCENT else C.CARD, if (cats != null) 0xFF06262B.toInt() else C.TEXT) {
+        bar.addView(button(tr("Place types ($n/${placeCats.size})", "Yer türleri ($n/${placeCats.size})"), if (cats != null) C.ACCENT else C.CARD, if (cats != null) 0xFF06262B.toInt() else C.TEXT) {
             val checked = BooleanArray(placeCats.size) { cats == null || placeCats[it].first in cats }
-            android.app.AlertDialog.Builder(this).setTitle("Show these places")
+            android.app.AlertDialog.Builder(this).setTitle(tr("Show these places", "Bu yerleri göster"))
                 .setMultiChoiceItems(placeCats.map { it.second }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
-                .setPositiveButton("Apply") { _, _ ->
+                .setPositiveButton(tr("Apply", "Uygula")) { _, _ ->
                     val sel = placeCats.indices.filter { checked[it] }.map { placeCats[it].first }
                     prefs.edit().putString("sc", if (sel.size == placeCats.size) "*" else sel.joinToString(",")).apply()
                     render()
                 }
-                .setNeutralButton("All") { _, _ -> prefs.edit().putString("sc", "*").apply(); render() }
-                .setNegativeButton("Cancel", null).show()
+                .setNeutralButton(tr("All", "Tümü")) { _, _ -> prefs.edit().putString("sc", "*").apply(); render() }
+                .setNegativeButton(tr("Cancel", "İptal"), null).show()
         })
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
     }
@@ -946,10 +980,10 @@ class MainActivity : Activity() {
     /** A tapped point, named after the nearest stop or place. */
     private fun pointNamed(lat: Double, lon: Double): Pt {
         val st = store.stopsNear(lat, lon, 300.0, 1).firstOrNull()
-        if (st != null) return Pt(lat, lon, if (st.second < 60) st.first.name else "Near ${st.first.name}")
+        if (st != null) return Pt(lat, lon, if (st.second < 60) st.first.name else tr("Near ${st.first.name}", "${st.first.name} yakını"))
         val p = store.poisNear(lat, lon, 200.0, 1).firstOrNull()
-        if (p != null) return Pt(lat, lon, "Near ${p.first.name.ifEmpty { p.first.label }}")
-        return Pt(lat, lon, "Point on map")
+        if (p != null) return p.first.name.ifEmpty { p.first.label }.let { Pt(lat, lon, tr("Near $it", "$it yakını")) }
+        return Pt(lat, lon, tr("Point on map", "Haritada nokta"))
     }
 
     private val legColors = intArrayOf(0xFFFFD740.toInt(), 0xFF40C4FF.toInt(), 0xFFFF80AB.toInt(), 0xFF69F0AE.toInt())
@@ -1010,7 +1044,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderRoute(t: Int) {
-        header("Route", "By line contacts: fewest changes, ending near the destination")
+        header(tr("Route", "Rota"), tr("By line contacts: fewest changes, ending near the destination", "Hat bağlantılarıyla: en az aktarma, hedefe yakın bitiş"))
         map.circle = null
         val a = from; val b = to
         val views = ArrayList<View>()
@@ -1019,37 +1053,39 @@ class MainActivity : Activity() {
             r.addView(View(this).apply { background = oval(if (which == 1) 0xFF66BB6A.toInt() else 0xFFEF5350.toInt()) }, lpL(dp(12), dp(12)).apply { rightMargin = dp(10) })
             val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             col.addView(text(label, 12f, C.DIM))
-            col.addView(text(if (picking == which) "Tap the map…" else p?.name ?: "Not set", 15f, if (picking == which) C.ACCENT else C.TEXT, lines = 1))
+            col.addView(text(if (picking == which) tr("Tap the map…", "Haritaya dokunun…") else p?.name ?: tr("Not set", "Seçilmedi"), 15f, if (picking == which) C.ACCENT else C.TEXT, lines = 1))
             r.addView(col, lpL(0, WRAP, 1f))
-            r.addView(button("Map", if (picking == which) C.ACCENT else C.CARD, if (picking == which) 0xFF06262B.toInt() else C.TEXT) {
+            r.addView(button(tr("Map", "Harita"), if (picking == which) C.ACCENT else C.CARD, if (picking == which) 0xFF06262B.toInt() else C.TEXT) {
                 picking = if (picking == which) 0 else which
                 render()
             }, lpL(WRAP, WRAP).apply { leftMargin = dp(6) })
-            if (map.hasMe()) r.addView(button("Me") {
-                val p0 = Pt(map.meLat(), map.meLon(), "My location")
+            if (map.hasMe()) r.addView(button(tr("Me", "Ben")) {
+                val p0 = Pt(map.meLat(), map.meLon(), tr("My location", "Konumum"))
                 if (which == 1) from = p0 else to = p0
                 picking = 0; prefer = null; render()
             }, lpL(WRAP, WRAP).apply { leftMargin = dp(6) })
             return r
         }
-        views.add(endRow("From", a, 1))
-        views.add(endRow("To", b, 2))
+        views.add(endRow(tr("From", "Nereden"), a, 1))
+        views.add(endRow(tr("To", "Nereye"), b, 2))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(6), 0, dp(4)) }
-        bar.addView(button("⇅ Swap") { val x = from; from = to; to = x; prefer = null; render() }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
-        bar.addView(button("My routes ▾") { myRoutes() }, lpL(WRAP, WRAP))
+        bar.addView(button(tr("⇅ Swap", "⇅ Değiştir")) { val x = from; from = to; to = x; prefer = null; render() }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
+        bar.addView(button(tr("My routes ▾", "Rotalarım ▾")) { myRoutes() }, lpL(WRAP, WRAP))
         views.add(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) })
         val dots = ArrayList<MapView.Dot>()
         a?.let { dots.add(MapView.Dot(Geo.mx(it.lon), Geo.my(it.lat), 0xFF66BB6A.toInt(), 5f, 0xFF000000.toInt())) }
         b?.let { dots.add(MapView.Dot(Geo.mx(it.lon), Geo.my(it.lat), 0xFFEF5350.toInt(), 5f, 0xFF000000.toInt())) }
         map.dots = dots
         map.lines = emptyList()
-        if (picking != 0) views.add(note("Tap the map to set the ${if (picking == 1) "start" else "destination"}. Pan and zoom first if you like."))
+        if (picking != 0) views.add(note(tr("Tap the map to set the ${if (picking == 1) "start" else "destination"}. Pan and zoom first if you like.",
+            "${if (picking == 1) "Başlangıcı" else "Varış noktasını"} seçmek için haritaya dokunun. İsterseniz önce kaydırıp yakınlaştırın.")))
         if (a == null || b == null) {
-            if (picking == 0) views.add(note("Set both ends: pick them on the map, use your last location, or use “Route from/to here” on a stop or place."))
+            if (picking == 0) views.add(note(tr("Set both ends: pick them on the map, use your last location, or use “Route from/to here” on a stop or place.",
+                "İki ucu da seçin: haritadan seçin, son konumunuzu kullanın ya da bir durak veya yerde “Buradan/Buraya rota” düğmesine dokunun.")))
             body(*views.toTypedArray())
             return
         }
-        views.add(note("Finding routes…"))
+        views.add(note(tr("Finding routes…", "Rotalar aranıyor…")))
         body(*views.toTypedArray())
         val finding = views.last()
         load(t, {
@@ -1058,7 +1094,8 @@ class MainActivity : Activity() {
         }) { opts ->
             sheetBody.removeView(finding)
             if (opts.isEmpty()) {
-                sheetBody.addView(note("No line connection found within 500 m of both ends and two changes. Try points closer to a stop."))
+                sheetBody.addView(note(tr("No line connection found within 500 m of both ends and two changes. Try points closer to a stop.",
+                    "İki uca 500 m mesafede, en çok iki aktarmalı hat bağlantısı bulunamadı. Bir durağa daha yakın noktalar deneyin.")))
                 return@load
             }
             val pref = prefer
@@ -1066,10 +1103,13 @@ class MainActivity : Activity() {
             val n = now()
             opts.forEachIndexed { i, o ->
                 val first = o.legs.first()
-                val dep = first.next.firstOrNull()?.let { " · next ${Times.mins(it, n.sec)}" } ?: if (first.v.ntrips == 0 && first.v.mode != Mode.BUS) "" else " · no more today"
-                val sub = (if (o.j.changes == 0) "Direct" else "${o.j.changes} change${if (o.j.changes > 1) "s" else ""}") +
-                    " · ${String.format(java.util.Locale.US, "%.1f", o.j.rideMeters / 1000.0)} km by line · ends ${Fmt.dist(o.j.endDist.toDouble())} from the destination" +
-                    "\nBoard at ${first.board.name}$dep"
+                val dep = first.next.firstOrNull()?.let { tr(" · next ${Times.mins(it, n.sec)}", " · sonraki ${Times.mins(it, n.sec)}") }
+                    ?: if (first.v.ntrips == 0 && first.v.mode != Mode.BUS) "" else tr(" · no more today", " · bugün sefer kalmadı")
+                val km = String.format(java.util.Locale.US, "%.1f", o.j.rideMeters / 1000.0)
+                val end = Fmt.dist(o.j.endDist.toDouble())
+                val sub = changes(o.j.changes) +
+                    tr(" · $km km by line · ends $end from the destination", " · hatla $km km · hedefe $end kala biter") +
+                    tr("\nBoard at ${first.board.name}$dep", "\nBiniş: ${first.board.name}$dep")
                 val r = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
                     background = ripple(roundRect(if (i == 0) 0x1826C6DA else 0x0FFFFFFF, dpf(10)))
@@ -1093,34 +1133,42 @@ class MainActivity : Activity() {
         sheet.post { updatePads(); map.fit(doubleArrayOf(xs.min() - pad, ys.min() - pad, xs.max() + pad, ys.max() + pad), 16.0) }
     }
 
+    /** "Direct" / "1 change" / "2 changes". */
+    private fun changes(k: Int) = if (k == 0) tr("Direct", "Aktarmasız") else tr("$k change${if (k > 1) "s" else ""}", "$k aktarma")
+
     private fun renderLegs(s: Screen.Legs) {
         val o = s.opt
-        header(if (o.j.changes == 0) "Direct" else "${o.j.changes} change${if (o.j.changes > 1) "s" else ""}",
-            "${from?.name ?: "?"} → ${to?.name ?: "?"}", legBadges(o))
+        header(changes(o.j.changes), "${from?.name ?: "?"} → ${to?.name ?: "?"}", legBadges(o))
         map.circle = null
         val n = now()
         val views = ArrayList<View>()
-        if (o.j.startDist > 30) views.add(note("Start: ${o.legs.first().board.name} is about ${Fmt.dist(o.j.startDist.toDouble())} from your start."))
+        if (o.j.startDist > 30) views.add(note(tr("Start: ${o.legs.first().board.name} is about ${Fmt.dist(o.j.startDist.toDouble())} from your start.",
+            "Başlangıç: ${o.legs.first().board.name}, başlangıç noktanıza yaklaşık ${Fmt.dist(o.j.startDist.toDouble())} uzakta.")))
         o.legs.forEachIndexed { i, l ->
             if (i > 0) {
                 val prev = o.legs[i - 1].alight
                 val gap = Geo.dist(prev.lat, prev.lon, l.board.lat, l.board.lon)
-                views.add(note(if (gap < 40) "Change at ${l.board.name}" else "Change: ${prev.name} → ${l.board.name} (about ${Fmt.dist(gap)})", C.ACCENT))
+                views.add(note(if (gap < 40) tr("Change at ${l.board.name}", "Aktarma: ${l.board.name}")
+                    else tr("Change: ${prev.name} → ${l.board.name} (about ${Fmt.dist(gap)})", "Aktarma: ${prev.name} → ${l.board.name} (yaklaşık ${Fmt.dist(gap)})"), C.ACCENT))
             }
             val dep = when {
-                l.next.isNotEmpty() -> "next " + l.next.joinToString(", ") { Times.mins(it, n.sec) }
-                l.v.mode != Mode.BUS -> "no timetable offline"
-                else -> "no more today"
+                l.next.isNotEmpty() -> tr("next ", "sonraki ") + l.next.joinToString(", ") { Times.mins(it, n.sec) }
+                l.v.mode != Mode.BUS -> tr("no timetable offline", "çevrimdışı saat yok")
+                else -> tr("no more today", "bugün sefer kalmadı")
             }
             val stopsN = l.alightIdx - l.boardIdx
             views.add(row(badge(l.v.ref, l.color), "→ " + l.v.headsign.ifEmpty { l.v.lineName },
-                warn(l.v) + "Board at ${l.board.name} · $dep\n$stopsN stop${if (stopsN > 1) "s" else ""} " +
-                    "(${String.format(java.util.Locale.US, "%.1f", (l.v.dists[l.alightIdx] - l.v.dists[l.boardIdx]) / 1000.0)} km) to ${l.alight.name}") {
+                warn(l.v) + run {
+                    val km = String.format(java.util.Locale.US, "%.1f", (l.v.dists[l.alightIdx] - l.v.dists[l.boardIdx]) / 1000.0)
+                    tr("Board at ${l.board.name} · $dep\n$stopsN stop${if (stopsN > 1) "s" else ""} ($km km) to ${l.alight.name}",
+                        "Biniş: ${l.board.name} · $dep\n$stopsN durak ($km km), iniş: ${l.alight.name}")
+                }) {
                 show(Screen.LineS(l.v.id, l.board.id))
             })
         }
-        views.add(note("Get off at ${o.legs.last().alight.name}, about ${Fmt.dist(o.j.endDist.toDouble())} from the destination."))
-        views.add(button("★ Save to My routes", C.ACCENT, 0xFF06262B.toInt()) { saveRoute(o) }.apply {
+        views.add(note(tr("Get off at ${o.legs.last().alight.name}, about ${Fmt.dist(o.j.endDist.toDouble())} from the destination.",
+            "İniş: ${o.legs.last().alight.name}, hedefe yaklaşık ${Fmt.dist(o.j.endDist.toDouble())}.")))
+        views.add(button(tr("★ Save to My routes", "★ Rotalarıma kaydet"), C.ACCENT, 0xFF06262B.toInt()) { saveRoute(o) }.apply {
             layoutParams = lpL(MATCH, WRAP).apply { topMargin = dp(8) }
         })
         body(*views.toTypedArray())
@@ -1170,40 +1218,41 @@ class MainActivity : Activity() {
         val a = from ?: return; val b = to ?: return
         val et = EditText(this).apply { setText("${a.name} → ${b.name}"); setSingleLine(); selectAll() }
         val box = FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(et) }
-        android.app.AlertDialog.Builder(this).setTitle("Save route (${o.key.replace(">", " › ")})").setView(box)
-            .setPositiveButton("Save") { _, _ ->
+        android.app.AlertDialog.Builder(this).setTitle(tr("Save route", "Rotayı kaydet") + " (${o.key.replace(">", " › ")})").setView(box)
+            .setPositiveButton(tr("Save", "Kaydet")) { _, _ ->
                 val name = et.text.toString().trim().ifEmpty { "${a.name} → ${b.name}" }
                 val l = favs()
                 l.removeAll { it.name == name }
                 l.add(0, Fav(name, a, b, o.key))
                 saveFavs(l)
-                android.widget.Toast.makeText(this, "Saved to My routes", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(this, tr("Saved to My routes", "Rotalarıma kaydedildi"), android.widget.Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     private fun myRoutes() {
         val l = favs()
         if (l.isEmpty()) {
-            android.widget.Toast.makeText(this, "No saved routes yet. Open a route option and tap “Save to My routes”.", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this, tr("No saved routes yet. Open a route option and tap “Save to My routes”.",
+                "Henüz kayıtlı rota yok. Bir rota seçeneğini açıp “Rotalarıma kaydet” düğmesine dokunun."), android.widget.Toast.LENGTH_LONG).show()
             return
         }
-        android.app.AlertDialog.Builder(this).setTitle("My routes")
+        android.app.AlertDialog.Builder(this).setTitle(tr("My routes", "Rotalarım"))
             .setItems(l.map { it.name + "\n   " + it.lines.replace(">", " › ") }.toTypedArray()) { _, i ->
                 val f = l[i]
                 android.app.AlertDialog.Builder(this).setTitle(f.name)
-                    .setItems(arrayOf("Open", "Delete")) { _, k ->
+                    .setItems(arrayOf(tr("Open", "Aç"), tr("Delete", "Sil"))) { _, k ->
                         if (k == 0) {
                             from = f.a; to = f.b; prefer = f.lines; picking = 0
                             if (stack.lastOrNull() is Screen.Route) render() else show(Screen.Route)
                         } else {
-                            android.app.AlertDialog.Builder(this).setTitle("Delete “${f.name}”?")
-                                .setPositiveButton("Delete") { _, _ -> saveFavs(favs().filterNot { it.name == f.name }) }
-                                .setNegativeButton("Cancel", null).show()
+                            android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${f.name}”?", "“${f.name}” silinsin mi?"))
+                                .setPositiveButton(tr("Delete", "Sil")) { _, _ -> saveFavs(favs().filterNot { it.name == f.name }) }
+                                .setNegativeButton(tr("Cancel", "İptal"), null).show()
                         }
                     }.show()
             }
-            .setNegativeButton("Close", null).show()
+            .setNegativeButton(tr("Close", "Kapat"), null).show()
     }
 
     private fun pick(h: Store.Hit) {
@@ -1228,17 +1277,20 @@ class MainActivity : Activity() {
     private var syncErr: TextView? = null
 
     private fun renderWelcome() {
-        header("No offline data yet", "Plain ${City.name} Map works offline after one sync")
+        header(tr("No offline data yet", "Henüz çevrimdışı veri yok"), tr("Plain ${City.name} Map works offline after one sync",
+            "Plain ${City.name} Map tek bir eşitlemeden sonra çevrimdışı çalışır"))
         map.circle = null; map.lines = emptyList(); map.dots = emptyList()
         body(
-            note("Sync downloads the ${City.name} map, places, metro/tram/ferry lines (OpenStreetMap) and all ${City.operator} bus lines, stops and timetables. " +
-                "It needs Wi-Fi and ${City.downloadSize} of download, and takes 10–60 minutes. After that, everything works offline."),
-            button("Open sync settings", C.ACCENT, 0xFF06262B.toInt()) { show(Screen.Settings) },
+            note(tr("Sync downloads the ${City.name} map, places, metro/tram/ferry lines (OpenStreetMap) and all ${City.operator} bus lines, stops and timetables. " +
+                "It needs Wi-Fi and ${City.downloadSize} of download, and takes 10–60 minutes. After that, everything works offline.",
+                "Eşitleme ${City.localName} haritasını, yerleri, metro/tramvay/vapur hatlarını (OpenStreetMap) ve tüm ${City.operator} otobüs hatlarını, " +
+                    "duraklarını ve saatlerini indirir. Wi-Fi ve ${City.downloadSize} indirme gerekir; 10–60 dakika sürer. Sonrasında her şey çevrimdışı çalışır.")),
+            button(tr("Open sync settings", "Eşitleme ayarlarını aç"), C.ACCENT, 0xFF06262B.toInt()) { show(Screen.Settings) },
         )
     }
 
     private fun renderSettings() {
-        header("Settings", "Offline data")
+        header(tr("Settings", "Ayarlar"), tr("Offline data", "Çevrimdışı veri"))
         map.circle = null; map.lines = emptyList(); map.dots = emptyList()
         val views = ArrayList<View>()
         val info = text("…", 14f).apply { setPadding(dp(6), dp(4), dp(6), dp(8)) }
@@ -1246,19 +1298,25 @@ class MainActivity : Activity() {
         bg.execute {
             val s = if (store.ready) {
                 val at = store.meta("synced_at")?.toLongOrNull()
-                "Last sync: " + (at?.let { Fmt.date(it) } ?: "?") + "\n" +
-                    (if (City.ankara) "EGO timetables read: " else "İETT timetable published: ") + (store.meta("gtfs_date") ?: "?") + "\n" +
-                    (store.meta("ego_stats")?.let { it + "\n" } ?: "") +
+                tr("Last sync: ", "Son eşitleme: ") + (at?.let { Fmt.date(it) } ?: "?") + "\n" +
+                    (if (City.ankara) tr("EGO timetables read: ", "EGO saatleri okundu: ") else tr("İETT timetable published: ", "İETT saatlerinin yayın tarihi: ")) +
+                    (store.meta("gtfs_date") ?: "?") + "\n" +
+                    (egoStats()?.let { it + "\n" } ?: "") +
                     store.counts() + "\n" +
-                    "Size on phone: " + Fmt.mb(store.file.length()) +
+                    tr("Size on phone: ", "Telefondaki boyut: ") + Fmt.mb(store.file.length()) +
                     (store.meta("outskirts_missing")?.toIntOrNull()?.takeIf { it > 0 }
-                        ?.let { "\n$it outer squares were left out (OpenStreetMap server busy). Sync again later to fill them in." } ?: "") +
-                    if (City.istanbul && !store.hasLand) "\nCoastline: not complete in this sync (sea is drawn as land)" else ""
-            } else "No offline data yet."
+                        ?.let { tr("\n$it outer squares were left out (OpenStreetMap server busy). Sync again later to fill them in.",
+                            "\n$it dış kare atlandı (OpenStreetMap sunucusu meşgul). Tamamlamak için daha sonra yeniden eşitleyin.") } ?: "") +
+                    if (City.istanbul && !store.hasLand) tr("\nCoastline: not complete in this sync (sea is drawn as land)",
+                        "\nKıyı şeridi: bu eşitlemede eksik (deniz kara olarak çizildi)") else ""
+            } else tr("No offline data yet.", "Henüz çevrimdışı veri yok.")
             val sit = if (store.ready) store.meta("situational_at")?.toLongOrNull()?.let { at ->
-                "Last situational sync: ${Fmt.date(at)} · ${store.meta("situational_lines")?.substringBefore('/') ?: "?"} lines checked, " +
-                    "${store.meta("situational_lines")?.substringAfter('/') ?: "?"} routes with new times · ${store.noticed().size} lines with announcements"
-            } ?: "No situational sync yet." else ""
+                val checked = store.meta("situational_lines")?.substringBefore('/') ?: "?"
+                val newTimes = store.meta("situational_lines")?.substringAfter('/') ?: "?"
+                val noticed = store.noticed().size
+                tr("Last situational sync: ${Fmt.date(at)} · $checked lines checked, $newTimes routes with new times · $noticed lines with announcements",
+                    "Son güncel durum eşitlemesi: ${Fmt.date(at)} · $checked hat denetlendi, $newTimes güzergâhın saati yenilendi · $noticed hatta duyuru var")
+            } ?: tr("No situational sync yet.", "Henüz güncel durum eşitlemesi yapılmadı.") else ""
             main.post { info.text = s; sitInfo?.text = sit }
         }
         syncBtn = button("", C.ACCENT, 0xFF06262B.toInt()) {
@@ -1272,39 +1330,64 @@ class MainActivity : Activity() {
         syncErr = text("", 13f, C.RED).apply { setPadding(dp(6), dp(2), dp(6), dp(2)) }
         views.add(syncErr!!)
         // situational sync
-        views.add(text("Situational sync", 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
+        views.add(text(tr("Situational sync", "Güncel durum eşitlemesi"), 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
         sitInfo = text("", 13f, C.DIM).apply { setPadding(dp(6), 0, dp(6), dp(6)) }
         views.add(sitInfo!!)
         sitBtn = button("", C.CARD) { if (SyncState.running) SyncService.stop() else startSync(situational = true) }
         views.add(sitBtn!!)
-        views.add(note(if (City.ankara)
+        views.add(note(if (City.ankara) tr(
             "Fetches EGO's latest announcements (route changes, new services, stop notices; shown with ⚠ on lines and stops) and reads every bus line's " +
-                "current departure times again from ego.gov.tr, without downloading the map. About 660 pages on Wi-Fi; a few minutes."
-        else
+                "current departure times again from ego.gov.tr, without downloading the map. About 660 pages on Wi-Fi; a few minutes.",
+            "EGO'nun son duyurularını (güzergâh değişiklikleri, yeni seferler, durak duyuruları; hatlarda ve duraklarda ⚠ ile gösterilir) alır ve " +
+                "her otobüs hattının güncel kalkış saatlerini haritayı indirmeden ego.gov.tr'den yeniden okur. Wi-Fi ile yaklaşık 660 sayfa; birkaç dakika.")
+        else tr(
             "Fetches İETT's current announcements (cancelled trips, detours, closed roads; shown with ⚠ on the lines) and today's planned " +
-                "departure times of every bus line, without downloading the map again. About 800 small requests on Wi-Fi; usually under a minute."))
+                "departure times of every bus line, without downloading the map again. About 800 small requests on Wi-Fi; usually under a minute.",
+            "İETT'nin güncel duyurularını (iptal edilen seferler, güzergâh değişiklikleri, kapalı yollar; hatlarda ⚠ ile gösterilir) ve her otobüs " +
+                "hattının bugünkü planlı kalkış saatlerini haritayı yeniden indirmeden alır. Wi-Fi ile yaklaşık 800 küçük istek; genelde bir dakikadan kısa.")))
         // line looks
-        views.add(text("Lines on the map", 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
-        views.add(slider("Bus web thickness", Style.webWidth, 0.3f, 2f) { Style.webWidth = it })
-        views.add(slider("Bus web brightness", Style.webAlpha, 0.15f, 2f) { Style.webAlpha = it })
-        views.add(slider("Metro, tram and ferry thickness", Style.railWidth, 0.3f, 2f) { Style.railWidth = it })
-        views.add(slider("Selected lines thickness", Style.lineWidth, 0.4f, 2f) { Style.lineWidth = it })
-        views.add(note(
+        views.add(text(tr("Lines on the map", "Haritadaki hatlar"), 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
+        views.add(slider(tr("Bus web thickness", "Otobüs ağı kalınlığı"), Style.webWidth, 0.3f, 2f) { Style.webWidth = it })
+        views.add(slider(tr("Bus web brightness", "Otobüs ağı parlaklığı"), Style.webAlpha, 0.15f, 2f) { Style.webAlpha = it })
+        views.add(slider(tr("Metro, tram and ferry thickness", "Metro, tramvay ve vapur kalınlığı"), Style.railWidth, 0.3f, 2f) { Style.railWidth = it })
+        views.add(slider(tr("Selected lines thickness", "Seçili hat kalınlığı"), Style.lineWidth, 0.4f, 2f) { Style.lineWidth = it })
+        views.add(note(tr(
             "Full sync runs only on Wi-Fi (never mobile data). It downloads ${City.downloadSize} and takes 10–60 minutes; you can leave the app. " +
-                "If it stops, the next sync continues where it left off. Nothing runs in the background otherwise.\n\n" + City.mapSourceText
+                "If it stops, the next sync continues where it left off. Nothing runs in the background otherwise.\n\n",
+            "Tam eşitleme yalnızca Wi-Fi ile çalışır (asla mobil veriyle değil). ${City.downloadSize} indirir ve 10–60 dakika sürer; uygulamadan çıkabilirsiniz. " +
+                "Durursa bir sonraki eşitleme kaldığı yerden devam eder. Bunun dışında arka planda hiçbir şey çalışmaz.\n\n",
+        ) + City.mapSourceText))
+        views.add(note(
+            if (City.ankara) tr("EGO publishes departure times at the first stop and the trip's length; times at later stops are estimated from them. " +
+                "Stops EGO lists without a map position are placed by name near the line, or estimated between their neighbours. On holidays EGO runs the Saturday times.",
+                "EGO ilk duraktaki kalkış saatlerini ve sefer süresini yayımlar; sonraki duraklardaki saatler bunlardan tahmin edilir. " +
+                    "EGO'nun konumsuz listelediği duraklar adlarına göre hattın yakınına yerleştirilir ya da komşu duraklar arasında tahmin edilir. Bayramlarda EGO cumartesi saatlerini uygular.")
+            else tr("Times at stops after the first are estimated from the first and last stop's scheduled times. Public holidays are not in the timetable.",
+                "İlk duraktan sonraki saatler, ilk ve son durağın planlı saatlerinden tahmin edilir. Resmî tatiller saat çizelgesinde yoktur."),
         ))
         views.add(note(
-            if (City.ankara) "EGO publishes departure times at the first stop and the trip's length; times at later stops are estimated from them. " +
-                "Stops EGO lists without a map position are placed by name near the line, or estimated between their neighbours. On holidays EGO runs the Saturday times."
-            else "Times at stops after the first are estimated from the first and last stop's scheduled times. Public holidays are not in the timetable.",
-        ))
-        views.add(note(
-            "Map, places, metro, tram and ferry lines © OpenStreetMap contributors (ODbL). " + City.busSourceText,
+            tr("Map, places, metro, tram and ferry lines © OpenStreetMap contributors (ODbL). ",
+                "Harita, yerler, metro, tramvay ve vapur hatları © OpenStreetMap katkıcıları (ODbL). ") + City.busSourceText,
         ))
         // Hands off to Plain Setup (shared helper, app/plain/update/PlainUpdate.kt).
         views.add(button(app.plain.update.PlainUpdate.label(this), C.CARD) { app.plain.update.PlainUpdate.check(this) })
+        // Language (shared helper, app/plain/lang/PlainLang.kt): a dropdown under the row; a change recreates the
+        // activity, which then reopens these settings (see onSaveInstanceState / openStore).
+        val lang = button(PlainLang.label(), C.CARD) { v -> PlainLang.choose(this, v) }
+        lang.layoutParams = lpL(MATCH, WRAP).apply { topMargin = dp(8) }
+        langRow = lang
+        views.add(lang)
         body(*views.toTypedArray())
         onSyncChanged()
+    }
+
+    /** EGO's placement numbers (written by the sync as "ego_nums"), worded in the current language; older data keeps its English line. */
+    private fun egoStats(): String? {
+        val n = store.meta("ego_nums")?.split(',')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 9 } ?: return store.meta("ego_stats")
+        return tr("${n[0]} of ${n[1]} EGO lines on the map · stops placed by number ${n[2]}, by name ${n[3]}, along the street ${n[4]}, " +
+            "estimated ${n[5]}, not found ${n[6]} · ${n[7]} lines drawn along the streets, ${n[8]} from OpenStreetMap routes",
+            "${n[0]}/${n[1]} EGO hattı haritada · durak yerleşimi: numarayla ${n[2]}, adla ${n[3]}, sokak boyunca ${n[4]}, " +
+                "tahmini ${n[5]}, bulunamayan ${n[6]} · ${n[7]} hat sokaklar boyunca, ${n[8]} hat OpenStreetMap güzergâhlarından çizildi")
     }
 
     private var sitInfo: TextView? = null
@@ -1314,7 +1397,7 @@ class MainActivity : Activity() {
     private fun slider(label: String, value: Float, lo: Float, hi: Float, set: (Float) -> Unit): View {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(4), dp(6), dp(4)) }
         val t = text("", 13f, C.TEXT)
-        fun label(v: Float) { t.text = "$label: ${(v * 100).toInt()} %" }
+        fun label(v: Float) { t.text = tr("$label: ${(v * 100).toInt()} %", "$label: %${(v * 100).toInt()}") }
         label(value)
         col.addView(t)
         col.addView(android.widget.SeekBar(this).apply {
@@ -1336,7 +1419,7 @@ class MainActivity : Activity() {
 
     private fun startSync(situational: Boolean = false) {
         if (Net.wifi(this) == null) {
-            syncErr?.text = "Connect to Wi-Fi first. Sync never uses mobile data."
+            syncErr?.text = tr("Connect to Wi-Fi first. Sync never uses mobile data.", "Önce Wi-Fi'a bağlanın. Eşitleme asla mobil veri kullanmaz.")
             return
         }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -1348,8 +1431,10 @@ class MainActivity : Activity() {
 
     private fun onSyncChanged() {
         val sit = SyncState.situational
-        syncBtn?.text = if (SyncState.running && !sit) "Stop sync" else if (store.ready) "Full sync (Wi-Fi)" else "Download offline data (Wi-Fi)"
-        sitBtn?.text = if (SyncState.running && sit) "Stop situational sync" else "Situational sync (Wi-Fi)"
+        syncBtn?.text = if (SyncState.running && !sit) tr("Stop sync", "Eşitlemeyi durdur")
+            else if (store.ready) tr("Full sync (Wi-Fi)", "Tam eşitleme (Wi-Fi)") else tr("Download offline data (Wi-Fi)", "Çevrimdışı veriyi indir (Wi-Fi)")
+        sitBtn?.text = if (SyncState.running && sit) tr("Stop situational sync", "Güncel durum eşitlemesini durdur")
+            else tr("Situational sync (Wi-Fi)", "Güncel durum eşitlemesi (Wi-Fi)")
         syncBtn?.isEnabled = !(SyncState.running && sit)
         sitBtn?.isEnabled = store.ready && !(SyncState.running && !sit)
         sitBtn?.alpha = if (sitBtn?.isEnabled == true) 1f else 0.4f

@@ -1,5 +1,6 @@
 package app.trekmap.trail
 
+import app.plain.lang.tr
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
@@ -47,7 +48,7 @@ class PhotoViewer(
     private val d = Dialog(act, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
     private val iv = ZoomImage(act)
     private val caption = act.text("", 13f).apply { maxLines = 2; setPadding(0, 0, act.dp(8), 0) }
-    private val gallery = act.button("Gallery") { openGallery() }
+    private val gallery = act.button(tr("Gallery", "Galeri")) { openGallery() }
     private val mini = MiniMap(act)
     private val miniChip = act.text("🗺", 18f).apply {
         gravity = Gravity.CENTER
@@ -73,7 +74,7 @@ class PhotoViewer(
         }
         bar.addView(caption, lpL(0, WRAP, 1f))
         bar.addView(gallery, lpL(WRAP, act.dp(36)).apply { marginEnd = act.dp(6) })
-        if (onRemoved != null) bar.addView(act.button("Remove", 0xFF5D1F1F.toInt()) { askRemove() }, lpL(WRAP, act.dp(36)))
+        if (onRemoved != null) bar.addView(act.button(tr("Remove", "Kaldır"), 0xFF5D1F1F.toInt()) { askRemove() }, lpL(WRAP, act.dp(36)))
         root.addView(bar, lpF(MATCH, WRAP, Gravity.BOTTOM))
 
         // mini map (top-right), foldable; remembers the choice
@@ -92,7 +93,7 @@ class PhotoViewer(
         iv.onTap = { d.dismiss() }
         iv.onSwipe = { dir ->
             val k = i + dir
-            if (k in all.indices) showAt(k) else act.toast(if (k < 0) "First photo" else "Last photo")
+            if (k in all.indices) showAt(k) else act.toast(if (k < 0) tr("First photo", "İlk fotoğraf") else tr("Last photo", "Son fotoğraf"))
         }
         iv.onZoomed = { z -> if (z > 1.6f) sharpen() }
         d.setOnDismissListener {
@@ -111,7 +112,7 @@ class PhotoViewer(
         showAt(i)
         if (all.size > 1 && !act.prefs.getBoolean("photoSwipeTip", false)) {
             act.prefs.edit().putBoolean("photoSwipeTip", true).apply()
-            act.toast("Swipe left or right for the other photos of this trail.")
+            act.toast(tr("Swipe left or right for the other photos of this trail.", "Bu rotanın diğer fotoğrafları için sola ya da sağa kaydırın."))
         }
     }
 
@@ -149,7 +150,7 @@ class PhotoViewer(
                 val b = try { Photos.decode(File(dir, ph.file), maxPx, Bitmap.Config.RGB_565) } catch (e: Exception) { null }
                 act.runOnUiThread {
                     if (closed) return@runOnUiThread
-                    if (b == null) { if (show && all.getOrNull(i)?.file == ph.file) act.toast("Could not open the photo."); return@runOnUiThread }
+                    if (b == null) { if (show && all.getOrNull(i)?.file == ph.file) act.toast(tr("Could not open the photo.", "Fotoğraf açılamadı.")); return@runOnUiThread }
                     full.put(ph.file, b)
                     if (all.getOrNull(i)?.file == ph.file && sharp == null) iv.setBitmap(b)
                 }
@@ -182,26 +183,26 @@ class PhotoViewer(
         val u = Photos.galleryUri(all.getOrNull(i) ?: return) ?: return
         try {
             act.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/jpeg").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-        } catch (e: Exception) { act.toast("No gallery app found.") }
+        } catch (e: Exception) { act.toast(tr("No gallery app found.", "Galeri uygulaması bulunamadı.")) }
     }
 
     private fun askRemove() {
         val ph = all.getOrNull(i) ?: return
         AlertDialog.Builder(act)
-            .setTitle("Remove this photo from the trail?")
-            .setMessage("It disappears from the map and the trail's exports. The copy in your phone's Gallery stays.")
-            .setPositiveButton("Remove") { _, _ ->
+            .setTitle(tr("Remove this photo from the trail?", "Bu fotoğraf rotadan kaldırılsın mı?"))
+            .setMessage(tr("It disappears from the map and the trail's exports. The copy in your phone's Gallery stays.", "Haritadan ve rotanın dışa aktarımlarından kalkar. Telefonun Galeri'sindeki kopya kalır."))
+            .setPositiveButton(tr("Remove", "Kaldır")) { _, _ ->
                 Photos.remove(dir, ph)
                 Dev.event("photo", "removed ${ph.file} from ${dir.name}")
                 full.remove(ph.file)
                 all.removeAt(i)
                 mini.photos = all
                 onRemoved?.invoke(ph)
-                if (all.isEmpty()) { d.dismiss(); act.toast("Photo removed."); return@setPositiveButton }
+                if (all.isEmpty()) { d.dismiss(); act.toast(tr("Photo removed.", "Fotoğraf kaldırıldı.")); return@setPositiveButton }
                 showAt(i.coerceAtMost(all.size - 1))
-                act.toast("Photo removed.")
+                act.toast(tr("Photo removed.", "Fotoğraf kaldırıldı."))
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 

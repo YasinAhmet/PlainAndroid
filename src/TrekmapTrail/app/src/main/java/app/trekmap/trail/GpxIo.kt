@@ -1,5 +1,6 @@
 package app.trekmap.trail
 
+import app.plain.lang.tr
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
@@ -32,7 +33,7 @@ object GpxIo {
                 val e = zip.nextEntry ?: break
                 if (!e.isDirectory && e.name.lowercase(Locale.ROOT).endsWith(".kml")) return parseXml(NoClose(zip))
             }
-            throw IOException("No KML file inside this KMZ")
+            throw IOException(tr("No KML file inside this KMZ", "Bu KMZ içinde KML dosyası yok"))
         }
         return parseXml(bin)
     }
@@ -49,7 +50,7 @@ object GpxIo {
         val h = Handler()
         f.newSAXParser().parse(InputSource(input), h)
         val segs = (if (h.trk.any { it.size >= 2 }) h.trk else h.rte).filter { it.size >= 2 }
-        if (segs.isEmpty()) throw IOException("No track or route found in this file")
+        if (segs.isEmpty()) throw IOException(tr("No track or route found in this file", "Bu dosyada iz ya da rota bulunamadı"))
         return Route(h.name, segs)
     }
 

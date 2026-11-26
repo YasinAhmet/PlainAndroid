@@ -1,5 +1,6 @@
 package app.localmusic
 
+import app.plain.lang.tr
 import java.util.Locale
 
 /** One audio file found on the phone, with resolved tags (pure data, no Android types). */
@@ -52,16 +53,16 @@ object Classify {
         audiobook: Boolean = false,
         hasTrackNumber: Boolean = false,
     ): String? {
-        if (notification) return "notification sound"
-        if (ringtone) return "ringtone"
-        if (alarm) return "alarm sound"
-        if (recording) return "voice recording"
-        if (podcast) return "podcast"
-        if (audiobook) return "audiobook"
+        if (notification) return tr("notification sound", "bildirim sesi")
+        if (ringtone) return tr("ringtone", "zil sesi")
+        if (alarm) return tr("alarm sound", "alarm sesi")
+        if (recording) return tr("voice recording", "ses kaydı")
+        if (podcast) return tr("podcast", "podcast")
+        if (audiobook) return tr("audiobook", "sesli kitap")
         val dirs = relPath.trim('/').split('/').filter { it.isNotEmpty() }
-        dirs.firstOrNull { NOT_MUSIC_DIR.matches(it) }?.let { return "in “$it” folder" }
-        if (NOT_MUSIC_NAME.containsMatchIn(name)) return "looks like a voice recording"
-        if (durationMs in 1 until 20_000 && !hasTrackNumber) return "shorter than 20 s"
+        dirs.firstOrNull { NOT_MUSIC_DIR.matches(it) }?.let { return tr("in “$it” folder", "klasör: “$it”") }
+        if (NOT_MUSIC_NAME.containsMatchIn(name)) return tr("looks like a voice recording", "ses kaydına benziyor")
+        if (durationMs in 1 until 20_000 && !hasTrackNumber) return tr("shorter than 20 s", "20 sn'den kısa")
         return null
     }
 }

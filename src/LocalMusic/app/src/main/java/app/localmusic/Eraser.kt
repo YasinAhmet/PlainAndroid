@@ -11,6 +11,8 @@ import android.os.Environment
 import android.os.StatFs
 import android.provider.MediaStore
 import android.provider.Settings
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 
 /**
  * Erasing from LocalMusic: one MediaStore.createTrashRequest per action (one Android consent dialog), or no dialog at all
@@ -66,19 +68,22 @@ class Eraser(private val act: MainActivity) {
 
     /** Confirm with count and size, then trash the whole set with one request. [strong] asks twice (packs, big sets). */
     fun confirm(set: EraseSet, what: String, strong: Boolean = false) {
-        if (set.isEmpty()) { act.toast("Nothing to erase"); return }
+        if (set.isEmpty()) { act.toast(tr("Nothing to erase", "Silinecek bir şey yok")); return }
         val big = strong || set.count >= 50
         val msg = "${set.summary}" + (if (set.artists > 1) " · ${Text.count(set.artists, "artist")}" else "") +
-            "\n\nThey go to Android's trash: restore them from ⋮ → Trash within 30 days. After that Android deletes them for good." +
+            tr("\n\nThey go to Android's trash: restore them from ⋮ → Trash within 30 days. After that Android deletes them for good.",
+                "\n\nAndroid'in çöp kutusuna gider: 30 gün içinde ⋮ → Çöp kutusu'ndan geri yükleyebilirsiniz. Sonra Android onları kalıcı olarak siler.") +
             "\n\n" + set.preview()
-        AlertDialog.Builder(act).setTitle("Erase $what?").setMessage(msg)
-            .setPositiveButton(if (big) "Erase ${set.count}…" else "Erase") { _, _ ->
+        val title = tr("Erase $what?", what.replaceFirstChar { it.titlecase(PlainLang.locale) } + " silinsin mi?")
+        AlertDialog.Builder(act).setTitle(title).setMessage(msg)
+            .setPositiveButton(if (big) tr("Erase ${set.count}…", "${set.count} öğeyi sil…") else tr("Erase", "Sil")) { _, _ ->
                 if (!big) send(set)
-                else AlertDialog.Builder(act).setTitle("Really erase ${set.count} files?")
-                    .setMessage("${set.summary}" + (if (set.artists > 1) " from ${Text.count(set.artists, "artist")}" else "") + " go to the trash.")
-                    .setPositiveButton("Erase all ${set.count}") { _, _ -> send(set) }.setNegativeButton("Cancel", null).show()
+                else AlertDialog.Builder(act).setTitle(tr("Really erase ${set.count} files?", "${set.count} dosya gerçekten silinsin mi?"))
+                    .setMessage("${set.summary}" + (if (set.artists > 1) tr(" from ${Text.count(set.artists, "artist")}", " (${Text.count(set.artists, "artist")})") else "") +
+                        tr(" go to the trash.", " çöp kutusuna gider."))
+                    .setPositiveButton(tr("Erase all ${set.count}", "Tümünü sil (${set.count})")) { _, _ -> send(set) }.setNegativeButton(tr("Cancel", "İptal"), null).show()
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     private fun send(set: EraseSet) {
@@ -91,7 +96,7 @@ class Eraser(private val act: MainActivity) {
             @Suppress("DEPRECATION")
             act.startIntentSenderForResult(make().intentSender, req, null, 0, 0, 0)
         } catch (e: Exception) {
-            act.toast("Android refused: ${e.message}")
+            act.toast(tr("Android refused: ${e.message}", "Android reddetti: ${e.message}"))
         }
     }
 
@@ -114,15 +119,17 @@ class Eraser(private val act: MainActivity) {
                 act.loadLibrary()
                 if (canManage(act)) {
                     undoable = set
-                    act.showUndo("Erased ${set.summary}") { undo() }
+                    act.showUndo(tr("Erased ${set.summary}", "Silindi: ${set.summary}")) { undo() }
                 } else {
-                    act.toast("Moved to the trash · ⋮ → Trash to restore")
+                    act.toast(tr("Moved to the trash · ⋮ → Trash to restore", "Çöp kutusuna taşındı · geri yüklemek için ⋮ → Çöp kutusu"))
                     offerMediaManagement()
                 }
             }
-            REQ_UNDO -> { act.loadLibrary(); if (ok) act.toast("Restored") }
+            REQ_UNDO -> { act.loadLibrary(); if (ok) act.toast(tr("Restored", "Geri yüklendi")) }
             REQ_PURGE -> {
-                if (ok) act.toast("Low storage: deleted ${Text.bytes(purging.sumOf { it.size })} of the oldest trash for good")
+                if (ok) Text.bytes(purging.sumOf { it.size }).let { b ->
+                    act.toast(tr("Low storage: deleted $b of the oldest trash for good", "Depolama az: çöp kutusundaki en eski $b kalıcı olarak silindi"))
+                }
                 purging = emptyList()
             }
             else -> return false
@@ -140,12 +147,15 @@ class Eraser(private val act: MainActivity) {
     private fun offerMediaManagement() {
         if (Build.VERSION.SDK_INT < 31 || Store.prefs.getBoolean("askedManageMedia", false)) return
         Store.prefs.edit().putBoolean("askedManageMedia", true).apply()
-        AlertDialog.Builder(act).setTitle("Skip Android's confirmation?")
-            .setMessage("Android asks before every erase. If you allow “Media management” for LocalMusic, erasing is immediate " +
+        AlertDialog.Builder(act).setTitle(tr("Skip Android's confirmation?", "Android'in onayı atlansın mı?"))
+            .setMessage(tr("Android asks before every erase. If you allow “Media management” for LocalMusic, erasing is immediate " +
                 "(with an Undo bar) and the trash can be emptied without asking. You can change this any time in Settings " +
-                "or from ⋮ → Media management.")
-            .setPositiveButton("Open settings") { _, _ -> runCatching { act.startActivity(manageMediaIntent(act)) } }
-            .setNegativeButton("Not now", null).show()
+                "or from ⋮ → Media management.",
+                "Android her silmeden önce sorar. LocalMusic için “Medya yönetimi”ne izin verirseniz silme hemen olur " +
+                "(Geri al çubuğuyla) ve çöp kutusu sormadan boşaltılabilir. Bunu istediğiniz zaman Ayarlar'dan " +
+                "veya ⋮ → Medya yönetimi'nden değiştirebilirsiniz."))
+            .setPositiveButton(tr("Open settings", "Ayarları aç")) { _, _ -> runCatching { act.startActivity(manageMediaIntent(act)) } }
+            .setNegativeButton(tr("Not now", "Şimdi değil"), null).show()
     }
 
     /** Low storage on open/resume (no background job). With Media management: delete the oldest trash until 3 GB are free. */

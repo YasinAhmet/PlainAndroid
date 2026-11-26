@@ -212,4 +212,74 @@ class PlayerLogicTest {
         assertTrue(s.contains("Content-Range: bytes 0-9/100\r\n") && s.endsWith("\r\n\r\n"))
         assertNotNull(Http.readHead(ByteArrayInputStream(ByteArray(0))))
     }
+
+    // ---- dubbed videos: original audio by default, other languages on request ----
+
+    @Test fun hlsDubbedPicksOriginal() {
+        // a real dubbed master (cut to ar/de/tr/en): every rendition DEFAULT=NO, alphabetical, "English - original" last
+        val base = "https://manifest.googlevideo.com/api/manifest/hls_variant/x/file/index.m3u8"
+        val m = Hls.parseMaster(res("hls_master_dubbed.m3u8"), base)
+        assertEquals(listOf("en", "ar", "de", "tr"), m.tracks.map { it.lang })
+        assertTrue(m.tracks.first().original && m.tracks.drop(1).none { it.original })
+        for (g in m.audio.keys) {
+            assertTrue(m.audio[g]!!.contains("acont%3Doriginal")) // not the first listed (Arabic)
+            assertEquals("en", m.audioFor(g, null)!!.second)
+            val tr = m.audioFor(g, "tr")!!
+            assertEquals("tr", tr.second); assertTrue(tr.first.contains("lang%3Dtr"))
+            assertEquals("en", m.audioFor(g, "xx")!!.second) // unknown language -> original
+        }
+        // single-track master: no languages, language "" (cache keys unchanged)
+        val single = Hls.parseMaster(res("hls_master.m3u8"), base)
+        assertTrue(single.tracks.isEmpty())
+        assertEquals("" , single.audioFor("234", null)!!.second)
+        assertEquals("English · original", m.tracks.first().label(java.util.Locale.ENGLISH))
+        assertEquals("Turkish", m.tracks.last().label(java.util.Locale.ENGLISH))
+    }
+
+    private fun track(itag: Int, codecs: String, id: String?, orig: Boolean, def: Boolean?) =
+        Format(itag, "u$itag$id", if (codecs == "opus") "audio/webm" else "audio/mp4", codecs, 128000, 128000, 1000, 0, 0, 0, "", 44100, 1000, false,
+            def, id, orig)
+
+    @Test fun dubbedFormatsPickOriginal() {
+        val fs = listOf("ar.3", "de.3", "tr.3", "en.4").flatMap { id ->
+            val o = id == "en.4"
+            listOf(track(140, "mp4a.40.2", id, o, o), track(251, "opus", id, o, o), track(139, "mp4a.40.5", id, o, o))
+        }
+        assertEquals("en", Modes.listenFormat(fs)!!.audioLang)
+        assertEquals(140, Modes.listenFormat(fs)!!.itag)
+        assertEquals("tr", Modes.listenFormat(fs, "tr")!!.audioLang)
+        assertEquals("en", Pick.audio(fs, AudioFmt.M4A, AudioQ.HIGH)!!.audioLang)
+        assertEquals("de", Pick.audio(fs, AudioFmt.OPUS, AudioQ.HIGH, "de")!!.audioLang)
+        assertEquals(listOf("en", "ar", "de", "tr"), AudioTracks.of(fs).map { it.lang })
+        // original not marked: YouTube's default track
+        val noOrig = fs.map { it.copy(audioOriginal = false) }
+        assertEquals("en", Modes.listenFormat(noOrig)!!.audioLang)
+        // single track: untouched
+        assertTrue(AudioTracks.of(listOf(track(140, "mp4a.40.2", null, false, null))).isEmpty())
+    }
+
+    @Test fun parsePlayerAudioTrack() {
+        val j = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"KrLj6nc516A","title":"T","lengthSeconds":"1"},
+            "streamingData":{"adaptiveFormats":[
+             {"itag":140,"url":"https://x/videoplayback?xtags=acont%3Ddubbed%3Alang%3Dar","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","bitrate":1,
+              "audioTrack":{"displayName":"Arabic","id":"ar.3","audioIsDefault":false}},
+             {"itag":140,"url":"https://x/videoplayback?xtags=acont%3Doriginal%3Alang%3Den","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","bitrate":1,
+              "audioTrack":{"displayName":"English original","id":"en.4","audioIsDefault":true}}]}}"""
+        val info = (Yt.parsePlayer(j, "visionos") as PlayerResult.Ok).info
+        assertEquals(listOf("ar", "en"), info.formats.map { it.audioLang })
+        assertEquals(listOf(false, true), info.formats.map { it.audioOriginal })
+        assertEquals("en", Modes.listenFormat(info.formats)!!.audioLang)
+    }
+
+    @Test fun cacheMetaLanguage() {
+        val old = CacheMeta(CacheKind.VIDEO, "abcdefghijk", 720, "T", "C", 1)
+        assertEquals("abcdefghijk_720", old.key)
+        assertTrue(old.langMatches(null)); assertFalse(old.langMatches("en"))
+        val en = CacheMeta(CacheKind.VIDEO, "abcdefghijk", 720, "T", "C", 1, lang = "en", langOriginal = true, langKnown = true)
+        assertEquals("abcdefghijk_720_en", en.key)
+        assertTrue(en.langMatches(null)); assertTrue(en.langMatches("en")); assertFalse(en.langMatches("tr"))
+        val tr = CacheMeta.decode(CacheMeta(CacheKind.MUSIC, "abcdefghijk", 140, "T", "C", 1, lang = "tr", langKnown = true).encode())!!
+        assertEquals("abcdefghijk_140_tr", tr.key); assertFalse(tr.langMatches(null)); assertTrue(tr.langMatches("tr")); assertTrue(tr.langKnown)
+        assertFalse(CacheMeta.decode(old.encode())!!.langKnown)
+    }
 }

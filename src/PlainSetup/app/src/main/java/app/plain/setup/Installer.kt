@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import app.plain.lang.tr
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -29,7 +30,8 @@ object Installer {
     interface Listener {
         fun onStatus(text: String)
         fun onConfirm(confirm: Intent)
-        fun onItemDone(pkg: String, ok: Boolean, message: String)
+        /** [blocked]: Android or Play Protect refused the app (not the user cancelling). */
+        fun onItemDone(pkg: String, ok: Boolean, message: String, blocked: Boolean)
         fun onQueueDone()
     }
 
@@ -39,6 +41,8 @@ object Installer {
     private val queue = ArrayDeque<Offer>()
     @Volatile var current: Offer? = null; private set
     val busy: Boolean get() = current != null || queue.isNotEmpty()
+    /** Android's confirm dialog is up for [current] ("Skip this app" is offered meanwhile). */
+    @Volatile var confirming = false; private set
 
     fun start(ctx: Context, offers: List<Offer>) {
         val app = ctx.applicationContext
@@ -50,7 +54,7 @@ object Installer {
     /** The confirm dialog was dismissed without a result (some phones never report it). */
     fun skipCurrent(ctx: Context) {
         val c = current ?: return
-        finish(ctx.applicationContext, c.entry.pkg, false, "Skipped")
+        finish(ctx.applicationContext, c.entry.pkg, false, tr("Skipped", "Atlandı"))
     }
 
     private fun next(app: Context) {
@@ -66,53 +70,55 @@ object Installer {
         }
     }
 
-    private fun status(s: String) = main.post { listener?.onStatus(s) }
+    private fun status(s: String) { confirming = false; main.post { listener?.onStatus(s) } }
 
     private fun install(app: Context, o: Offer) {
         val e = o.entry
         if (o.source != Source.LOCAL && e.pkg != app.packageName) {
-            status("Saving a copy of the installed ${e.name}…")
+            status(tr("Saving a copy of the installed ${e.name}…", "Yüklü ${e.name} yedekleniyor…"))
             Backups.save(app, e.pkg, e.versionCode) // "I updated but didn't like it" → Older versions… → this copy
         }
         when (o.source) {
             Source.LOCAL -> {
                 val f = File(e.url)
-                if (!f.isFile) throw IOException("The saved copy is gone")
+                if (!f.isFile) throw IOException(tr("The saved copy is gone", "Kaydedilen kopya artık yok"))
                 verify(app, f, e.pkg, deleteOnFail = false)
-                status("Installing ${e.name} ${e.versionName}…")
+                status(installing(e))
                 f.inputStream().use { commit(app, e, it, f.length()) }
             }
             Source.BUNDLED -> {
-                status("Installing ${e.name} ${e.versionName}…")
+                status(installing(e))
                 app.assets.openFd("apks/${e.file}").use { fd -> fd.createInputStream().use { commit(app, e, it, fd.length) } }
             }
             Source.ONLINE -> {
                 val dir = File(app.cacheDir, "apks").apply { mkdirs() }
                 val f = File(dir, e.file.ifEmpty { "${e.pkg}.apk" })
-                status("Downloading ${e.name} ${e.versionName}…")
+                status(tr("Downloading ${e.name} ${e.versionName}…", "${e.name} ${e.versionName} indiriliyor…"))
                 val sha = Net.download(e.url, f) { p ->
-                    if (p >= 0) status("Downloading ${e.name} ${e.versionName}… ${(p * 100).toInt()}%")
+                    if (p >= 0) status(tr("Downloading ${e.name} ${e.versionName}… ${(p * 100).toInt()}%", "${e.name} ${e.versionName} indiriliyor… %${(p * 100).toInt()}"))
                 }
-                if (e.sha256.isNotEmpty() && sha != e.sha256) { f.delete(); throw IOException("Download damaged (checksum mismatch)") }
+                if (e.sha256.isNotEmpty() && sha != e.sha256) { f.delete(); throw IOException(tr("Download damaged (checksum mismatch)", "İndirme bozuk (sağlama toplamı tutmuyor)")) }
                 verify(app, f, e.pkg)
-                status("Installing ${e.name} ${e.versionName}…")
+                status(installing(e))
                 f.inputStream().use { commit(app, e, it, f.length()) }
             }
         }
     }
+
+    private fun installing(e: Entry) = tr("Installing ${e.name} ${e.versionName}…", "${e.name} ${e.versionName} yükleniyor…")
 
     /** The APK must be [pkg] and signed with Setup's own key; otherwise it isn't ours. */
     private fun verify(app: Context, f: File, pkg: String, deleteOnFail: Boolean = true) {
         val pm = app.packageManager
         @Suppress("DEPRECATION")
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
-        val info = pm.getPackageArchiveInfo(f.path, flags) ?: throw IOException("Not a valid APK")
-        if (info.packageName != pkg) throw IOException("Wrong app inside the download (${info.packageName})")
+        val info = pm.getPackageArchiveInfo(f.path, flags) ?: throw IOException(tr("Not a valid APK", "Geçerli bir APK değil"))
+        if (info.packageName != pkg) throw IOException(tr("Wrong app inside the download (${info.packageName})", "İndirilen dosyada başka bir uygulama var (${info.packageName})"))
         val mine = certs(pm.getPackageInfo(app.packageName, flags))
         val theirs = certs(info)
         // Some old Android versions can't read an archive's certificate; the checksum still covers it.
         if (theirs.isNotEmpty() && mine.isNotEmpty() && theirs != mine) {
-            if (deleteOnFail) f.delete(); throw IOException("Not signed by the Plain apps' key — refused")
+            if (deleteOnFail) f.delete(); throw IOException(tr("Not signed by the Plain apps' key — refused", "Plain uygulamalarının anahtarıyla imzalanmamış — reddedildi"))
         }
     }
 
@@ -148,7 +154,7 @@ object Installer {
             try { pi.abandonSession(id) } catch (_: Exception) {}
             throw ex
         }
-        status("Waiting for Android to install ${e.name}…")
+        status(tr("Waiting for Android to install ${e.name}…", "Android'in ${e.name} uygulamasını yüklemesi bekleniyor…"))
     }
 
     /** From [InstallReceiver]. */
@@ -157,27 +163,34 @@ object Installer {
         if (c.entry.pkg != pkg) return
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                if (confirm == null) { finish(app, pkg, false, "Android didn't ask for confirmation"); return }
+                if (confirm == null) { finish(app, pkg, false, tr("Android didn't ask for confirmation", "Android onay istemedi")); return }
+                confirming = true
                 val l = listener
                 if (l != null) l.onConfirm(confirm)
                 else try { app.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
-                main.post { listener?.onStatus("Confirm the install of ${c.entry.name}") }
+                main.post { listener?.onStatus(tr("Confirm the install of ${c.entry.name}", "${c.entry.name} yüklemesini onaylayın")) }
             }
-            PackageInstaller.STATUS_SUCCESS -> finish(app, pkg, true, "Installed ${c.entry.versionName}")
-            PackageInstaller.STATUS_FAILURE_ABORTED -> finish(app, pkg, false, "Cancelled")
+            PackageInstaller.STATUS_SUCCESS -> finish(app, pkg, true, tr("Installed ${c.entry.versionName}", "${c.entry.versionName} yüklendi"))
+            PackageInstaller.STATUS_FAILURE_ABORTED -> finish(app, pkg, false, tr("Cancelled", "İptal edildi"))
+            // Play Protect (the package verifier) or a device policy refused it.
+            PackageInstaller.STATUS_FAILURE_BLOCKED ->
+                finish(app, pkg, false, tr("Blocked, likely by Play Protect", "Engellendi, büyük olasılıkla Play Protect"), blocked = true)
             PackageInstaller.STATUS_FAILURE_CONFLICT ->
-                finish(app, pkg, false, "Conflicts with the installed copy (signed differently?). Uninstall it first, then install.")
-            PackageInstaller.STATUS_FAILURE_STORAGE -> finish(app, pkg, false, "Not enough storage")
-            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> finish(app, pkg, false, "Not compatible with this phone")
-            else -> finish(app, pkg, false, message ?: "Install failed")
+                finish(app, pkg, false, tr("Conflicts with the installed copy (signed differently?). Uninstall it first, then install.",
+                    "Yüklü kopyayla çakışıyor (farklı imzalı olabilir). Önce onu kaldırın, sonra yükleyin."))
+            PackageInstaller.STATUS_FAILURE_STORAGE -> finish(app, pkg, false, tr("Not enough storage", "Yeterli depolama alanı yok"))
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> finish(app, pkg, false, tr("Not compatible with this phone", "Bu telefonla uyumlu değil"))
+            else -> finish(app, pkg, false, message ?: tr("Install failed", "Yükleme başarısız"),
+                blocked = message?.contains("VERIFICATION", ignoreCase = true) == true)
         }
     }
 
-    private fun finish(app: Context, pkg: String, ok: Boolean, msg: String) {
+    private fun finish(app: Context, pkg: String, ok: Boolean, msg: String, blocked: Boolean = false) {
         if (current?.entry?.pkg != pkg) return
         current = null
+        confirming = false
         File(app.cacheDir, "apks").listFiles()?.forEach { it.delete() }
-        listener?.onItemDone(pkg, ok, msg)
+        listener?.onItemDone(pkg, ok, msg, blocked)
         next(app)
     }
 }

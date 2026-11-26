@@ -73,6 +73,8 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -260,6 +262,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     // ================================================================== lifecycle
     override fun onCreate(b: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(b)
         prefs = getSharedPreferences("camera", MODE_PRIVATE)
         Jpeg.prefs = prefs
@@ -280,10 +283,17 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         if (secure) setShowWhenLocked(true)
         screenRatio = realScreenRatio()
         buildUi()
+        // back from a recreate (language change): reopen the panel that was showing once the camera is up
+        openPanel = b?.getString("panel")
         sound.load(MediaActionSound.SHUTTER_CLICK)
         profiles = Profiles.parse(prefs.getString("profiles", null))
         activeProfile = prefs.getString("profile", null)?.takeIf { Profiles.find(profiles, it) != null }
         if (!hasCam()) requestPermissions(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO), 1)
+    }
+
+    override fun onSaveInstanceState(out: Bundle) {
+        super.onSaveInstanceState(out)
+        out.putString("panel", openPanel)
     }
 
     override fun onResume() {
@@ -345,7 +355,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     override fun onRequestPermissionsResult(rc: Int, perms: Array<out String>, res: IntArray) {
         if (hasCam()) { hideMessage(); startCamera() }
-        else showMessage("Camera permission is needed.\nTap here to allow it.") {
+        else showMessage(tr("Camera permission is needed.\nTap here to allow it.", "Kamera izni gerekli.\nİzin vermek için buraya dokunun.")) {
             if (shouldShowRequestPermissionRationale(Manifest.permission.CAMERA))
                 requestPermissions(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO), 1)
             else startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
@@ -377,7 +387,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             closeCamera()
             stopAdvanced()
             idlePaused = true
-            showMessage("Paused to save battery.\nTap to continue.") { idlePaused = false; hideMessage(); startCamera(); syncAdvanced() }
+            showMessage(tr("Paused to save battery.\nTap to continue.", "Pil tasarrufu için duraklatıldı.\nDevam etmek için dokunun.")) { idlePaused = false; hideMessage(); startCamera(); syncAdvanced() }
         }
 
     }
@@ -453,8 +463,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             setPadding(dp(6), dp(4), dp(6), dp(4))
         }
         aspectSp = dropdown()
-        basicTab = label("BASIC", 13f).apply { setOnClickListener { setAdvanced(false) } }
-        advTab = label("ADVANCED", 13f).apply { setOnClickListener { setAdvanced(true) } }
+        basicTab = label(tr("BASIC", "TEMEL"), 13f).apply { setOnClickListener { setAdvanced(false) } }
+        advTab = label(tr("ADVANCED", "GELİŞMİŞ"), 13f).apply { setOnClickListener { setAdvanced(true) } }
         topBar.addView(aspectSp, LinearLayout.LayoutParams(-2, dp(44)))
         topBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         topBar.addView(basicTab, LinearLayout.LayoutParams(-2, dp(44)))
@@ -475,7 +485,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             setTextColor(ACCENT)
             background = outline(ACCENT, dp(10).toFloat(), dp(1))
             setPadding(dp(8), dp(2), dp(8), dp(2))
-            contentDescription = "Exposure locked. Tap to unlock."
+            contentDescription = tr("Exposure locked. Tap to unlock.", "Pozlama kilitli. Açmak için dokunun.")
             setOnClickListener { if (aeLocked) toggleLock() }
         }
         root.addView(lockTag, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { marginStart = dp(12) })
@@ -509,8 +519,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         chipScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chipRow) }
         bottomBar.addView(chipScroll, LinearLayout.LayoutParams(-1, -2))
         val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        photoTab = label("PHOTO", 13f).apply { setOnClickListener { setMode(Mode.PHOTO) } }
-        videoTab = label("VIDEO", 13f).apply { setOnClickListener { setMode(Mode.VIDEO) } }
+        photoTab = label(tr("PHOTO", "FOTOĞRAF"), 13f).apply { setOnClickListener { setMode(Mode.PHOTO) } }
+        videoTab = label(tr("VIDEO", "VİDEO"), 13f).apply { setOnClickListener { setMode(Mode.VIDEO) } }
         tabs.addView(photoTab)
         tabs.addView(videoTab)
         bottomBar.addView(tabs, LinearLayout.LayoutParams(-1, -2))
@@ -519,11 +529,11 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = ring(BTN_LINE, dp(1))
             clipToOutline = true
-            contentDescription = "Last capture"
+            contentDescription = tr("Last capture", "Son çekim")
             setOnClickListener { openLast() }
         }
         shutter = ShutterButton(this).apply { setOnClickListener { onShutter() } }
-        flipBtn = label("Flip", 13f).apply {
+        flipBtn = label(tr("Flip", "Çevir"), 13f).apply {
             background = ring(BTN_LINE, dp(1))
             setOnClickListener { flip() }
         }
@@ -671,7 +681,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             startActivity(Intent(view).setPackage(GALLERY_PKG).putExtra(EXTRA_CAMERA_ROLL, true))
             return
         } catch (_: Exception) {}
-        try { startActivity(view) } catch (_: Exception) { toast("No gallery app found.") }
+        try { startActivity(view) } catch (_: Exception) { toast(tr("No gallery app found.", "Galeri uygulaması bulunamadı.")) }
     }
 
     private fun shutterFeedback(what: Int) {
@@ -734,7 +744,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             else -> sizeList.firstOrNull()
         } ?: Dim(1280, 720)
         previewDim = Sizes.preview(previewSizes, size.ratio) ?: Dim(1280, 720)
-        setItems(aspectSp, aspects.map { it.label }, aspects.indexOf(aspect))
+        setItems(aspectSp, aspects.map { it.display }, aspects.indexOf(aspect))
     }
 
     private fun reconfigure() {
@@ -820,11 +830,11 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             (if (!front && advanced && adv.lens > 0) camerasFacing(facing).getOrNull(adv.lens) else null)
                 ?: pickCamera(facing) ?: pickCamera(if (front) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT)
         } catch (e: Exception) { null }
-        if (id == null) { showMessage("No camera found."); return }
+        if (id == null) { showMessage(tr("No camera found.", "Kamera bulunamadı.")); return }
         try {
             loadCamera(id)
             facing = cm.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ?: facing
-        } catch (e: Exception) { showMessage("Can't read the camera: ${e.message}"); return }
+        } catch (e: Exception) { showMessage(tr("Can't read the camera: ${e.message}", "Kamera okunamıyor: ${e.message}")); return }
         flipBtn.visibility = if (pickCamera(CameraCharacteristics.LENS_FACING_FRONT) != null && pickCamera(CameraCharacteristics.LENS_FACING_BACK) != null) View.VISIBLE else View.INVISIBLE
         chooseSizes()
         layoutPreview()
@@ -837,7 +847,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             opening = false
         } catch (e: Exception) {
             opening = false
-            showMessage("Can't open the camera:\n${e.message}")
+            showMessage(tr("Can't open the camera:\n${e.message}", "Kamera açılamıyor:\n${e.message}"))
         }
     }
 
@@ -860,8 +870,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             opening = false
             d.close()
             if (device === d) { device = null; session = null }
-            showMessage(if (error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE) "Another app is using the camera.\nTap to try again."
-            else "The camera stopped (error $error).\nTap to try again.") { hideMessage(); startCamera() }
+            showMessage(if (error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE)
+                tr("Another app is using the camera.\nTap to try again.", "Kamerayı başka bir uygulama kullanıyor.\nTekrar denemek için dokunun.")
+            else tr("The camera stopped (error $error).\nTap to try again.", "Kamera durdu (hata $error).\nTekrar denemek için dokunun.")) { hideMessage(); startCamera() }
         }
     }
 
@@ -924,10 +935,10 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 override fun onConfigureFailed(s: CameraCaptureSession) {
                     s.close()
                     if (recorder != null) abortRecording()
-                    toast("This camera can't use ${size.w}×${size.h} here. Pick another size.")
+                    toast(tr("This camera can't use ${size.w}×${size.h} here. Pick another size.", "Bu kamera burada ${size.w}×${size.h} kullanamıyor. Başka bir boyut seçin."))
                 }
             })
-        try { d.createCaptureSession(cfg) } catch (e: Exception) { toast("Camera setup failed: ${e.message}") }
+        try { d.createCaptureSession(cfg) } catch (e: Exception) { toast(tr("Camera setup failed: ${e.message}", "Kamera kurulamadı: ${e.message}")) }
     }
 
     private fun common(b: CaptureRequest.Builder) {
@@ -1184,7 +1195,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             // steady shutter: wait (at most 1 s) for the phone to stop moving
             if (eff.steady && sensorsOn && shake > Advisor.STILL && session != null) {
                 steadyWaiting = true
-                showHint("Hold still…")
+                showHint(tr("Hold still…", "Sabit tutun…"))
                 main.postDelayed(steadyTimeout, 1000)
                 return
             }
@@ -1253,7 +1264,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 override fun onCaptureFailed(s: CameraCaptureSession, req: CaptureRequest, f: CaptureFailure) {
                     synchronized(shots) { shots.remove(shot) }
                     callerBusy = false
-                    toast("The photo failed. Try again.")
+                    toast(tr("The photo failed. Try again.", "Fotoğraf çekilemedi. Tekrar deneyin."))
                 }
             }, main)
             shutterFeedback(MediaActionSound.SHUTTER_CLICK)
@@ -1261,7 +1272,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: Exception) {
             synchronized(shots) { shots.remove(shot) }
             callerBusy = false
-            toast("The photo failed: ${e.message}")
+            toast(tr("The photo failed: ${e.message}", "Fotoğraf çekilemedi: ${e.message}"))
         }
     }
 
@@ -1284,7 +1295,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             val bmp = Media.thumb(this, uri, dp(96))
             runOnUiThread { lastUri = uri; lastVideo = false; thumb.setImageBitmap(bmp); updateUi() }
         } catch (e: Exception) {
-            runOnUiThread { toast("Couldn't save the photo: ${e.message}") }
+            runOnUiThread { toast(tr("Couldn't save the photo: ${e.message}", "Fotoğraf kaydedilemedi: ${e.message}")) }
         }
     }
 
@@ -1297,7 +1308,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             else result.putExtra("data", Jpeg.small(jpeg, 320))
             runOnUiThread { setResult(RESULT_OK, result); finish() }
         } catch (e: Exception) {
-            runOnUiThread { callerBusy = false; toast("Couldn't hand the photo over: ${e.message}") }
+            runOnUiThread { callerBusy = false; toast(tr("Couldn't hand the photo over: ${e.message}", "Fotoğraf iletilemedi: ${e.message}")) }
         }
     }
 
@@ -1314,7 +1325,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             pfd = (try { contentResolver.openFileDescriptor(uri, "rw") } catch (_: Exception) { null }
                 ?: contentResolver.openFileDescriptor(uri, "w"))!!
         } catch (e: Exception) {
-            toast("Can't create the video file: ${e.message}")
+            toast(tr("Can't create the video file: ${e.message}", "Video dosyası oluşturulamıyor: ${e.message}"))
             return
         }
         @Suppress("DEPRECATION")
@@ -1350,7 +1361,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             rec.release()
             try { pfd.close() } catch (_: Exception) {}
             if (owned) Media.delete(this, uri)
-            toast("Can't record at ${size.w}×${size.h}: ${e.message}")
+            toast(tr("Can't record at ${size.w}×${size.h}: ${e.message}", "${size.w}×${size.h} kaydedilemiyor: ${e.message}"))
             return
         }
         recorder = rec
@@ -1369,7 +1380,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 timer.visibility = View.VISIBLE
                 tick.run()
             } catch (e: Exception) {
-                toast("Recording didn't start: ${e.message}")
+                toast(tr("Recording didn't start: ${e.message}", "Kayıt başlamadı: ${e.message}"))
                 abortRecording()
             }
         }
@@ -1416,8 +1427,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 finish()
                 return
             }
-            toast("The video was too short.")
-        } else if (!ok) toast("The video was too short to keep.")
+            toast(tr("The video was too short.", "Video çok kısaydı."))
+        } else if (!ok) toast(tr("The video was too short to keep.", "Video saklamak için çok kısaydı."))
         updateUi()
         if (reopen && device != null) createSession()
     }
@@ -1493,21 +1504,22 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             c.isEnabled = !locked
             c.chipState(on && !dim, openPanel == k, !dim && !locked)
         }
-        set("Profiles", true, activeProfile ?: "Profiles", activeProfile != null, locked = recording)
+        set("Profiles", true, activeProfile ?: tr("Profiles", "Profiller"), activeProfile != null, locked = recording)
         set("EV", evRange != null, if (a.ev == 0) "EV" else "EV ${Adv.evLabel(a.ev)}", a.ev != 0, dim = manualExp)
         set("ISO", manOk, if (a.iso == 0) "ISO" else "ISO ${a.iso}", a.iso > 0)
-        set("Shutter", manOk, if (a.shutterNs == 0L) "Shutter" else Adv.shutterLabel(a.shutterNs), a.shutterNs > 0)
+        set("Shutter", manOk, if (a.shutterNs == 0L) tr("Shutter", "Enstantane") else Adv.shutterLabel(a.shutterNs), a.shutterNs > 0)
         set("WB", awbModes.size > 1, if (a.wb == Adv.WB_AUTO) "WB" else Adv.wbLabel(a), a.wb != Adv.WB_AUTO)
-        set("Focus", manualFocusOk, if (a.manualFocus) "MF ${Adv.focusLabel(a.focus, minFocus)}" else "Focus", a.manualFocus)
-        set("Tone", curvePoints >= 2 || nrModes.size > 1 || edgeModes.size > 1, "Tone", a.toneSet || a.sharpen != 0 || a.noise != 0)
-        set("Look", true, if (a.look.neutral) "Look" else Look.name(a.look), !a.look.neutral, dim = video)
+        set("Focus", manualFocusOk, if (a.manualFocus) "MF ${Adv.focusLabel(a.focus, minFocus)}" else tr("Focus", "Odak"), a.manualFocus)
+        set("Tone", curvePoints >= 2 || nrModes.size > 1 || edgeModes.size > 1, tr("Tone", "Ton"), a.toneSet || a.sharpen != 0 || a.noise != 0)
+        set("Look", true, if (a.look.neutral) tr("Look", "Görünüm") else Look.name(a.look), !a.look.neutral, dim = video)
         val sc = sceneOptions()
-        set("Scene", sc.size > 1, sc.firstOrNull { it.second == a.scene && it.second != 0 }?.first ?: "Scene", a.scene != 0,
+        set("Scene", sc.size > 1, sc.firstOrNull { it.second == a.scene && it.second != 0 }?.first ?: tr("Scene", "Sahne"), a.scene != 0,
             dim = a.scene != 0 && (manualExp || a.wb != Adv.WB_AUTO))
-        set("Guides", true, "Guides", a.grid != 0 || a.faces || a.steady)
+        set("Guides", true, tr("Guides", "Kılavuzlar"), a.grid != 0 || a.faces || a.steady)
         set("Quality", true, qualityLabel(), false, locked = recording)
-        set("Flash", hasFlash, if (video) (if (flash == 1) "Torch" else "Torch off") else arrayOf("Flash off", "Flash auto", "Flash on")[flash.coerceIn(0, 2)], flash > 0)
-        set("Lens", !front && backIds.size > 1, if (a.lens == 0) "Main lens" else "Lens ${a.lens + 1}", a.lens > 0, locked = recording)
+        set("Flash", hasFlash, if (video) (if (flash == 1) tr("Torch", "Fener") else tr("Torch off", "Fener kapalı"))
+            else arrayOf(tr("Flash off", "Flaş kapalı"), tr("Flash auto", "Flaş otomatik"), tr("Flash on", "Flaş açık"))[flash.coerceIn(0, 2)], flash > 0)
+        set("Lens", !front && backIds.size > 1, if (a.lens == 0) tr("Main lens", "Ana lens") else "Lens ${a.lens + 1}", a.lens > 0, locked = recording)
     }
 
     /** Opens the option rows for one chip (or closes them with null). */
@@ -1525,30 +1537,33 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         val video = mode == Mode.VIDEO
         val add = { v: View -> panel.addView(v, LinearLayout.LayoutParams(-1, -2)) }
         when (key) {
-            "EV" -> if (manualExp) add(noteRow("EV works with automatic exposure. Set ISO and Shutter back to Auto to use it."))
+            "EV" -> if (manualExp) add(noteRow(tr("EV works with automatic exposure. Set ISO and Shutter back to Auto to use it.",
+                "EV otomatik pozlamayla çalışır. Kullanmak için ISO ve Enstantane'yi Otomatik'e döndürün.")))
             else {
                 add(sliderRow("EV", -6, 6, Adv.evPos(a.ev), { Adv.evLabel(Adv.evTenths(it)) },
                     { p -> setAdv(adv.copy(ev = Adv.evTenths(p)), rebuild = false) }, { setAdv(adv.copy(ev = 0)) }))
-                if (aeLockOk) add(noteRow("Hold the preview to lock exposure and white balance (AE-L). Hold again, or tap the AE-L tag, to unlock. A tap only locks focus."))
+                if (aeLockOk) add(noteRow(tr("Hold the preview to lock exposure and white balance (AE-L). Hold again, or tap the AE-L tag, to unlock. A tap only locks focus.",
+                    "Pozlamayı ve beyaz dengesini kilitlemek için önizlemeyi basılı tutun (AE-L). Açmak için yine basılı tutun veya AE-L etiketine dokunun. Dokunmak yalnızca odağı kilitler.")))
             }
             "ISO" -> {
                 val r = isoRange!!
                 val ch = Adv.isoChoices(r.lower, r.upper)
-                add(optionRow("ISO", listOf("Auto") + ch.map { "$it" }, { i -> if (i == 0) a.iso == 0 else ch[i - 1] == a.iso }) { i ->
+                add(optionRow("ISO", listOf(tr("Auto", "Otomatik")) + ch.map { "$it" }, { i -> if (i == 0) a.iso == 0 else ch[i - 1] == a.iso }) { i ->
                     setAdv(adv.copy(iso = if (i == 0) 0 else ch[i - 1], scene = 0))
                 })
-                add(noteRow(if (a.iso >= 1600) "High ISO: brighter but grainier." else "Set ISO or Shutter alone and the other follows the light. Both set = full manual."))
+                add(noteRow(if (a.iso >= 1600) tr("High ISO: brighter but grainier.", "Yüksek ISO: daha parlak ama daha kumlu.")
+                else tr("Set ISO or Shutter alone and the other follows the light. Both set = full manual.", "Yalnız ISO'yu veya Enstantane'yi ayarlayın, diğeri ışığa uyar. İkisi de ayarlı = tam manuel.")))
             }
             "Shutter" -> {
                 val r = nsRange!!
                 val ch = Adv.shutterChoices(r.lower, r.upper, video)
-                add(optionRow("Shutter", listOf("Auto") + ch.map { Adv.shutterLabel(it) }, { i -> if (i == 0) a.shutterNs == 0L else ch[i - 1] == a.shutterNs }) { i ->
+                add(optionRow(tr("Shutter", "Enstantane"), listOf(tr("Auto", "Otomatik")) + ch.map { Adv.shutterLabel(it) }, { i -> if (i == 0) a.shutterNs == 0L else ch[i - 1] == a.shutterNs }) { i ->
                     setAdv(adv.copy(shutterNs = if (i == 0) 0L else ch[i - 1], scene = 0))
                 })
                 add(noteRow(when {
-                    a.shutterNs >= 125_000_000L -> "Slow shutter: rest the phone on something or use Steady shutter (Guides)."
-                    video -> "Video can't go slower than 1/30."
-                    else -> "Fast speeds freeze motion; slow ones let in more light but blur movement."
+                    a.shutterNs >= 125_000_000L -> tr("Slow shutter: rest the phone on something or use Steady shutter (Guides).", "Yavaş enstantane: telefonu bir yere dayayın veya Sabit deklanşör kullanın (Kılavuzlar).")
+                    video -> tr("Video can't go slower than 1/30.", "Video 1/30'dan yavaş olamaz.")
+                    else -> tr("Fast speeds freeze motion; slow ones let in more light but blur movement.", "Hızlı enstantane hareketi dondurur; yavaşı daha çok ışık alır ama hareketi bulanıklaştırır.")
                 }))
             }
             "WB" -> {
@@ -1561,13 +1576,14 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                     { p -> setAdv(adv.copy(kelvin = p * 100), rebuild = false) }, { setAdv(adv.copy(kelvin = 5500)) }))
             }
             "Focus" -> {
-                add(optionRow("Focus", listOf("Auto", "Manual"), { i -> (i == 1) == a.manualFocus }) { i ->
+                add(optionRow(tr("Focus", "Odak"), listOf(tr("Auto", "Otomatik"), tr("Manual", "Manuel")), { i -> (i == 1) == a.manualFocus }) { i ->
                     setAdv(adv.copy(focus = if (i == 0) -1f else if (a.manualFocus) a.focus else 0f))
                 })
-                if (a.manualFocus) add(sliderRow("Distance", 0, 100, (a.focus * 100).roundToInt(), { Adv.focusLabel(it / 100f, minFocus) },
+                if (a.manualFocus) add(sliderRow(tr("Distance", "Mesafe"), 0, 100, (a.focus * 100).roundToInt(), { Adv.focusLabel(it / 100f, minFocus) },
                     { p -> setAdv(adv.copy(focus = p / 100f), rebuild = false) }, null))
-                add(noteRow(if (a.manualFocus) "Manual focus overrides tap focus; a tap only meters there."
-                else "Tap the preview to focus there and lock it (AF-L): it stays even if you move. Tap the square again for continuous auto focus."))
+                add(noteRow(if (a.manualFocus) tr("Manual focus overrides tap focus; a tap only meters there.", "Manuel odak dokunarak odaklamanın yerine geçer; dokunmak yalnızca orada ölçüm yapar.")
+                else tr("Tap the preview to focus there and lock it (AF-L): it stays even if you move. Tap the square again for continuous auto focus.",
+                    "Oraya odaklayıp kilitlemek için önizlemeye dokunun (AF-L): hareket etseniz de kalır. Sürekli otomatik odak için kareye yine dokunun.")))
             }
             "Tone" -> {
                 val params = buildList {
@@ -1576,21 +1592,28 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                     if (nrModes.size > 1) add("Noise")
                 }
                 toneParam = toneParam.coerceIn(0, params.size - 1)
-                add(optionRow("", params, { it == toneParam }) { i -> toneParam = i; showPanel("Tone") })
+                // params are keys; the buttons show their names in the app language
+                fun toneName(p: String) = when (p) {
+                    "Contrast" -> tr("Contrast", "Kontrast"); "Shadows" -> tr("Shadows", "Gölgeler")
+                    "Sharpen" -> tr("Sharpen", "Keskinlik"); else -> tr("Noise", "Gürültü")
+                }
+                add(optionRow("", params.map(::toneName), { it == toneParam }) { i -> toneParam = i; showPanel("Tone") })
                 when (params.getOrNull(toneParam)) {
-                    "Contrast" -> add(sliderRow("Contrast", -100, 100, a.contrast, ::signed, { p -> setAdv(adv.copy(contrast = p), rebuild = false) }, { setAdv(adv.copy(contrast = 0)) }))
-                    "Shadows" -> add(sliderRow("Shadows", -100, 100, a.shadows, ::signed, { p -> setAdv(adv.copy(shadows = p), rebuild = false) }, { setAdv(adv.copy(shadows = 0)) }))
-                    "Sharpen" -> add(optionRow("Sharpen", Adv.LEVELS, { it == a.sharpen }) { i -> setAdv(adv.copy(sharpen = i)) })
-                    "Noise" -> add(optionRow("Noise red.", Adv.LEVELS, { it == a.noise }) { i -> setAdv(adv.copy(noise = i)) })
+                    "Contrast" -> add(sliderRow(tr("Contrast", "Kontrast"), -100, 100, a.contrast, ::signed, { p -> setAdv(adv.copy(contrast = p), rebuild = false) }, { setAdv(adv.copy(contrast = 0)) }))
+                    "Shadows" -> add(sliderRow(tr("Shadows", "Gölgeler"), -100, 100, a.shadows, ::signed, { p -> setAdv(adv.copy(shadows = p), rebuild = false) }, { setAdv(adv.copy(shadows = 0)) }))
+                    "Sharpen" -> add(optionRow(tr("Sharpen", "Keskinlik"), Adv.LEVELS, { it == a.sharpen }) { i -> setAdv(adv.copy(sharpen = i)) })
+                    "Noise" -> add(optionRow(tr("Noise red.", "Gürültü az."), Adv.LEVELS, { it == a.noise }) { i -> setAdv(adv.copy(noise = i)) })
                 }
             }
-            "Look" -> if (video) add(noteRow("Look is for photos only. In video, use WB, EV and Tone (contrast, shadows): they work while recording."))
+            "Look" -> if (video) add(noteRow(tr("Look is for photos only. In video, use WB, EV and Tone (contrast, shadows): they work while recording.",
+                "Görünüm yalnızca fotoğraf içindir. Videoda WB, EV ve Ton (kontrast, gölgeler) kullanın: kayıt sırasında da çalışırlar.")))
             else {
-                add(optionRow("Look", Look.PRESETS.map { it.first }, { i -> Look.PRESETS[i].second == a.look }) { i ->
-                    val l = Look.PRESETS[i].second
+                val presets = Look.PRESETS
+                add(optionRow(tr("Look", "Görünüm"), presets.map { it.first }, { i -> presets[i].second == a.look }) { i ->
+                    val l = presets[i].second
                     setAdv(adv.copy(sat = l.sat, warmth = l.warmth, tint = l.tint, vibrance = l.vibrance), Apply.UI)
                 })
-                val params = listOf("Saturation", "Warmth", "Tint", "Vibrance")
+                val params = listOf(tr("Saturation", "Doygunluk"), tr("Warmth", "Sıcaklık"), tr("Tint", "Renk tonu"), tr("Vibrance", "Canlılık"))
                 add(optionRow("", params, { it == lookParam }) { i -> lookParam = i; showPanel("Look") })
                 val v = when (lookParam) { 0 -> a.sat; 1 -> a.warmth; 2 -> a.tint; else -> a.vibrance }
                 fun with(p: Int) = when (lookParam) { 0 -> adv.copy(sat = p); 1 -> adv.copy(warmth = p); 2 -> adv.copy(tint = p); else -> adv.copy(vibrance = p) }
@@ -1598,19 +1621,25 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             }
             "Scene" -> {
                 val sc = sceneOptions()
-                add(optionRow("Scene", sc.map { it.first }, { i -> sc[i].second == a.scene }) { i ->
+                add(optionRow(tr("Scene", "Sahne"), sc.map { it.first }, { i -> sc[i].second == a.scene }) { i ->
                     val s = sc[i].second
                     setAdv(if (s == 0) adv.copy(scene = 0) else adv.copy(scene = s, iso = 0, shutterNs = 0L, wb = Adv.WB_AUTO))
                 })
-                add(noteRow("Scene modes are hints to the phone's own processing; how much they change depends on the phone. They replace manual ISO, Shutter and WB."))
+                add(noteRow(tr("Scene modes are hints to the phone's own processing; how much they change depends on the phone. They replace manual ISO, Shutter and WB.",
+                    "Sahne modları telefonun kendi işlemesine ipucudur; ne kadar değiştirdikleri telefona bağlıdır. Manuel ISO, Enstantane ve WB'nin yerini alırlar.")))
             }
             "Guides" -> {
-                add(optionRow("Grid", Adv.GRIDS, { it == a.grid }) { i -> setAdv(adv.copy(grid = i), Apply.UI) })
+                add(optionRow(tr("Grid", "Izgara"), Adv.GRIDS, { it == a.grid }) { i -> setAdv(adv.copy(grid = i), Apply.UI) })
                 val toggles = buildList {
                     add("Level"); if (faceSimple) add("Faces"); add("Hints"); if (mode == Mode.PHOTO) add("Steady shutter")
                 }
                 fun isOn(t: String) = when (t) { "Level" -> a.level; "Faces" -> a.faces; "Hints" -> a.hints; else -> a.steady }
-                add(optionRow("Show", toggles, { isOn(toggles[it]) }) { i ->
+                // toggles are keys; the buttons show their names in the app language
+                fun toggleName(t: String) = when (t) {
+                    "Level" -> tr("Level", "Seviye"); "Faces" -> tr("Faces", "Yüzler")
+                    "Hints" -> tr("Hints", "İpuçları"); else -> tr("Steady shutter", "Sabit deklanşör")
+                }
+                add(optionRow(tr("Show", "Göster"), toggles.map(::toggleName), { isOn(toggles[it]) }) { i ->
                     setAdv(when (toggles[i]) {
                         "Level" -> adv.copy(level = !a.level)
                         "Faces" -> adv.copy(faces = !a.faces)
@@ -1618,10 +1647,11 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                         else -> adv.copy(steady = !a.steady)
                     })
                 })
-                add(noteRow("Hints: offline advice about light, shake, tilt and faces. The dot on the shutter turns green when it's a good moment."))
+                add(noteRow(tr("Hints: offline advice about light, shake, tilt and faces. The dot on the shutter turns green when it's a good moment.",
+                    "İpuçları: ışık, titreme, eğiklik ve yüzler hakkında çevrimdışı öneriler. Doğru anda deklanşördeki nokta yeşile döner.")))
             }
             "Quality" -> {
-                add(optionRow("Size", sizeList.map { if (mode == Mode.PHOTO) Sizes.photoLabel(it) else Sizes.videoLabel(it) }, { sizeList[it] == size }) { i ->
+                add(optionRow(tr("Size", "Boyut"), sizeList.map { if (mode == Mode.PHOTO) Sizes.photoLabel(it) else Sizes.videoLabel(it) }, { sizeList[it] == size }) { i ->
                     val s = sizeList[i]
                     if (s != size && !recording) {
                         prefs.edit().putString(sizeKey(aspect), s.toString()).apply()
@@ -1630,46 +1660,52 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                     }
                 })
                 if (mode == Mode.PHOTO) add(optionRow("JPEG", Adv.JPEG.map { "$it" }, { Adv.JPEG[it] == a.jpeg }) { i -> setAdv(adv.copy(jpeg = Adv.JPEG[i]), Apply.UI) })
-                else add(optionRow("Bitrate", listOf("Standard", "High"), { (it == 1) == a.bitrateHigh }) { i -> setAdv(adv.copy(bitrateHigh = i == 1), Apply.UI) })
-                add(optionRow("", listOf("Reset all Advanced settings"), { false }) {
+                else add(optionRow(tr("Bitrate", "Bit hızı"), listOf(tr("Standard", "Standart"), tr("High", "Yüksek")), { (it == 1) == a.bitrateHigh }) { i -> setAdv(adv.copy(bitrateHigh = i == 1), Apply.UI) })
+                add(optionRow("", listOf(tr("Reset all Advanced settings", "Tüm Gelişmiş ayarları sıfırla")), { false }) {
                     val lens = adv.lens
                     aeLocked = false
                     setAdv(Adv(), if (lens != 0 && !front) Apply.RESTART else Apply.CAMERA)
-                    toast("Advanced settings reset.")
+                    toast(tr("Advanced settings reset.", "Gelişmiş ayarlar sıfırlandı."))
                 })
+                // language: a dropdown under the row; the activity is recreated and comes back to this panel
+                lateinit var langRow: View
+                langRow = optionRow("", listOf(PlainLang.label()), { false }) { if (!recording) PlainLang.choose(this, langRow) }
+                add(langRow)
                 add(optionRow("", listOf(PlainUpdate.label(this)), { false }) { PlainUpdate.check(this) })
             }
             "Flash" -> {
-                val labels = if (video) listOf("Off", "Torch") else listOf("Off", "Auto", "On")
-                add(optionRow("Flash", labels, { it == flash }) { i -> setFlash(i); showPanel("Flash") })
+                val labels = if (video) listOf(tr("Off", "Kapalı"), tr("Torch", "Fener")) else listOf(tr("Off", "Kapalı"), tr("Auto", "Otomatik"), tr("On", "Açık"))
+                add(optionRow(tr("Flash", "Flaş"), labels, { it == flash }) { i -> setFlash(i); showPanel("Flash") })
                 // strength: Android 15+ and a flash with levels; shown for On (photo) and Torch (video)
                 val max = if (video) torchMax else singleMax
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM && max > 1 && flash == (if (video) 1 else 2)) {
                     val def = if (video) torchDef else singleDef
-                    add(sliderRow("Strength", 1, max, Adv.flashLevel(a.flashPct, max, def), { "$it/$max" },
+                    add(sliderRow(tr("Strength", "Güç"), 1, max, Adv.flashLevel(a.flashPct, max, def), { "$it/$max" },
                         { p -> setAdv(adv.copy(flashPct = Adv.flashPct(p, max)), rebuild = false) }, { setAdv(adv.copy(flashPct = 0)) }))
                     add(noteRow(when {
-                        a.flashPct == 0 -> "Strength: the phone's default. Move the slider to set your own."
-                        video || manualExp -> "Reset = the phone's default strength."
-                        else -> "A set strength fires a plain flash at that level (no pre-flash metering). Reset = the phone's own flash metering."
+                        a.flashPct == 0 -> tr("Strength: the phone's default. Move the slider to set your own.", "Güç: telefonun varsayılanı. Kendiniz ayarlamak için kaydırıcıyı oynatın.")
+                        video || manualExp -> tr("Reset = the phone's default strength.", "Sıfırla = telefonun varsayılan gücü.")
+                        else -> tr("A set strength fires a plain flash at that level (no pre-flash metering). Reset = the phone's own flash metering.",
+                            "Ayarlı güç, o seviyede düz bir flaş patlatır (ön flaş ölçümü yok). Sıfırla = telefonun kendi flaş ölçümü.")
                     }))
                 }
-                if (manualExp && !video) add(noteRow("With manual exposure, Auto flash is off and On fires a plain flash."))
+                if (manualExp && !video) add(noteRow(tr("With manual exposure, Auto flash is off and On fires a plain flash.", "Manuel pozlamada otomatik flaş kapalıdır, Açık düz bir flaş patlatır.")))
             }
             "Profiles" -> {
-                if (profiles.isNotEmpty()) add(optionRow("Load", profiles.map { it.name }, { profiles[it].name == activeProfile },
+                if (profiles.isNotEmpty()) add(optionRow(tr("Load", "Yükle"), profiles.map { it.name }, { profiles[it].name == activeProfile },
                     onHold = { i -> profileOptions(profiles[i].name) }) { i -> loadProfile(profiles[i]) })
                 val act = activeProfile
-                val acts = listOf("Save as…") + if (act != null) listOf("Overwrite “$act”") else emptyList()
+                val acts = listOf(tr("Save as…", "Farklı kaydet…")) + if (act != null) listOf(tr("Overwrite “$act”", "“$act” üzerine yaz")) else emptyList()
                 add(optionRow("", acts, { false }) { i -> if (i == 0) saveProfileAs() else if (act != null) overwriteProfile(act) })
-                add(noteRow(if (profiles.isEmpty()) "A profile keeps the Advanced settings, flash, aspect, size and photo / video. Save as… to make one."
-                else "Tap a profile to load it. Hold one to rename or delete it."))
+                add(noteRow(if (profiles.isEmpty()) tr("A profile keeps the Advanced settings, flash, aspect, size and photo / video. Save as… to make one.",
+                    "Profil; Gelişmiş ayarları, flaşı, en-boy oranını, boyutu ve fotoğraf / videoyu saklar. Oluşturmak için Farklı kaydet…")
+                else tr("Tap a profile to load it. Hold one to rename or delete it.", "Yüklemek için profile dokunun. Yeniden adlandırmak veya silmek için basılı tutun.")))
             }
             "Lens" -> {
                 val labels = backIds.mapIndexed { i, id ->
                     val px = try { cm.getCameraCharacteristics(id).get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE) } catch (_: Exception) { null }
                     val mp = px?.let { " · ${((it.width.toLong() * it.height) / 1_000_000.0).roundToInt()} MP" } ?: ""
-                    (if (i == 0) "Main" else "Lens ${i + 1}") + mp
+                    (if (i == 0) tr("Main", "Ana") else "Lens ${i + 1}") + mp
                 }
                 add(optionRow("Lens", labels, { it == a.lens }) { i -> if (i != a.lens && !recording) setAdv(adv.copy(lens = i), Apply.RESTART) })
             }
@@ -1704,43 +1740,43 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         activeProfile = name
         saveProfiles()
         showPanel("Profiles")
-        toast("Profile “$name” saved.")
+        toast(tr("Profile “$name” saved.", "“$name” profili kaydedildi."))
     }
 
     private fun saveProfileAs() {
-        askName("Save profile", "") { n ->
+        askName(tr("Save profile", "Profili kaydet"), "") { n ->
             val old = Profiles.find(profiles, n)
             if (old == null) storeProfile(n) else overwriteProfile(old.name)
         }
     }
 
     private fun overwriteProfile(name: String) {
-        AlertDialog.Builder(this).setTitle("Overwrite “$name”?")
-            .setMessage("It gets the current settings.")
-            .setPositiveButton("Overwrite") { _, _ -> storeProfile(name) }
-            .setNegativeButton("Cancel", null)
+        AlertDialog.Builder(this).setTitle(tr("Overwrite “$name”?", "“$name” üzerine yazılsın mı?"))
+            .setMessage(tr("It gets the current settings.", "Geçerli ayarları alır."))
+            .setPositiveButton(tr("Overwrite", "Üzerine yaz")) { _, _ -> storeProfile(name) }
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 
     /** Hold a profile: rename or delete it. */
     private fun profileOptions(name: String) {
         AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf("Rename", "Delete")) { _, w ->
-                if (w == 0) askName("Rename profile", name) { n ->
-                    val l = Profiles.rename(profiles, name, n) ?: run { toast("There is already a profile called “$n”."); return@askName }
+            .setItems(arrayOf(tr("Rename", "Yeniden adlandır"), tr("Delete", "Sil"))) { _, w ->
+                if (w == 0) askName(tr("Rename profile", "Profili yeniden adlandır"), name) { n ->
+                    val l = Profiles.rename(profiles, name, n) ?: run { toast(tr("There is already a profile called “$n”.", "“$n” adında bir profil zaten var.")); return@askName }
                     profiles = l
                     if (activeProfile.equals(name, ignoreCase = true)) activeProfile = n
                     saveProfiles()
                     showPanel("Profiles")
-                } else AlertDialog.Builder(this).setTitle("Delete “$name”?")
-                    .setMessage("Only the profile goes; the current settings stay as they are.")
-                    .setPositiveButton("Delete") { _, _ ->
+                } else AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
+                    .setMessage(tr("Only the profile goes; the current settings stay as they are.", "Yalnızca profil silinir; geçerli ayarlar olduğu gibi kalır."))
+                    .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
                         profiles = Profiles.remove(profiles, name)
                         if (activeProfile.equals(name, ignoreCase = true)) activeProfile = null
                         saveProfiles()
                         showPanel("Profiles")
                     }
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton(tr("Cancel", "İptal"), null)
                     .show()
             }
             .show()
@@ -1772,7 +1808,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         updateUi()
         syncAdvanced()
         showPanel("Profiles")
-        toast("Profile “${p.name}” loaded.")
+        toast(tr("Profile “${p.name}” loaded.", "“${p.name}” profili yüklendi."))
     }
 
     /** A one-line name dialog (OK only with a usable name). */
@@ -1782,15 +1818,15 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             isSingleLine = true
             setText(initial)
             setSelection(text.length)
-            hint = "Name"
+            hint = tr("Name", "Ad")
             setTextColor(TEXT)
             setHintTextColor(LABEL)
             filters = arrayOf(android.text.InputFilter.LengthFilter(Profiles.MAX_NAME))
         }
         val box = FrameLayout(this).apply { setPadding(dp(22), dp(8), dp(22), 0); addView(e) }
         AlertDialog.Builder(this).setTitle(title).setView(box)
-            .setPositiveButton("OK") { _, _ -> Profiles.cleanName(e.text.toString())?.let(done) }
-            .setNegativeButton("Cancel", null)
+            .setPositiveButton(tr("OK", "Tamam")) { _, _ -> Profiles.cleanName(e.text.toString())?.let(done) }
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 

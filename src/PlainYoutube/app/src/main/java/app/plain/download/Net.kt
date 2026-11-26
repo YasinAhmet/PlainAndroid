@@ -10,9 +10,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import app.plain.lang.tr
 
-class NoWifi : IOException("Not on Wi-Fi (Wi-Fi only is on)")
-class Expired : IOException("Stream link expired or refused (HTTP 403)")
+class NoWifi : IOException(tr("Not on Wi-Fi (Wi-Fi only is on)", "Wi-Fi bağlı değil (Yalnızca Wi-Fi açık)"))
+class Expired : IOException(tr("Stream link expired or refused (HTTP 403)", "Akış bağlantısının süresi doldu ya da reddedildi (HTTP 403)"))
 class Cancelled : IOException("Cancelled")
 
 object Net {
@@ -25,7 +26,7 @@ object Net {
         val active = cm.activeNetwork
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         if (!wifiOnly) {
-            if (active == null || caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) throw IOException("No network")
+            if (active == null || caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) throw IOException(tr("No network", "Ağ yok"))
             return null
         }
         if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return active // also a VPN running over Wi-Fi
@@ -56,7 +57,7 @@ object Net {
             val n = s.read(buf)
             if (n < 0) break
             out.write(buf, 0, n)
-            if (out.size() > limit) throw IOException("Answer too large")
+            if (out.size() > limit) throw IOException(tr("Answer too large", "Yanıt çok büyük"))
         }
         return out.toByteArray()
     }
@@ -94,7 +95,7 @@ object InnerTube {
 
     /** The only place a /player request may use the account: a video YouTube itself called members-only. */
     private fun members(videoId: String, net: Network?): VideoInfo {
-        if (!Account.usable) throw YtError(if (Account.expired) "Members-only — account expired: import new cookies in ⋮ → Account" else Account.SIGNED_OUT, false, members = true)
+        if (!Account.usable) throw YtError(if (Account.expired) tr("Members-only — account expired: import new cookies in ⋮ → Account", "Üyelere özel — hesabın süresi doldu: ⋮ → Hesap'tan yeni çerezleri içe aktarın") else Account.SIGNED_OUT, false, members = true)
         return AuthPlayer.info(Account.ctx, videoId, net)
     }
 
@@ -105,11 +106,11 @@ object InnerTube {
             return infoIn(videoId, net, skip, order, if (known) alt else null)
         } catch (e: YtError) {
             if (!e.geo) throw e
-            if (alt.isEmpty()) throw YtError("Blocked in your country (legal complaint). Turn on ⋮ → Region for blocked videos.", false, true)
-            if (known) throw YtError("Blocked in your country and in region $alt too. Try another region in ⋮.", false, true)
+            if (alt.isEmpty()) throw YtError(tr("Blocked in your country (legal complaint). Turn on ⋮ → Region for blocked videos.", "Ülkenizde engelli (yasal şikâyet). ⋮ → Engelli videolar için bölge'yi açın."), false, true)
+            if (known) throw YtError(tr("Blocked in your country and in region $alt too. Try another region in ⋮.", "Ülkenizde ve $alt bölgesinde de engelli. ⋮ menüsünden başka bir bölge deneyin."), false, true)
         }
         val i = try { infoIn(videoId, net, skip, order, alt) } catch (e: YtError) {
-            if (e.geo) throw YtError("Blocked in your country and in region $alt too. Try another region in ⋮.", false, true)
+            if (e.geo) throw YtError(tr("Blocked in your country and in region $alt too. Try another region in ⋮.", "Ülkenizde ve $alt bölgesinde de engelli. ⋮ menüsünden başka bir bölge deneyin."), false, true)
             throw e
         }
         Store.markBlocked(videoId)
@@ -123,7 +124,7 @@ object InnerTube {
             var used = visitor
             var r = try { call(c, videoId, used, net, gl) } catch (e: IOException) {
                 if (e is NoWifi) throw e
-                best = best ?: YtError("Network error: ${e.message}", true); continue
+                best = best ?: YtError(tr("Network error: ${e.message}", "Ağ hatası: ${e.message}"), true, weak = true); continue
             }
             if (r is PlayerResult.Fail && r.error.tryOther && r.visitorData != null && r.visitorData != used) {
                 // "confirm you're not a bot" without visitorData: retry once with the id YouTube just handed out
@@ -139,11 +140,11 @@ object InnerTube {
                 is PlayerResult.Fail -> {
                     if (!r.error.tryOther) throw r.error
                     val b = best
-                    if (b == null || b.message!!.contains("bot") || b.message!!.startsWith("Network")) best = r.error
+                    if (b == null || b.weak || b.message!!.contains("bot") || b.message!!.startsWith("Network")) best = r.error
                 }
             }
         }
-        throw best ?: YtError("No InnerTube client worked", true)
+        throw best ?: YtError(tr("No InnerTube client worked", "Hiçbir InnerTube istemcisi çalışmadı"), true)
     }
 
     private fun call(c: Client, videoId: String, visitorData: String?, net: Network?, gl: String?): PlayerResult {
@@ -230,7 +231,7 @@ class Fetcher(
                 } catch (e: IOException) {
                     if (e is Cancelled || e is Expired || e is NoWifi) throw e
                     con?.disconnect()
-                    if (++tries > MAX_TRIES) throw IOException("Download failed: ${e.message}", e)
+                    if (++tries > MAX_TRIES) throw IOException(tr("Download failed: ${e.message}", "İndirme başarısız: ${e.message}"), e)
                     Thread.sleep(minOf(200L * tries, 2000L))
                 }
             }

@@ -54,7 +54,7 @@ object Net {
                 part.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
-                        if (Thread.currentThread().isInterrupted) throw IOException("Cancelled")
+                        if (Thread.currentThread().isInterrupted) throw IOException(app.plain.lang.tr("Cancelled", "İptal edildi"))
                         val n = inp.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
@@ -64,10 +64,10 @@ object Net {
                     }
                 }
             }
-            if (total > 0 && done != total) throw IOException("Download cut short")
+            if (total > 0 && done != total) throw IOException(app.plain.lang.tr("Download cut short", "İndirme yarıda kesildi"))
         } finally { c.disconnect() }
         if (dest.exists()) dest.delete()
-        if (!part.renameTo(dest)) throw IOException("Can't save the download")
+        if (!part.renameTo(dest)) throw IOException(app.plain.lang.tr("Can't save the download", "İndirilen dosya kaydedilemedi"))
         progress(1f)
         return hex(md.digest())
     }

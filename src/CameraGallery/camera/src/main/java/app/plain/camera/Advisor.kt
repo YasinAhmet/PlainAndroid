@@ -1,5 +1,6 @@
 package app.plain.camera
 
+import app.plain.lang.tr
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -128,25 +129,26 @@ object Advisor {
     /** The most important problem right now, or null. */
     fun hint(m: Moment): String? {
         val s = m.stats
-        if (m.shake > SHAKE) return "Shaking – hold still"
-        if ((m.flashRequired && !m.flashOn) || (s != null && s.mean < 40 && m.iso >= 3200)) return "Too dark – add light or turn on flash"
+        if (m.shake > SHAKE) return tr("Shaking – hold still", "Titriyor – sabit tutun")
+        if ((m.flashRequired && !m.flashOn) || (s != null && s.mean < 40 && m.iso >= 3200)) return tr("Too dark – add light or turn on flash", "Çok karanlık – ışık ekleyin veya flaşı açın")
         if (s != null) {
-            if (s.sun) return "Sun or a bright light in frame – flare likely. Move it to the edge or shade the lens"
-            if (s.edgeMean - s.centerMean > 70 && s.clipped > 0.03f) return "Subject backlit – tap it to expose for it, or use flash"
-            if (s.clipped > 0.04f) return "Highlights blown (${(s.clipped * 100).roundToInt()}%) – lower EV"
+            if (s.sun) return tr("Sun or a bright light in frame – flare likely. Move it to the edge or shade the lens",
+                "Kadrajda güneş veya parlak ışık – parlama olabilir. Kenara alın veya lensi gölgeleyin")
+            if (s.edgeMean - s.centerMean > 70 && s.clipped > 0.03f) return tr("Subject backlit – tap it to expose for it, or use flash", "Konu arkadan ışık alıyor – ona dokunun veya flaş kullanın")
+            if (s.clipped > 0.04f) return tr("Highlights blown (${(s.clipped * 100).roundToInt()}%) – lower EV", "Parlak alanlar patlamış (%${(s.clipped * 100).roundToInt()}) – EV'yi düşürün")
         }
         for (f in m.faces) {
-            if (f.l < 0.02f || f.r > 0.98f || f.t < 0.01f || f.b > 0.98f) return "Face cut off by the edge"
+            if (f.l < 0.02f || f.r > 0.98f || f.t < 0.01f || f.b > 0.98f) return tr("Face cut off by the edge", "Yüz kenardan kesiliyor")
         }
         if (s != null) for (f in m.faces) {
-            if (s.meanIn(f.l, f.t, f.r, f.b) < s.mean - 45) return "Face in shadow – tap the face or add light"
+            if (s.meanIn(f.l, f.t, f.r, f.b) < s.mean - 45) return tr("Face in shadow – tap the face or add light", "Yüz gölgede – yüze dokunun veya ışık ekleyin")
         }
-        if (m.iso >= 1600 && m.exposureNs >= Adv.FRAME_30) return "Low light – hold steady, the photo will be noisy"
-        if (m.unfocused) return "Soft – tap to focus"
+        if (m.iso >= 1600 && m.exposureNs >= Adv.FRAME_30) return tr("Low light – hold steady, the photo will be noisy", "Az ışık – sabit tutun, fotoğraf kumlu olacak")
+        if (m.unfocused) return tr("Soft – tap to focus", "Bulanık – odaklamak için dokunun")
         val t = m.tilt
-        if (t != null && abs(t) > 3f && abs(t) < 30f) return "Tilted ${abs(t).roundToInt()}° – straighten"
-        for (f in m.faces) if (f.t < 0.06f) return "Face too close to the top"
-        if (s != null && s.spread < 0.25f && s.mean in 50f..200f) return "Flat light – low contrast"
+        if (t != null && abs(t) > 3f && abs(t) < 30f) return tr("Tilted ${abs(t).roundToInt()}° – straighten", "${abs(t).roundToInt()}° eğik – düzeltin")
+        for (f in m.faces) if (f.t < 0.06f) return tr("Face too close to the top", "Yüz üst kenara çok yakın")
+        if (s != null && s.spread < 0.25f && s.mean in 50f..200f) return tr("Flat light – low contrast", "Düz ışık – düşük kontrast")
         return null
     }
 
@@ -162,9 +164,9 @@ object Advisor {
     fun verdict(m: Moment): String? {
         val s = m.stats ?: return null
         return when {
-            m.shake > SHAKE -> "Saved · may be blurred (shake)"
-            s.clipped > 0.02f -> "Saved · ${(s.clipped * 100).roundToInt()}% blown"
-            s.mean < 35 -> "Saved · dark"
+            m.shake > SHAKE -> tr("Saved · may be blurred (shake)", "Kaydedildi · bulanık olabilir (titreme)")
+            s.clipped > 0.02f -> tr("Saved · ${(s.clipped * 100).roundToInt()}% blown", "Kaydedildi · %${(s.clipped * 100).roundToInt()} patlamış")
+            s.mean < 35 -> tr("Saved · dark", "Kaydedildi · karanlık")
             else -> null
         }
     }

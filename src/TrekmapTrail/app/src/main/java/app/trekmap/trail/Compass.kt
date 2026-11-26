@@ -1,5 +1,6 @@
 package app.trekmap.trail
 
+import app.plain.lang.PlainLang
 import android.content.Context
 import android.hardware.GeomagneticField
 import android.hardware.Sensor
@@ -33,7 +34,8 @@ object Heading {
     fun norm(d: Double) = ((d % 360) + 360) % 360
 
     private val NAMES = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-    fun cardinal(d: Double) = NAMES[(((norm(d) + 22.5) / 45).toInt()) % 8]
+    private val NAMES_TR = arrayOf("K", "KD", "D", "GD", "G", "GB", "B", "KB")
+    fun cardinal(d: Double) = (if (PlainLang.turkish) NAMES_TR else NAMES)[(((norm(d) + 22.5) / 45).toInt()) % 8]
 
     /** Smallest signed difference a−b in degrees (−180..180). */
     fun diff(a: Double, b: Double): Double = ((a - b + 540) % 360) - 180

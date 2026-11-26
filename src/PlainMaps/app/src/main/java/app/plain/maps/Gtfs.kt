@@ -1,5 +1,6 @@
 package app.plain.maps
 
+import app.plain.lang.tr
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStream
@@ -85,7 +86,7 @@ class Transit {
                     t.stops.add(Stop(c.get(row, id), c.get(row, code), Text.title(c.get(row, name)), lat, lon))
                 }
             }
-            log("${t.stops.size} stops")
+            log(tr("${t.stops.size} stops", "${t.stops.size} durak"))
             // routes (route_desc may contain the delimiter)
             val routeIdx = HashMap<String, Int>()
             reader(routesF).use { r ->
@@ -98,7 +99,7 @@ class Transit {
                     t.routes.add(Route(c.get(row, id), c.get(row, sn), Text.title(c.get(row, ln)), if (code >= 0) c.get(row, code) else ""))
                 }
             }
-            log("${t.routes.size} routes")
+            log(tr("${t.routes.size} routes", "${t.routes.size} hat"))
             // trips
             class TripInfo(val route: Int, val days: Int, val headsign: String, val dir: Int)
             val trips = HashMap<String, TripInfo>(200_000)
@@ -113,7 +114,7 @@ class Transit {
                     trips[c.get(row, id)] = TripInfo(ri, days, Text.title(c.get(row, hs)), c.get(row, dir).toIntOrNull() ?: 0)
                 }
             }
-            log("${trips.size} trips")
+            log(tr("${trips.size} trips", "${trips.size} sefer"))
 
             // stop_times: rows are grouped by trip; every trip becomes (pattern, days, start, duration)
             class Key(val route: Int, val stops: IntArray) {
@@ -176,7 +177,7 @@ class Transit {
                     val tm = Text.time(f.getOrNull(cD) ?: "") ?: Text.time(f.getOrNull(cA) ?: "") ?: -1
                     times.add(tm)
                     if (++n % 500_000 == 0L) {
-                        log("stop times: ${n / 1000}k rows")
+                        log(tr("stop times: ${n / 1000}k rows", "durak saatleri: ${n / 1000} bin satır"))
                         if (cancelled()) throw InterruptedException()
                     }
                 }
@@ -190,7 +191,7 @@ class Transit {
                     z.getInputStream(e).use { readStopTimes(it) }
                 }
             } else stopTimesF.inputStream().use { readStopTimes(it) }
-            log("${t.tripsRead} trips in ${t.patterns.size} stop sequences")
+            log(tr("${t.tripsRead} trips in ${t.patterns.size} stop sequences", "${t.patterns.size} durak dizisinde ${t.tripsRead} sefer"))
 
             // distance along each pattern, for estimating times at the stops in between
             for (p in t.patterns) {

@@ -31,6 +31,8 @@ import android.widget.TextView
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 
 /**
  * In-app player (MediaPlayer, no libraries). Streams go through [StreamProxy] so what is watched is cached at the
@@ -90,7 +92,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         holder = null
         try { mp?.setDisplay(null) } catch (_: Exception) {}
         ui = null
-        if (EngineRule.keepOnDetach(wantsPlay)) saveState() else close()
+        val keep = keepOnce
+        keepOnce = false
+        if (keep || EngineRule.keepOnDetach(wantsPlay)) saveState() else close()
     }
 
     /** What to resume after the process was gone: item, position, mode, queue flag (the queue itself is in Store). */
@@ -110,7 +114,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             videoId = l.id; title = l.title; channel = l.channel; localUri = l.uri?.let { Uri.parse(it) }; localAudio = l.audio
             forced = l.mode; albumHint = l.album; musicLink = false; channelId = null
         }
-        info = null; choices = emptyList(); triedOpus = false; watchFailed = false; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; pubMeta = null; listenItag = 0
         resumeMs = l.pos
         mode = l.mode; itemMode = l.mode
         playWhenReady = false
@@ -293,6 +297,25 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         private set
     private var beforePip = PState.FULL
     val root = FrameLayout(this) // overlay host (MATCH_PARENT, transparent: touches outside the mini pass through)
+
+    // ---- language: the panel's views outlive MainActivity, so its fixed labels are rewritten on a change ----
+    private val relabels = ArrayList<() -> Unit>()
+    private fun <T : TextView> T.say(s: () -> String): T = apply { text = s(); relabels += { text = s() } }
+    private fun <T : View> T.desc(s: () -> String): T = apply { contentDescription = s(); relabels += { contentDescription = s() } }
+    /** The activity is recreated on purpose (language change): the next [detach] keeps even a paused player. */
+    private var keepOnce = false
+    fun keepOnNextDetach() { keepOnce = true }
+
+    /** A new app language: rewrite the labels the panel built once (MainActivity rebuilds its own views). */
+    fun relabel() {
+        relabels.forEach { it() }
+        rotateBtn.text = rotateText()
+        qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p")
+        membersV.text = tr("MEMBERS", "ÜYELER"); membersV.contentDescription = tr("Members only", "Üyelere özel")
+        showEntryControls()
+    }
+
+    private fun rotateText() = if (rotationLocked) tr("Rotate: locked", "Döndür: kilitli") else tr("Rotate: auto", "Döndür: otomatik")
     private lateinit var full: LinearLayout // the player itself: whole screen, or the mini window
     private lateinit var miniCtl: FrameLayout
     private lateinit var miniCard: LinearLayout
@@ -340,6 +363,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private var info: VideoInfo? = null
     private var choices: List<Hls.Variant> = emptyList()
     private var height = 720
+    private var tracks: List<AudioTrack> = emptyList() // audio languages of a dubbed video (empty = single track / not known yet)
+    private var audioLang: String? = null // picked language; null = the original track
     private var listenItag = 0
     private var triedOpus = false
     private var watchFailed = false
@@ -372,6 +397,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private lateinit var watchChip: Chip
     private lateinit var listenChip: Chip
     private lateinit var qualityBtn: TextView
+    private lateinit var audioBtn: TextView
     private lateinit var saveBtn: TextView
     private lateinit var dlBtn: TextView
 
@@ -385,7 +411,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     /** Start playing [r] (from a row, the downloads list, the Cached folder, the queue): the player opens full. */
     fun open(r: PlayReq) {
         val e = if (r.queue) Store.queue().current else null
-        if (r.queue && e == null) { toast("The play queue is empty"); return }
+        if (r.queue && e == null) { toast(tr("The play queue is empty", "Çalma sırası boş")); return }
         releaseAll()
         queueMode = r.queue
         if (e != null) setEntry(e) else {
@@ -393,7 +419,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             localUri = r.uri?.let { Uri.parse(it) }; localAudio = r.audio
             forced = r.mode; musicLink = r.musicLink; albumHint = r.album; channelId = null
         }
-        info = null; choices = emptyList(); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
         height = Store.watchP
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
@@ -559,7 +585,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val playing = mp?.isPlaying == true
         val icon = if (playing) R.drawable.ic_pause else R.drawable.ic_play
         miniPlay.setImageResource(icon); miniCardPlay.setImageResource(icon)
-        miniCardTitle.text = title.ifEmpty { "Player" }
+        miniCardTitle.text = title.ifEmpty { tr("Player", "Oynatıcı") }
         if (videoId.isNotEmpty() && state == PState.MINI && mode == PlayMode.LISTEN) thumbs.load(miniCardThumb, videoId, dp(64))
     }
 
@@ -595,13 +621,13 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     /** PiP button: over other apps, video only. Android places and sizes the window; the app can't pin it. */
     fun enterPip() {
-        if (mode != PlayMode.WATCH || state == PState.CLOSED) { toast("Picture-in-picture is for Watch"); return }
+        if (mode != PlayMode.WATCH || state == PState.CLOSED) { toast(tr("Picture-in-picture is for Watch", "Pencere içinde pencere yalnızca İzle için")); return }
         if (state == PState.FULL) minimize() // the window then animates out of the top-right mini window
         root.post {
             try {
                 registerPipActions()
                 if (ui?.enterPictureInPictureMode(pipParams()) == true) go(PlayerUi.Ev.ENTER_PIP)
-            } catch (e: Exception) { toast("Picture-in-picture isn't available: ${e.message}") }
+            } catch (e: Exception) { toast(tr("Picture-in-picture isn't available: ${e.message}", "Pencere içinde pencere kullanılamıyor: ${e.message}")) }
         }
     }
 
@@ -637,9 +663,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
         val playing = mp?.isPlaying == true
         return listOf(
-            action(1, R.drawable.ic_back10, "Back 10 s", "back"),
-            action(2, if (playing) R.drawable.ic_pause else R.drawable.ic_play, if (playing) "Pause" else "Play", "toggle"),
-            action(3, R.drawable.ic_fwd10, "Forward 10 s", "fwd"),
+            action(1, R.drawable.ic_back10, tr("Back 10 s", "10 sn geri"), "back"),
+            action(2, if (playing) R.drawable.ic_pause else R.drawable.ic_play, if (playing) tr("Pause", "Duraklat") else tr("Play", "Oynat"), "toggle"),
+            action(3, R.drawable.ic_fwd10, tr("Forward 10 s", "10 sn ileri"), "fwd"),
         )
     }
 
@@ -724,16 +750,16 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
         this.root.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
         topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(4), dp(8), dp(4)) }
-        topBar.addView(icon(R.drawable.ic_minimize, desc = "Minimise") { minimize() })
+        topBar.addView(icon(R.drawable.ic_minimize, desc = "") { minimize() }.desc { tr("Minimise", "Küçült") })
         val tcol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titleV = text(title.ifEmpty { "Player" }, 15f, C.TEXT, bold = true, lines = 2)
+        titleV = text(title.ifEmpty { tr("Player", "Oynatıcı") }, 15f, C.TEXT, bold = true, lines = 2)
         channelV = text(channel, 12f, C.DIM).apply { setOnClickListener { visitChannel() } }
         tcol.addView(titleV); tcol.addView(channelV)
         topBar.addView(tcol, lpL(0, WRAP, 1f))
         membersV = membersBadge().apply { visibility = if (Store.isMembers(videoId)) View.VISIBLE else View.GONE }
         topBar.addView(membersV, lpL(WRAP, WRAP).apply { marginEnd = dp(4) })
-        topBar.addView(icon(R.drawable.ic_pip, desc = "Picture-in-picture") { enterPip() })
-        topBar.addView(icon(R.drawable.ic_close, desc = "Close the player") { close() })
+        topBar.addView(icon(R.drawable.ic_pip, desc = "") { enterPip() }.desc { tr("Picture-in-picture", "Pencere içinde pencere") })
+        topBar.addView(icon(R.drawable.ic_close, desc = "") { close() }.desc { tr("Close the player", "Oynatıcıyı kapat") })
         root.addView(topBar, lpL(MATCH, WRAP))
 
         stage = FrameLayout(this)
@@ -744,7 +770,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 if (mp == null || !prepared) return false
                 val left = e.x < stage.width / 2f
                 seekBy(if (left) -10_000 else 10_000)
-                flashSeek(if (left) "« 10 s" else "10 s »", left)
+                flashSeek(if (left) tr("« 10 s", "« 10 sn") else tr("10 s »", "10 sn »"), left)
                 kickHide()
                 return true
             }
@@ -762,11 +788,11 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         stage.addView(seekHint, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL or Gravity.START).apply { setMargins(dp(32), 0, dp(32), 0) })
         // mini window (Watch): tap = full, drag = corner, ▶ ✕ and PiP
         miniCtl = FrameLayout(this).apply { setOnTouchListener(dragTouch()) }
-        miniPlay = icon(R.drawable.ic_play, sizeDp = 32, padDp = 6, desc = "Play / pause") { togglePlay() }
+        miniPlay = icon(R.drawable.ic_play, sizeDp = 32, padDp = 6, desc = "") { togglePlay() }.desc { tr("Play / pause", "Oynat / duraklat") }
         miniCtl.addView(miniPlay, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.BOTTOM or Gravity.START))
-        miniCtl.addView(icon(R.drawable.ic_close, sizeDp = 32, padDp = 7, desc = "Close the player") { close() },
+        miniCtl.addView(icon(R.drawable.ic_close, sizeDp = 32, padDp = 7, desc = "") { close() }.desc { tr("Close the player", "Oynatıcıyı kapat") },
             FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.END))
-        miniCtl.addView(icon(R.drawable.ic_pip, sizeDp = 32, padDp = 6, desc = "Picture-in-picture") { enterPip() },
+        miniCtl.addView(icon(R.drawable.ic_pip, sizeDp = 32, padDp = 6, desc = "") { enterPip() }.desc { tr("Picture-in-picture", "Pencere içinde pencere") },
             FrameLayout.LayoutParams(dp(32), dp(32), Gravity.BOTTOM or Gravity.END))
         stage.addView(miniCtl, FrameLayout.LayoutParams(MATCH, MATCH))
         art = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) }
@@ -783,9 +809,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         miniCard.addView(miniCardThumb, lpL(dp(64), dp(36)))
         miniCardTitle = text("", 12f, C.TEXT, bold = true, lines = 2).apply { setPadding(dp(8), 0, dp(4), 0) }
         miniCard.addView(miniCardTitle, lpL(0, WRAP, 1f))
-        miniCardPlay = icon(R.drawable.ic_play, sizeDp = 36, padDp = 8, desc = "Play / pause") { togglePlay() }
+        miniCardPlay = icon(R.drawable.ic_play, sizeDp = 36, padDp = 8, desc = "") { togglePlay() }.desc { tr("Play / pause", "Oynat / duraklat") }
         miniCard.addView(miniCardPlay)
-        miniCard.addView(icon(R.drawable.ic_close, sizeDp = 36, padDp = 9, desc = "Close the player") { close() })
+        miniCard.addView(icon(R.drawable.ic_close, sizeDp = 36, padDp = 9, desc = "") { close() }.desc { tr("Close the player", "Oynatıcıyı kapat") })
         root.addView(miniCard, lpL(MATCH, WRAP))
 
         controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(4), dp(12), dp(12)) }
@@ -810,7 +836,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         controls.addView(seekRow, lpL(MATCH, WRAP))
         // volume: the media stream, like the hardware keys (Spotify-style bar, speaker = mute)
         val volRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, 0) }
-        volIcon = icon(R.drawable.ic_volume, sizeDp = 36, padDp = 8, desc = "Mute") { setVolume(vol.toggleMute()); syncVolumeBar() }
+        volIcon = icon(R.drawable.ic_volume, sizeDp = 36, padDp = 8, desc = "") { setVolume(vol.toggleMute()); syncVolumeBar() }.desc { tr("Mute", "Sesi kapat") }
         volBar = SeekBar(this).apply {
             max = vol.max
             progressTintList = android.content.res.ColorStateList.valueOf(C.TEXT)
@@ -828,12 +854,12 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         prevBtn = pill("⏮") { step(-1) }
         btnRow.addView(prevBtn)
         btnRow.addView(View(this), lpL(dp(8), 1))
-        btnRow.addView(pill("−10 s") { seekBy(-10_000); kickHide() })
+        btnRow.addView(pill("") { seekBy(-10_000); kickHide() }.say { tr("−10 s", "−10 sn") })
         btnRow.addView(View(this), lpL(dp(12), 1))
         playBtn = pill("▶", C.ACCENT, C.ACCENT) { togglePlay() }.apply { minWidth = dp(72) }
         btnRow.addView(playBtn)
         btnRow.addView(View(this), lpL(dp(12), 1))
-        btnRow.addView(pill("+10 s") { seekBy(10_000); kickHide() })
+        btnRow.addView(pill("") { seekBy(10_000); kickHide() }.say { tr("+10 s", "+10 sn") })
         btnRow.addView(View(this), lpL(dp(8), 1))
         nextBtn = pill("⏭") { step(1) }
         btnRow.addView(nextBtn)
@@ -841,19 +867,20 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         upNextV = text("", 12f, C.LABEL).apply { setPadding(dp(4), 0, dp(4), dp(4)); setOnClickListener { step(1) } }
         controls.addView(upNextV, lpL(MATCH, WRAP))
         val chips = FlowLayout(this)
-        watchChip = Chip(this, "Watch") { switchMode(PlayMode.WATCH) }
-        listenChip = Chip(this, "Listen") { switchMode(PlayMode.LISTEN) }
-        qualityBtn = pill("Quality") { qualityMenu() }
-        saveBtn = pill("Save") { save() }
-        dlBtn = pill("Download…") { openDownload() }
-        chips.addView(watchChip); chips.addView(listenChip); chips.addView(qualityBtn); chips.addView(saveBtn); chips.addView(dlBtn)
+        watchChip = Chip(this, "") { switchMode(PlayMode.WATCH) }.say { tr("Watch", "İzle") }
+        listenChip = Chip(this, "") { switchMode(PlayMode.LISTEN) }.say { tr("Listen", "Dinle") }
+        qualityBtn = pill(tr("Quality", "Kalite")) { qualityMenu() }
+        audioBtn = pill(tr("Audio", "Ses")) { audioMenu() }
+        saveBtn = pill("") { save() }.say { tr("Save", "Kaydet") }
+        dlBtn = pill("") { openDownload() }.say { tr("Download…", "İndir…") }
+        chips.addView(watchChip); chips.addView(listenChip); chips.addView(qualityBtn); chips.addView(audioBtn); chips.addView(saveBtn); chips.addView(dlBtn)
         speedBtn = pill(Speeds.label(speed)) { speedMenu() }
         chips.addView(speedBtn)
-        chips.addView(pill("Full screen") { setFullscreen(!fullscreen) })
-        rotateBtn = pill("Rotate: auto") { toggleRotation() }
+        chips.addView(pill("") { setFullscreen(!fullscreen) }.say { tr("Full screen", "Tam ekran") })
+        rotateBtn = pill(rotateText()) { toggleRotation() }
         chips.addView(rotateBtn)
-        chips.addView(pill("Channel") { visitChannel() })
-        queueBtn = pill("Queue") { queueSheet() }
+        chips.addView(pill("") { visitChannel() }.say { tr("Channel", "Kanal") })
+        queueBtn = pill(tr("Queue", "Sıra")) { queueSheet() }
         chips.addView(queueBtn)
         controls.addView(chips, lpL(MATCH, WRAP))
         root.addView(controls, lpL(MATCH, WRAP))
@@ -862,7 +889,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun syncVolumeBar() { if (volBar.progress != vol.level) volBar.progress = vol.level }
 
     private fun speedMenu() {
-        ui?.menu("Playback speed", Speeds.ALL.map { s -> (if (s == speed) "✓ " else "   ") + Speeds.label(s) to { setSpeed(s) } })
+        ui?.menu(tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { s -> (if (s == speed) "✓ " else "   ") + Speeds.label(s) to { setSpeed(s) } })
     }
 
     private fun setSpeed(s: Float) {
@@ -875,7 +902,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun toggleRotation() {
         rotationLocked = !rotationLocked
-        rotateBtn.text = if (rotationLocked) "Rotate: locked" else "Rotate: auto"
+        rotateBtn.text = rotateText()
         if (state == PState.FULL && !fullscreen) ui?.requestedOrientation = if (rotationLocked) ActivityInfo.SCREEN_ORIENTATION_LOCKED else ActivityInfo.SCREEN_ORIENTATION_SENSOR
     }
 
@@ -883,7 +910,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val watch = mode == PlayMode.WATCH
         watchChip.select(watch); listenChip.select(!watch)
         qualityBtn.visibility = if (watch && localUri == null) View.VISIBLE else View.GONE
-        qualityBtn.text = "Quality ${height}p"
+        qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p")
+        showAudio()
         art.visibility = if (watch) View.GONE else View.VISIBLE
         videoFrame.visibility = if (watch) View.VISIBLE else View.GONE
         if (watch && surfaceView == null) {
@@ -892,7 +920,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             videoFrame.removeAllViews(); surfaceView = null; holder = null // Listen: no surface at all
         }
         if (!watch && videoId.isNotEmpty()) thumbs.load(artImg, videoId, dp(240))
-        titleV.text = title.ifEmpty { "Player" }
+        titleV.text = title.ifEmpty { tr("Player", "Oynatıcı") }
         if (state == PState.MINI) applyState() // Watch <-> Listen changes the mini window's shape
     }
 
@@ -926,7 +954,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         prepared = false
         pubMeta = null
         localUri?.let { preparePlayer(it); return }
-        status("Loading…")
+        status(tr("Loading…", "Yükleniyor…"))
         val g = calls.gen
         val m0 = mode
         io.execute {
@@ -937,16 +965,17 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                     if (src is CacheMeta) { pubMeta = src; preparePlayer(Uri.parse(src.publicUri)) } // offline, public file
                     else startSource(src as CachedSource)
                 }, { e -> status(errText(e), true) })
+                showAudio()
             }
         }
     }
 
     private fun errText(e: Throwable): String = when (e) {
-        is NoWifi -> "Not on Wi-Fi (Wi-Fi only is on). Cached videos still play."
-        is java.net.UnknownHostException -> "No internet connection"
-        is YtError, is AccountExpired -> e.message ?: "Can't play"
+        is NoWifi -> tr("Not on Wi-Fi (Wi-Fi only is on). Cached videos still play.", "Wi-Fi bağlı değil (Yalnızca Wi-Fi açık). Önbellekteki videolar yine oynar.")
+        is java.net.UnknownHostException -> tr("No internet connection", "İnternet bağlantısı yok")
+        is YtError, is AccountExpired -> e.message ?: tr("Can't play", "Oynatılamıyor")
         is Cancelled -> ""
-        else -> "Couldn't start: ${e.message ?: e.javaClass.simpleName}"
+        else -> tr("Couldn't start: ${e.message ?: e.javaClass.simpleName}", "Başlatılamadı: ${e.message ?: e.javaClass.simpleName}")
     }
 
     /** Background thread: pick the mode, prefer complete caches (no network), else ask YouTube. */
@@ -964,15 +993,16 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
         if (m == null && wanted != PlayMode.WATCH) m = wanted
         // offline replays
-        if (m == PlayMode.LISTEN) music.filter { it.complete && (!triedOpus || it.ext == "webm") }.maxByOrNull { it.lastUsed }?.let {
+        if (m == PlayMode.LISTEN) music.filter { it.complete && it.langMatches(audioLang) && (!triedOpus || it.ext == "webm") }.maxByOrNull { it.lastUsed }?.let {
             setMode(m); touch(it); CachePublisher.publish(this, it); return if (it.published) it else musicSource(it, null)
         }
-        if (m == PlayMode.WATCH) video.filter { it.complete }.let { l -> (l.firstOrNull { it.quality == height } ?: Hls.pickMeta(l, height)) }
+        if (m == PlayMode.WATCH) video.filter { it.complete && it.langMatches(audioLang) }.let { l -> (l.firstOrNull { it.quality == height } ?: Hls.pickMeta(l, height)) }
             ?.let { setMode(m); touch(it); CachePublisher.publish(this, it); return if (it.published) it else if (it.ext == "mp4") ProgressiveSource(this, it, null, "", null) else hlsOffline(it) }
 
         calls.check(g)
         val net = Net.network(this, Store.wifiOnly)
         val inf = info ?: InnerTube.info(videoId, net, order = Clients.PLAY_ORDER).also { info = it }
+        AudioTracks.of(inf.formats).takeIf { it.size > 1 }?.let { t -> main.post { tracks = t; showAudio() } }
         if (inf.members) main.post { membersV.visibility = View.VISIBLE }
         if (title.isEmpty()) title = inf.title
         if (channel.isEmpty()) channel = Naming.channel(inf.author)
@@ -991,7 +1021,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (m == PlayMode.WATCH && inf.members && inf.hls == null) {
             val src = Sources.membersVideo(this, inf, title, channel)
             height = src.meta.quality
-            main.post { qualityBtn.text = "Quality ${height}p" }
+            main.post { qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p") }
             return src
         }
         return if (m == PlayMode.LISTEN) musicSource(null, inf) else hlsSource(g, net, inf)
@@ -1005,14 +1035,17 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun musicSource(cached: CacheMeta?, inf: VideoInfo?): CachedSource {
         if (cached != null) { listenItag = cached.quality; return ProgressiveSource(this, cached, null, "", null) }
-        inf ?: throw IOException("No stream info")
-        val f = (if (triedOpus) inf.formats.firstOrNull { it.itag == 251 } else null) ?: Modes.listenFormat(inf.formats)
-            ?: throw YtError("No audio stream offered", false)
+        inf ?: throw IOException(tr("No stream info", "Akış bilgisi yok"))
+        val f = (if (triedOpus) AudioTracks.select(inf.formats.filter { !it.hasVideo }, audioLang).firstOrNull { it.itag == 251 } else null)
+            ?: Modes.listenFormat(inf.formats, audioLang)
+            ?: throw YtError(tr("No audio stream offered", "Ses akışı sunulmuyor"), false)
         listenItag = f.itag
-        val key = "${videoId}_${f.itag}"
+        val lang = f.audioLang.orEmpty()
+        val key = CacheMeta.keyOf(videoId, f.itag, lang)
         val meta = Store.cache.get(CacheKind.MUSIC, key)?.takeIf { it.total == f.contentLength || f.contentLength <= 0 }
             ?: CacheMeta(CacheKind.MUSIC, videoId, f.itag, title, channel, inf.durationSec, total = maxOf(0L, f.contentLength),
-                ext = if (f.isOpus) "webm" else "m4a").also { Store.cache.remove(CacheKind.MUSIC, key) }
+                ext = if (f.isOpus) "webm" else "m4a", lang = lang, langOriginal = f.audioOriginal, langKnown = true)
+                .also { Store.cache.remove(CacheKind.MUSIC, key) }
         meta.title = title; meta.channel = channel
         if (meta.album == null) meta.album = album
         val skip = HashSet<String>()
@@ -1021,36 +1054,42 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             skip += client
             val i2 = InnerTube.info(videoId, Net.network(this, Store.wifiOnly), skip, Clients.PLAY_ORDER)
             client = i2.client
-            val nf = i2.formats.firstOrNull { it.itag == f.itag } ?: throw YtError("Stream no longer offered", false)
+            val nf = i2.formats.firstOrNull { it.itag == f.itag && it.audioLang == f.audioLang } ?: throw YtError(tr("Stream no longer offered", "Akış artık sunulmuyor"), false)
             nf.url to (Clients.byKey(i2.client) ?: Clients.VISIONOS).userAgent
         }
         return ProgressiveSource(this, meta, f.url, (Clients.byKey(inf.client) ?: Clients.VISIONOS).userAgent, refresh)
     }
 
-    private class Hl(val variant: Hls.Variant, val v: List<Hls.Seg>, val a: List<Hls.Seg>?, val vText: String, val aText: String?)
+    private class Hl(val variant: Hls.Variant, val v: List<Hls.Seg>, val a: List<Hls.Seg>?, val vText: String, val aText: String?, val lang: String, val langOriginal: Boolean)
 
     private fun loadHls(g: Int, inf0: VideoInfo, want: Int): Pair<Hl, String> {
         var inf = inf0
         if (inf.hls == null) inf = InnerTube.info(videoId, Net.network(this, Store.wifiOnly), order = Clients.HLS_ORDER)
-        val url = inf.hls ?: throw YtError("No video stream for this video (try Listen)", false)
+        val url = inf.hls ?: throw YtError(tr("No video stream for this video (try Listen)", "Bu video için video akışı yok (Dinle'yi deneyin)"), false)
         val ua = (Clients.byKey(inf.client) ?: Clients.VISIONOS).userAgent
         val master = Hls.parseMaster(String(WebApi.get(this, calls, g, url, ua), Charsets.UTF_8), url)
         choices = Hls.choices(master)
-        val v = Hls.pick(choices, want) ?: throw YtError("No H.264 video stream", false)
+        master.tracks.takeIf { it.isNotEmpty() }?.let { t -> main.post { tracks = t; showAudio() } }
+        val v = Hls.pick(choices, want) ?: throw YtError(tr("No H.264 video stream", "H.264 video akışı yok"), false)
         val vText = String(WebApi.get(this, calls, g, v.uri, ua), Charsets.UTF_8)
-        val aUri = v.audio?.let { master.audio[it] }
+        // dubbed videos: the original track unless another language was picked (the first listed is usually Arabic)
+        val a = v.audio?.let { master.audioFor(it, audioLang) }
+        val aUri = a?.first
+        val lang = a?.second.orEmpty()
+        val orig = lang.isNotEmpty() && master.tracks.firstOrNull { it.lang == lang }?.original == true
         val aText = aUri?.let { String(WebApi.get(this, calls, g, it, ua), Charsets.UTF_8) }
-        return Hl(v, Hls.parseMedia(vText, v.uri), aUri?.let { Hls.parseMedia(aText!!, it) }, vText, aText) to ua
+        return Hl(v, Hls.parseMedia(vText, v.uri), aUri?.let { Hls.parseMedia(aText!!, it) }, vText, aText, lang, orig) to ua
     }
 
     private fun hlsSource(g: Int, net: android.net.Network?, inf: VideoInfo): CachedSource {
         val (h, ua) = loadHls(g, inf, height)
         height = h.variant.height
-        main.post { qualityBtn.text = "Quality ${height}p" }
-        val key = "${videoId}_$height"
+        main.post { qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p") }
+        val key = CacheMeta.keyOf(videoId, height, h.lang)
         val old = Store.cache.get(CacheKind.VIDEO, key)
         val meta = old?.takeIf { it.total == h.v.size.toLong() && (h.a == null || h.a.size == h.v.size) }
-            ?: CacheMeta(CacheKind.VIDEO, videoId, height, title, channel, inf.durationSec, total = h.v.size.toLong()).also { Store.cache.remove(CacheKind.VIDEO, key) }
+            ?: CacheMeta(CacheKind.VIDEO, videoId, height, title, channel, inf.durationSec, total = h.v.size.toLong(),
+                lang = h.lang, langOriginal = h.langOriginal, langKnown = true).also { Store.cache.remove(CacheKind.VIDEO, key) }
         meta.title = title; meta.channel = channel
         meta.codecs = h.variant.codecs; meta.bandwidth = h.variant.bandwidth; meta.resolution = "${h.variant.width}x${h.variant.height}"
         val dir = Store.cache.entryDir(CacheKind.VIDEO, key).apply { mkdirs() }
@@ -1066,7 +1105,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun hlsOffline(m: CacheMeta): CachedSource {
         height = m.quality
-        main.post { qualityBtn.text = "Quality ${height}p" }
+        main.post { qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p") }
         val dir = Store.cache.entryDir(CacheKind.VIDEO, m.key)
         val v = Hls.parseMedia(HlsSource.segsFile(dir, false).readText(), "https://x/")
         val a = HlsSource.segsFile(dir, true).takeIf { it.exists() }?.let { Hls.parseMedia(it.readText(), "https://x/") }
@@ -1076,9 +1115,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun startSource(src: CachedSource) {
         source = src
         src.start()
-        val p = try { StreamProxy(src).start() } catch (e: Exception) { status("Couldn't start the player: ${e.message}", true); src.close(); return }
+        val p = try { StreamProxy(src).start() } catch (e: Exception) { status(tr("Couldn't start the player: ${e.message}", "Oynatıcı başlatılamadı: ${e.message}"), true); src.close(); return }
         proxy = p
-        titleV.text = title.ifEmpty { "Player" }
+        titleV.text = title.ifEmpty { tr("Player", "Oynatıcı") }
         preparePlayer(Uri.parse(p.url))
     }
 
@@ -1114,7 +1153,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         p.setOnVideoSizeChangedListener { _, w, h -> videoFrame.setAspect(w, h); if (w > 0 && h > 0) { videoW = w; videoH = h; updatePip() } }
         p.setOnInfoListener { _, what, _ ->
             when (what) {
-                MediaPlayer.MEDIA_INFO_BUFFERING_START -> status("Buffering…")
+                MediaPlayer.MEDIA_INFO_BUFFERING_START -> status(tr("Buffering…", "Arabelleğe alınıyor…"))
                 MediaPlayer.MEDIA_INFO_BUFFERING_END -> status(cacheText())
             }
             false
@@ -1124,32 +1163,32 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             if (mode == PlayMode.WATCH) holder?.let { p.setDisplay(it) }
             p.prepareAsync()
         } catch (e: Exception) {
-            status("Can't play this: ${e.message}", true)
+            status(tr("Can't play this: ${e.message}", "Bu oynatılamıyor: ${e.message}"), true)
         }
     }
 
     private fun cacheText(): String {
-        if (pubMeta != null) return "Cached: ${pubMeta?.relPath ?: ""} · plays offline"
-        val m = source?.meta ?: return if (localUri != null) "Saved file" else ""
-        val what = if (m.kind == CacheKind.MUSIC) "Music" else "Video"
-        return if (m.complete) "Cached ($what) · plays offline" else "Caching while you watch · ${(m.fraction * 100).toInt()}% · ${Text.size(m.size)}"
+        if (pubMeta != null) return tr("Cached: ", "Önbellekte: ") + "${pubMeta?.relPath ?: ""}" + tr(" · plays offline", " · çevrimdışı oynar")
+        val m = source?.meta ?: return if (localUri != null) tr("Saved file", "Kayıtlı dosya") else ""
+        val what = if (m.kind == CacheKind.MUSIC) tr("Music", "Müzik") else "Video"
+        return if (m.complete) tr("Cached ($what) · plays offline", "Önbellekte ($what) · çevrimdışı oynar") else tr("Caching while you watch · ${(m.fraction * 100).toInt()}% · ${Text.size(m.size)}", "İzlerken önbelleğe alınıyor · %${(m.fraction * 100).toInt()} · ${Text.size(m.size)}")
     }
 
     private fun onPlayError(what: Int, extra: Int) {
         val err = source?.error
         when {
             err is NoWifi -> status(errText(err), true)
-            localUri != null || pubMeta != null -> status("This file can't be played ($what/$extra)", true)
+            localUri != null || pubMeta != null -> status(tr("This file can't be played ($what/$extra)", "Bu dosya oynatılamıyor ($what/$extra)"), true)
             mode == PlayMode.WATCH && !watchFailed -> {
                 watchFailed = true
-                toast("This phone couldn't play the video stream: playing the audio instead")
+                toast(tr("This phone couldn't play the video stream: playing the audio instead", "Bu telefon video akışını oynatamadı: yerine ses oynatılıyor"))
                 restartAt(PlayMode.LISTEN, remember = false)
             }
             mode == PlayMode.LISTEN && !triedOpus && listenItag != 251 && info?.formats?.any { it.itag == 251 } == true -> {
                 triedOpus = true
                 restartAt(PlayMode.LISTEN, remember = false)
             }
-            else -> status("Playback failed" + (err?.message?.let { ": $it" } ?: " ($what/$extra)"), true)
+            else -> status(tr("Playback failed", "Oynatma başarısız") + (err?.message?.let { ": $it" } ?: " ($what/$extra)"), true)
         }
     }
 
@@ -1181,7 +1220,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun play() {
         val p = mp ?: return
         if (!prepared) { playWhenReady = true; return }
-        if (!requestFocus()) { status("Another app is playing (audio focus refused)", true); return }
+        if (!requestFocus()) { status(tr("Another app is playing (audio focus refused)", "Başka bir uygulama çalıyor (ses odağı reddedildi)"), true); return }
         everPlayed = true
         noisyWatch(true)
         if (p.currentPosition >= p.duration - 300 && p.duration > 0) p.seekTo(0)
@@ -1260,14 +1299,64 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (started || bg.hidden) start()
     }
 
+    /**
+     * Audio button: shown for dubbed videos (tracks known), and for cached entries made before 2.8, which may hold a
+     * dub (their tracks are looked up when tapped). Label = the language playing.
+     */
+    private fun showAudio() {
+        if (!::audioBtn.isInitialized) return
+        val m = source?.meta ?: pubMeta
+        val legacy = m != null && !m.langKnown
+        audioBtn.visibility = if (localUri == null && (tracks.size > 1 || legacy)) View.VISIBLE else View.GONE
+        val playing = if (legacy) null else m?.lang?.ifEmpty { null } ?: audioLang ?: tracks.firstOrNull { it.original }?.lang
+        val t = tracks.firstOrNull { it.lang == playing }
+        audioBtn.text = tr("Audio", "Ses") + (t?.let { " · " + java.util.Locale.forLanguageTag(it.lang).getDisplayLanguage(PlainLang.locale).ifBlank { it.lang } } ?: "")
+    }
+
+    private fun audioMenu() {
+        if (tracks.size < 2) {
+            // a replay from the cache: ask YouTube which languages exist
+            status(tr("Loading audio languages…", "Ses dilleri yükleniyor…"))
+            val id = videoId
+            io.execute {
+                val t = try { AudioTracks.of((info ?: InnerTube.info(id, Net.network(this, Store.wifiOnly), order = Clients.PLAY_ORDER).also { info = it }).formats) } catch (e: Exception) { null }
+                main.post {
+                    if (isDestroyed || id != videoId) return@post
+                    status(cacheText())
+                    when {
+                        t == null -> toast(tr("Couldn't load the audio languages", "Ses dilleri yüklenemedi"))
+                        t.size < 2 -> { toast(tr("This video has a single audio track", "Bu videonun tek ses parçası var")); showAudio() }
+                        else -> { tracks = t; showAudio(); audioMenu() }
+                    }
+                }
+            }
+            return
+        }
+        val m = source?.meta ?: pubMeta
+        val playing = if (m != null && !m.langKnown) null else m?.lang?.ifEmpty { null } ?: audioLang ?: tracks.firstOrNull { it.original }?.lang
+        ui?.menu(tr("Audio language", "Ses dili"), tracks.map { t ->
+            (if (t.lang == playing) "✓ " else "   ") + t.label(PlainLang.locale) to {
+                // an entry cached before 2.8 (maybe a dub) is left by picking any language, the original included:
+                // an explicit language never matches those entries, so the pick is stored as that language
+                val leaveLegacy = m != null && !m.langKnown
+                val want = if (t.original && !leaveLegacy) null else t.lang
+                if (t.lang != playing || want != audioLang || leaveLegacy) {
+                    audioLang = want
+                    Store.setAudioLang(videoId, want)
+                    restartAt(mode, remember = true)
+                }
+            }
+        })
+    }
+
     private fun qualityMenu() {
-        val cached = Store.cache.list(CacheKind.VIDEO).filter { it.videoId == videoId }.associateBy { it.quality }
+        val cached = Store.cache.list(CacheKind.VIDEO).filter { it.videoId == videoId && it.langMatches(audioLang) }.associateBy { it.quality }
         val hs = (choices.map { it.height } + cached.keys).distinct().sortedDescending()
-        if (hs.isEmpty()) { toast("No other quality known yet"); return }
-        ui?.menu("Quality", hs.map { h ->
+        if (hs.isEmpty()) { toast(tr("No other quality known yet", "Henüz başka kalite bilinmiyor")); return }
+        ui?.menu(tr("Quality", "Kalite"), hs.map { h ->
             val c = cached[h]
             val label = "${h}p" + (if (h == height) "  ✓" else "") +
-                (if (c?.complete == true) "  · cached" else if (c != null) "  · ${(c.fraction * 100).toInt()}% cached" else "")
+                (if (c?.complete == true) tr("  · cached", "  · önbellekte") else if (c != null) tr("  · ${(c.fraction * 100).toInt()}% cached", "  · %${(c.fraction * 100).toInt()} önbellekte") else "")
             label to {
                 if (h != height) {
                     height = h
@@ -1280,20 +1369,20 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun save() {
         val pm = pubMeta
-        val m = pm ?: source?.meta ?: run { toast("Nothing cached yet"); return }
+        val m = pm ?: source?.meta ?: run { toast(tr("Nothing cached yet", "Henüz önbellekte bir şey yok")); return }
         if (pm == null && m.complete && !m.published) {
             // the player still reads the private copy: it is published and moved when the player closes
             saveOnClose = m
-            ui?.message("Save", "Fully cached: it will be saved to ${Naming.relativePath(if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO, Naming.channel(m.channel), m.album)} when you close the player.")
+            ui?.message(tr("Save", "Kaydet"), tr("Fully cached: it will be saved to ${Naming.relativePath(if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO, Naming.channel(m.channel), m.album)} when you close the player.", "Tamamen önbellekte: oynatıcıyı kapattığınızda kaydedilecek. Konum: ${Naming.relativePath(if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO, Naming.channel(m.channel), m.album)}"))
             return
         }
-        status("Saving…")
+        status(tr("Saving…", "Kaydediliyor…"))
         io.execute {
             source?.persist()
-            val r = try { CachePublisher.save(this, m) } catch (e: Exception) { CachePublisher.Result(false, "Couldn't save: ${e.message}") }
+            val r = try { CachePublisher.save(this, m) } catch (e: Exception) { CachePublisher.Result(false, tr("Couldn't save: ${e.message}", "Kaydedilemedi: ${e.message}")) }
             main.post {
                 if (isDestroyed) return@post
-                ui?.message("Save", r.message)
+                ui?.message(tr("Save", "Kaydet"), r.message)
                 status(cacheText())
             }
         }
@@ -1314,7 +1403,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         nextBtn.visibility = if (queueMode) View.VISIBLE else View.GONE
         prevBtn.alpha = if (q.hasPrev) 1f else 0.4f
         nextBtn.alpha = if (q.hasNext) 1f else 0.4f
-        queueBtn.text = "Queue (${q.items.size})"
+        queueBtn.text = tr("Queue (${q.items.size})", "Sıra (${q.items.size})")
         val local = localUri != null
         watchChip.visibility = if (local) View.GONE else View.VISIBLE
         listenChip.visibility = if (local) View.GONE else View.VISIBLE
@@ -1323,9 +1412,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         artChannel.text = channel
         channelV.text = channel
         channelV.visibility = if (channel.isEmpty()) View.GONE else View.VISIBLE
-        titleV.text = title.ifEmpty { "Player" }
+        titleV.text = title.ifEmpty { tr("Player", "Oynatıcı") }
         val next = if (queueMode && q.hasNext) q.items.getOrNull(q.index + 1) else null
-        upNextV.text = next?.let { "Up next: " + it.title.ifEmpty { it.id } + "  ⏭" }.orEmpty()
+        upNextV.text = next?.let { tr("Up next: ", "Sıradaki: ") + it.title.ifEmpty { it.id } + "  ⏭" }.orEmpty()
         upNextV.visibility = if (next == null) View.GONE else View.VISIBLE
         updateMini()
         membersV.visibility = if (Store.isMembers(videoId)) View.VISIBLE else View.GONE
@@ -1345,7 +1434,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun playEntry(e: QEntry, autoplay: Boolean) {
         releaseAll()
         setEntry(e)
-        info = null; choices = emptyList(); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
         itemMode = mode
@@ -1357,11 +1446,11 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun queueSheet() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(8), dp(8)) }
         val scroll = android.widget.ScrollView(this).apply { addView(col) }
-        val dlg = android.app.AlertDialog.Builder(ui ?: return).setTitle("Play queue").setView(scroll).setPositiveButton("Close", null).create()
+        val dlg = android.app.AlertDialog.Builder(ui ?: return).setTitle(tr("Play queue", "Çalma sırası")).setView(scroll).setPositiveButton(tr("Close", "Kapat"), null).create()
         fun render() {
             col.removeAllViews()
             val q = Store.queue()
-            if (q.items.isEmpty()) col.addView(text("Empty. Add videos with press & hold → Add to play queue.", 13f, C.LABEL, lines = 3))
+            if (q.items.isEmpty()) col.addView(text(tr("Empty. Add videos with press & hold → Add to play queue.", "Boş. Basılı tutup → Çalma sırasına ekle ile video ekleyin."), 13f, C.LABEL, lines = 3))
             for ((i, e) in q.items.withIndex()) {
                 val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
                 val t = text((if (i == q.index) "▶ " else "") + e.title.ifEmpty { e.id } + (e.mode?.let { if (it == PlayMode.LISTEN) "  ♪" else "" } ?: ""),
@@ -1388,10 +1477,10 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val known = channelId ?: info?.channelId
         if (known != null) { openChannel(known); return }
         if (videoId.isEmpty()) return
-        toast("Finding the channel…")
+        toast(tr("Finding the channel…", "Kanal bulunuyor…"))
         io.execute {
             val id = try { InnerTube.info(videoId, Net.network(this, Store.wifiOnly), order = Clients.PLAY_ORDER).also { info = it }.channelId } catch (_: Exception) { null }
-            main.post { if (!isDestroyed) { if (id != null) openChannel(id) else toast("Couldn't find the channel") } }
+            main.post { if (!isDestroyed) { if (id != null) openChannel(id) else toast(tr("Couldn't find the channel", "Kanal bulunamadı")) } }
         }
     }
 

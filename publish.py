@@ -108,7 +108,7 @@ def build_app(app, live_by_key, force_bump, dry):
         "key": app["key"], "name": app["name"], "package": app["package"],
         "versionCode": code, "versionName": name, "file": app["file"], "tag": tag,
         "url": f"https://github.com/{CAT['repo']}/releases/download/{tag}/{app['file']}",
-        "size": os.path.getsize(out), "sha256": sha256(out), "minSdk": min_sdk, "summary": app["summary"],
+        "size": os.path.getsize(out), "sha256": sha256(out), "minSdk": min_sdk, "summary": app["summary"], "summary_tr": app.get("summary_tr", ""),
     }
 
 
@@ -187,8 +187,9 @@ def sync_sources(apps):
         src = os.path.join(PROJECTS, a["project"])
         if os.path.isdir(src):
             mirror(src, os.path.join(REPO_DIR, "src", a["src"]))
-    shutil.copyfile(os.path.join(PROJECTS, "PlainSetup", "app", "src", "main", "java", "app", "plain", "update", "PlainUpdate.kt"),
-                    os.path.join(REPO_DIR, "shared", "PlainUpdate.kt"))
+    for pkg, name in (("update", "PlainUpdate.kt"), ("lang", "PlainLang.kt")):
+        shutil.copyfile(os.path.join(PROJECTS, "PlainSetup", "app", "src", "main", "java", "app", "plain", pkg, name),
+                        os.path.join(REPO_DIR, "shared", name))
 
 
 def git_push(message, no_push):
@@ -218,6 +219,10 @@ def main():
     live_path = os.path.join(REPO_DIR, "apps.json")
     live = load(live_path, {"repo": CAT["repo"], "apps": []})
     live_by_key = {x["key"]: x for x in live["apps"]}
+    for k, e in live_by_key.items():  # catalog texts win, also for apps not rebuilt this time
+        if k in by_key:
+            e["summary"] = by_key[k]["summary"]
+            e["summary_tr"] = by_key[k].get("summary_tr", "")
 
     if a.sync_only:
         sync_sources(apps)

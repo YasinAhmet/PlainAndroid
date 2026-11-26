@@ -7,6 +7,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.plain.lang.tr
 import kotlin.math.roundToInt
 
 fun Context.dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
@@ -41,7 +42,7 @@ fun outline(stroke: Int, radius: Float, width: Int) = GradientDrawable().apply {
 /** "Moved 3 to trash · UNDO" along the bottom for a few seconds after a delete. */
 class UndoBar(ctx: Context) : LinearLayout(ctx) {
     private val text = ctx.label("", 15f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
-    private val btn = ctx.label("UNDO", 15f, ACCENT).apply { contentDescription = "Undo" }
+    private val btn = ctx.label(tr("UNDO", "GERİ AL"), 15f, ACCENT).apply { contentDescription = tr("Undo", "Geri al") }
     private val hide = Runnable { visibility = GONE; onGone?.invoke() }
     /** Called when the bar goes away (timed out or undone). */
     var onGone: (() -> Unit)? = null

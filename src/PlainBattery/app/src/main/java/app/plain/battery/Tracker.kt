@@ -12,6 +12,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.PowerManager
+import app.plain.lang.tr
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
@@ -110,7 +111,7 @@ class Tracker(context: Context) {
             return
         }
         prefs.edit().remove("accessError").putLong("snapshotAt", now).apply()
-        append(appsLog, Csv.APPS_HEADER, Csv.appRows(prev, snap, { label(it, snap) }))
+        append(appsLog, Csv.APPS_HEADER, Csv.appRows(prev, snap, { label(it, snap, UidNames.english) }))
         save(latestFile, snap)
         saveHistory(snap)
         // Stats do not grow while on power, so the last snapshot on power is the unplug baseline.
@@ -217,9 +218,10 @@ class Tracker(context: Context) {
         }
     }
 
-    fun label(uid: Int, s: Snapshot?): String {
+    /** Name of [uid] in the UI language; [t] = [UidNames.english] for the logs. */
+    fun label(uid: Int, s: Snapshot?, t: (String, String) -> String = ::tr): String {
         val pkgs = s?.names?.get(uid) ?: ctx.packageManager.getPackagesForUid(uid)?.toList().orEmpty()
-        return UidNames.label(uid, pkgs) { appLabel(it) }
+        return UidNames.label(uid, pkgs, { appLabel(it) }, t)
     }
 
     // ---- files ----

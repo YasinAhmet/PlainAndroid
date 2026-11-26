@@ -26,6 +26,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 
 sealed class Row
@@ -57,6 +59,7 @@ class MainActivity : Activity() {
     private val adapter = RowAdapter()
     private lateinit var search: EditText
     private lateinit var back: ImageView
+    private lateinit var menuBtn: ImageView
     private lateinit var titleView: TextView
     private val tabViews = ArrayList<TextView>()
     private var tab = 0
@@ -108,8 +111,9 @@ class MainActivity : Activity() {
     private val onPlayer: () -> Unit = { onPlayerChanged() }
 
     companion object {
-        val TABS = listOf("Home", "Library", "Videos", "Playlists")
-        val SEGMENTS = listOf("Songs", "Artists", "Albums", "Genres", "Folders")
+        // getters, not vals: built in the current language each time
+        val TABS get() = listOf(tr("Home", "Ana sayfa"), tr("Library", "Kitaplık"), tr("Videos", "Videolar"), tr("Playlists", "Çalma listeleri"))
+        val SEGMENTS get() = listOf(tr("Songs", "Şarkılar"), tr("Artists", "Sanatçılar"), tr("Albums", "Albümler"), tr("Genres", "Türler"), tr("Folders", "Klasörler"))
         const val HOME = 0; const val LIBRARY = 1; const val VIDEOS = 2; const val PLAYLISTS = 3
         const val SHELF_MAX = 15
         const val REQ_PERMS = 1
@@ -119,6 +123,7 @@ class MainActivity : Activity() {
     // --- lifecycle ---------------------------------------------------------------------------
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         Player.init(this)
         tab = Store.prefs.getInt("tab4", 0).coerceIn(0, TABS.size - 1)
@@ -153,8 +158,8 @@ class MainActivity : Activity() {
             val song = try { External.describe(app, uri) } catch (e: Exception) { null }
             Player.dlog("open $uri -> ${song?.title} external=${song?.externalUri != null}")
             runOnUiThread {
-                if (song == null) { toast("Can't open this file"); return@runOnUiThread }
-                if (Player.playExternal(song)) openNowPlaying() else toast("Can't play this file")
+                if (song == null) { toast(tr("Can't open this file", "Bu dosya açılamıyor")); return@runOnUiThread }
+                if (Player.playExternal(song)) openNowPlaying() else toast(tr("Can't play this file", "Bu dosya oynatılamıyor"))
             }
         }.start()
     }
@@ -200,7 +205,7 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (requestCode == REQ_VIDEO && !Library.hasVideoPermission(this)) toast("Videos stay hidden. Allow “Videos” for this app in Settings to list them.")
+        if (requestCode == REQ_VIDEO && !Library.hasVideoPermission(this)) toast(tr("Videos stay hidden. Allow “Videos” for this app in Settings to list them.", "Videolar gizli kalır. Listelemek için Ayarlar'da bu uygulamaya “Videolar” izni verin."))
         if (requestCode == REQ_PERMS || requestCode == REQ_VIDEO) loadLibrary()
     }
 
@@ -317,7 +322,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(6), dp(4), dp(2))
         }
-        back = icon(R.drawable.ic_back, desc = "Back") { onBackPressed() }
+        back = icon(R.drawable.ic_back, desc = tr("Back", "Geri")) { onBackPressed() }
         top.addView(back)
         val searchBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -327,7 +332,7 @@ class MainActivity : Activity() {
         }
         searchBox.addView(ImageView(this).apply { setImageResource(R.drawable.ic_search); tint(C.LABEL) }, lpL(dp(20), dp(20)))
         search = EditText(this).apply {
-            hint = "Search songs, artists, albums"
+            hint = tr("Search songs, artists, albums", "Şarkı, sanatçı, albüm ara")
             setHintTextColor(C.LABEL)
             setTextColor(C.TEXT)
             textSize = 15f
@@ -346,7 +351,7 @@ class MainActivity : Activity() {
             setOnEditorActionListener { _, _, _ -> hideKeyboard(); true }
         }
         searchBox.addView(search, lpL(0, WRAP, 1f))
-        searchBox.addView(icon(R.drawable.ic_close, 36, 9, C.LABEL, "Clear") { search.setText("") }.also { clear ->
+        searchBox.addView(icon(R.drawable.ic_close, 36, 9, C.LABEL, tr("Clear", "Temizle")) { search.setText("") }.also { clear ->
             search.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -355,7 +360,8 @@ class MainActivity : Activity() {
             clear.visibility = View.GONE
         })
         top.addView(searchBox, lpL(0, dp(44), 1f).apply { leftMargin = dp(4); rightMargin = dp(2) })
-        top.addView(icon(R.drawable.ic_more, desc = "Menu") { mainMenu() })
+        menuBtn = icon(R.drawable.ic_more, desc = tr("Menu", "Menü")) { mainMenu() }
+        top.addView(menuBtn)
         col.addView(top, lpL(MATCH, WRAP))
         spaceBar = text("", 13f, C.ACCENT, lines = 2).apply {
             background = outline(dpf(10), C.ACCENT)
@@ -428,9 +434,9 @@ class MainActivity : Activity() {
         miniSub = text("", 12.5f, C.DIM)
         miniText.addView(miniTitle); miniText.addView(miniSub)
         miniRow.addView(miniText, lpL(0, WRAP, 1f))
-        miniPlay = icon(R.drawable.ic_play, 44, 9, desc = "Play/pause") { Player.toggle() }
+        miniPlay = icon(R.drawable.ic_play, 44, 9, desc = tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
         miniRow.addView(miniPlay)
-        miniRow.addView(icon(R.drawable.ic_next, 44, 10, desc = "Next") { Player.next() })
+        miniRow.addView(icon(R.drawable.ic_next, 44, 10, desc = tr("Next", "Sonraki")) { Player.next() })
         mini.addView(miniRow, lpL(MATCH, WRAP))
         miniProgress = ProgressLine(this)
         mini.addView(miniProgress, lpL(MATCH, dp(2)).apply { leftMargin = dp(8); rightMargin = dp(8); bottomMargin = dp(1) })
@@ -442,15 +448,15 @@ class MainActivity : Activity() {
             setPadding(dp(2), dp(4), dp(8), dp(4))
             visibility = View.GONE
         }
-        sel.addView(icon(R.drawable.ic_close, 40, 10, C.TEXT, "End selection") { endSelection() })
+        sel.addView(icon(R.drawable.ic_close, 40, 10, C.TEXT, tr("End selection", "Seçimi bitir")) { endSelection() })
         selCount = text("", 14f, C.TEXT, bold = true)
         sel.addView(selCount, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
         val selActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun selPill(label: String, fn: () -> Unit) = selActions.addView(pill(label, C.BG) { fn() }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
-        selPill("All") { selection?.toggleAll(shownSongs()); updateSelection() }
-        selPill("Play next") { selectedSongs().takeIf { it.isNotEmpty() }?.let { Player.playNext(it); toast("${it.size} play next"); endSelection() } }
-        selPill("Add to playlist") { selectedSongs().takeIf { it.isNotEmpty() }?.let { addToPlaylist(it) } }
-        selActions.addView(pill("Erase", C.BG, C.RED, C.RED) { selectedSongs().takeIf { it.isNotEmpty() }?.let { eraser.confirm(EraseSet.of(it), "${it.size} selected") } })
+        selPill(tr("All", "Tümü")) { selection?.toggleAll(shownSongs()); updateSelection() }
+        selPill(tr("Play next", "Sonra çal")) { selectedSongs().takeIf { it.isNotEmpty() }?.let { Player.playNext(it); toast(tr("${it.size} play next", "${it.size} şarkı sonra çalacak")); endSelection() } }
+        selPill(tr("Add to playlist", "Çalma listesine ekle")) { selectedSongs().takeIf { it.isNotEmpty() }?.let { addToPlaylist(it) } }
+        selActions.addView(pill(tr("Erase", "Sil"), C.BG, C.RED, C.RED) { selectedSongs().takeIf { it.isNotEmpty() }?.let { eraser.confirm(EraseSet.of(it), tr("${it.size} selected", "${it.size} seçili öğe")) } })
         sel.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(selActions) }, lpL(0, WRAP, 1f))
         selBar = sel
         col.addView(sel, lpL(MATCH, WRAP).apply { leftMargin = dp(6); rightMargin = dp(6); bottomMargin = dp(6) })
@@ -465,7 +471,7 @@ class MainActivity : Activity() {
         }
         undoText = text("", 14f, C.TEXT)
         undoBar.addView(undoText, lpL(0, WRAP, 1f))
-        undoBar.addView(text("UNDO", 14f, C.ACCENT, bold = true).apply {
+        undoBar.addView(text(PlainLang.upper(tr("Undo", "Geri al")), 14f, C.ACCENT, bold = true).apply {
             setPadding(dp(14), dp(10), dp(14), dp(10))
             setOnClickListener { val a = undoAction; handler.removeCallbacks(hideUndo); hideUndo.run(); a?.invoke() }
         })
@@ -562,7 +568,8 @@ class MainActivity : Activity() {
         updateTabs()
         val lib = Library.index
         val rows: List<Row> = when {
-            !Library.hasPermission(this) -> listOf(EmptyRow("LocalMusic needs access to the music files on this phone.\nNothing ever leaves the phone: the app has no internet permission.", "Allow access" to {
+            !Library.hasPermission(this) -> listOf(EmptyRow(tr("LocalMusic needs access to the music files on this phone.\nNothing ever leaves the phone: the app has no internet permission.",
+                "LocalMusic'in bu telefondaki müzik dosyalarına erişmesi gerekiyor.\nHiçbir şey telefondan çıkmaz: uygulamanın internet izni yok."), tr("Allow access", "Erişime izin ver") to {
                 requestPermissions(if (Build.VERSION.SDK_INT >= 33) arrayOf(Library.PERMISSION, Library.VIDEO_PERMISSION) else arrayOf(Library.PERMISSION), REQ_PERMS)
             }))
             query.isNotEmpty() -> searchRows(lib)
@@ -577,7 +584,7 @@ class MainActivity : Activity() {
 
     private fun tabRows(lib: LibraryIndex): List<Row> {
         if (lib.songs.isEmpty() && tab != PLAYLISTS) {
-            return listOf(EmptyRow(if (loading) "Loading…" else "No music found on this phone.", "Rescan" to { loadLibrary() }))
+            return listOf(EmptyRow(if (loading) tr("Loading…", "Yükleniyor…") else tr("No music found on this phone.", "Bu telefonda müzik bulunamadı."), tr("Rescan", "Yeniden tara") to { loadLibrary() }))
         }
         return when (tab) {
             HOME -> homeRows(lib)
@@ -601,7 +608,7 @@ class MainActivity : Activity() {
 
     private fun songCard(list: List<Song>, i: Int, sub: String? = null): Card {
         val s = list[i]
-        val tags = listOfNotNull(if (s.isVideo) "Video" else null, if (s.cached) "Cached" else null)
+        val tags = listOfNotNull(if (s.isVideo) tr("Video", "Video") else null, if (s.cached) tr("Cached", "Önbellekte") else null)
         return Card(s.title, sub ?: (tags + s.shownArtist).joinToString(" · "), listOf(s), { playFrom(list, i) }, { songMenu(s) })
     }
 
@@ -614,52 +621,54 @@ class MainActivity : Activity() {
     private fun homeRows(lib: LibraryIndex): List<Row> {
         val rows = ArrayList<Row>()
         val total = lib.songs.size - lib.videos.size
-        rows += HeaderRow("Home", listOfNotNull(Text.count(total, "song"), if (lib.videos.isNotEmpty()) Text.count(lib.videos.size, "video") else null,
+        rows += HeaderRow(tr("Home", "Ana sayfa"), listOfNotNull(Text.count(total, "song"), if (lib.videos.isNotEmpty()) Text.count(lib.videos.size, "video") else null,
             Text.longTime(lib.songs.sumOf { it.durationMs })).joinToString(" · "), listOf(
-            "Shuffle all" to { Player.shufflePlay(lib.songs.filter { !it.isVideo }.map { it.id }); openNowPlaying() },
+            tr("Shuffle all", "Tümünü karıştır") to { Player.shufflePlay(lib.songs.filter { !it.isVideo }.map { it.id }); openNowPlaying() },
         ))
 
         val fresh = lib.newPieces
         val freshSongs = fresh.flatMap { it.songs }
-        shelf(rows, "New pieces", "Last ${NewPieces.DAYS} days · ${Text.count(freshSongs.size, "piece")}", freshSongs, fresh.take(SHELF_MAX).map { item ->
-            if (item.isBundle) Card(item.title, item.sub, item.songs, { openSongList(item.title, item.sub, item.songs) }, { groupMenu(Group("new", item.title, item.songs), "these new pieces") }, mosaic = true)
+        shelf(rows, tr("New pieces", "Yeni parçalar"), tr("Last ${NewPieces.DAYS} days", "Son ${NewPieces.DAYS} gün") + " · ${Text.count(freshSongs.size, "piece")}", freshSongs, fresh.take(SHELF_MAX).map { item ->
+            if (item.isBundle) Card(item.title, item.sub, item.songs, { openSongList(item.title, item.sub, item.songs) }, { groupMenu(Group("new", item.title, item.songs), K_NEW) }, mosaic = true)
             else songCard(freshSongs, freshSongs.indexOf(item.songs[0]))
         }) { openNewPieces() }
 
         shownHistory = Store.historyVersion
         val h = Store.history
         val recent = h.recent(lib.byId, lib.byPath).take(100)
-        shelf(rows, "Recently listened", null, recent, recent.indices.map { songCard(recent, it) }) {
-            openSongList("Recently listened", "Newest first", Store.history.recent(Library.index.byId, Library.index.byPath).take(200))
+        shelf(rows, tr("Recently listened", "Son dinlenenler"), null, recent, recent.indices.map { songCard(recent, it) }) {
+            openSongList(tr("Recently listened", "Son dinlenenler"), tr("Newest first", "Önce en yeniler"), Store.history.recent(Library.index.byId, Library.index.byPath).take(200))
         }
         val most = h.most(lib.byId, lib.byPath).take(100)
         if (most.size >= 3) {
             val songs = most.map { it.first }
-            shelf(rows, "Most played", null, songs, most.indices.map { i -> songCard(songs, i, "${most[i].first.shownArtist} · ${most[i].second} plays") }) {
-                openSongList("Most played", "Most plays first", Store.history.most(Library.index.byId, Library.index.byPath).take(200).map { it.first })
+            shelf(rows, tr("Most played", "En çok çalınanlar"), null, songs, most.indices.map { i -> songCard(songs, i, "${most[i].first.shownArtist} · " + tr("${most[i].second} plays", "${most[i].second} kez çalındı")) }) {
+                openSongList(tr("Most played", "En çok çalınanlar"), tr("Most plays first", "Önce en çok çalınanlar"), Store.history.most(Library.index.byId, Library.index.byPath).take(200).map { it.first })
             }
         }
 
-        shelf(rows, "Videos", Text.count(lib.videos.size, "video"), lib.videos, lib.videos.indices.take(SHELF_MAX).map { songCard(lib.videos, it) }) { selectTab(VIDEOS) }
+        shelf(rows, tr("Videos", "Videolar"), Text.count(lib.videos.size, "video"), lib.videos, lib.videos.indices.take(SHELF_MAX).map { songCard(lib.videos, it) }) { selectTab(VIDEOS) }
         val pyt = lib.plainYoutube
-        shelf(rows, "From Plain Youtube", "Saved and cached · newest first", pyt, pyt.indices.take(SHELF_MAX).map { songCard(pyt, it) }) {
-            openSongList("From Plain Youtube", "Saved and cached · newest first", Library.index.plainYoutube)
+        val pytTitle = tr("From Plain Youtube", "Plain Youtube'dan")
+        val pytSub = tr("Saved and cached · newest first", "Kaydedilen ve önbellekteki · önce en yeniler")
+        shelf(rows, pytTitle, pytSub, pyt, pyt.indices.take(SHELF_MAX).map { songCard(pyt, it) }) {
+            openSongList(pytTitle, pytSub, Library.index.plainYoutube)
         }
         val pls = Store.playlists.map { it to it.resolve(lib.byId, lib.byPath) }
-        shelf(rows, "Playlists", null, emptyList(), pls.map { (p, songs) ->
+        shelf(rows, tr("Playlists", "Çalma listeleri"), null, emptyList(), pls.map { (p, songs) ->
             Card(p.name, Text.count(songs.size, "song"), songs, { openPlaylist(p) }, { playlistMenu(p) })
         }) { selectTab(PLAYLISTS) }
         return rows
     }
 
     private fun openNewPieces() {
-        pushDrill("New pieces") {
+        pushDrill(tr("New pieces", "Yeni parçalar")) {
             val items = Library.index.newPieces
             val songs = items.flatMap { it.songs }
             val rows = ArrayList<Row>()
-            rows += HeaderRow("New pieces", "Added in the last ${NewPieces.DAYS} days · ${Text.count(songs.size, "piece")}", playButtons(songs))
+            rows += HeaderRow(tr("New pieces", "Yeni parçalar"), tr("Added in the last ${NewPieces.DAYS} days", "Son ${NewPieces.DAYS} günde eklendi") + " · ${Text.count(songs.size, "piece")}", playButtons(songs))
             for (it in items) {
-                if (it.isBundle) rows += GroupRow(it.title, it.sub, it.songs[0].id, { openSongList(it.title, it.sub, it.songs) }, { groupMenu(Group("new", it.title, it.songs), "these new pieces") }, artSongs = it.songs, mosaic = true)
+                if (it.isBundle) rows += GroupRow(it.title, it.sub, it.songs[0].id, { openSongList(it.title, it.sub, it.songs) }, { groupMenu(Group("new", it.title, it.songs), K_NEW) }, artSongs = it.songs, mosaic = true)
                 else rows += SongRow(it.songs[0], songs, songs.indexOf(it.songs[0]))
             }
             rows
@@ -671,7 +680,7 @@ class MainActivity : Activity() {
         if (query.isNotEmpty()) hideKeyboard()
         pushDrill(title) {
             listOf<Row>(HeaderRow(title, listOfNotNull(sub, Text.count(songs.size, "song") + " · " + Text.longTime(songs.sumOf { it.durationMs })).joinToString("\n"),
-                playButtons(songs) + if (erase) listOf(eraseButton(songs, "all in", title, strong = true)) else emptyList())) +
+                playButtons(songs) + if (erase) listOf(eraseButton(songs, K_ALL_IN, title, strong = true)) else emptyList())) +
                 songs.mapIndexed { i, s -> SongRow(s, songs, i) }
         }
     }
@@ -681,9 +690,9 @@ class MainActivity : Activity() {
     // --- Library: Songs / Artists / Albums / Genres / Folders -------------------------------------
 
     private fun libraryRows(lib: LibraryIndex): List<Row> = when (seg) {
-        0 -> listOf<Row>(HeaderRow("Songs", "${lib.songs.size} songs · ${Text.time(lib.songs.sumOf { it.durationMs })}", listOf(
-            "Shuffle all" to { Player.shufflePlay(lib.songs.map { it.id }); openNowPlaying() },
-            "Play" to { Player.playList(lib.songs.map { it.id }, 0) },
+        0 -> listOf<Row>(HeaderRow(tr("Songs", "Şarkılar"), tr("${lib.songs.size} songs", "${lib.songs.size} şarkı") + " · ${Text.time(lib.songs.sumOf { it.durationMs })}", listOf(
+            tr("Shuffle all", "Tümünü karıştır") to { Player.shufflePlay(lib.songs.map { it.id }); openNowPlaying() },
+            tr("Play", "Oynat") to { Player.playList(lib.songs.map { it.id }, 0) },
         ))) + lib.songs.mapIndexed { i, s -> SongRow(s, lib.songs, i) }
         1 -> {
             val sort = Store.prefs.getInt("artistSort", 0)
@@ -692,13 +701,16 @@ class MainActivity : Activity() {
             val plays = playCounts()
             val list = if (sort == 0) packed.groups.sortedWith(compareBy({ -it.count }, { Text.sortKey(it.title) })) else packed.groups
             val rows = ArrayList<Row>()
-            rows += HeaderRow("Artists", "${Text.count(lib.artists.size, "artist")} · ${Text.count(lib.songs.size, "song")}" +
-                (packed.packed?.let { "\nArtists with ${if (max == 1) "1 song" else "1–2 songs"} are packed into “${Packing.ONE_OFFS}”" } ?: ""), listOf(
-                "Most songs" to { setSort("artistSort", 0) }, "A–Z" to { setSort("artistSort", 1) },
-                (if (max == 1) "Pack: 1 song" else "Pack: ≤2 songs") to { setSort("packMax", if (max == 1) 2 else 1) },
+            rows += HeaderRow(tr("Artists", "Sanatçılar"), "${Text.count(lib.artists.size, "artist")} · ${Text.count(lib.songs.size, "song")}" +
+                (packed.packed?.let {
+                    tr("\nArtists with ${if (max == 1) "1 song" else "1–2 songs"} are packed into “${Packing.oneOffsTitle}”",
+                        "\n${if (max == 1) "1" else "1–2"} şarkılı sanatçılar “${Packing.oneOffsTitle}” içinde toplanır")
+                } ?: ""), listOf(
+                tr("Most songs", "En çok şarkı") to { setSort("artistSort", 0) }, "A–Z" to { setSort("artistSort", 1) },
+                (if (max == 1) tr("Pack: 1 song", "Topla: 1 şarkı") else tr("Pack: ≤2 songs", "Topla: ≤2 şarkı")) to { setSort("packMax", if (max == 1) 2 else 1) },
             ), accent = sort)
-            packed.packed?.let { p -> rows += GroupRow(p.title, p.artist + " · " + Text.count(p.count, "song"), p.songs.first().id, { openPacked(p) }, { groupMenu(p, "all in", strong = true) }, round = true, artSongs = p.songs, mosaic = true) }
-            list.forEach { g -> rows += GroupRow(g.title, g.stats, g.songs.first().id, { openArtist(g) }, { groupMenu(g, "artist") }, round = true, artSongs = ArtPick.artist(g.songs, plays)) }
+            packed.packed?.let { p -> rows += GroupRow(p.title, p.artist + " · " + Text.count(p.count, "song"), p.songs.first().id, { openPacked(p) }, { groupMenu(p, K_ALL_IN, strong = true) }, round = true, artSongs = p.songs, mosaic = true) }
+            list.forEach { g -> rows += GroupRow(g.title, g.stats, g.songs.first().id, { openArtist(g) }, { groupMenu(g, K_ARTIST) }, round = true, artSongs = ArtPick.artist(g.songs, plays)) }
             rows
         }
         2 -> {
@@ -710,18 +722,19 @@ class MainActivity : Activity() {
                     else -> lib.albums
                 }
             }
-            listOf<Row>(HeaderRow("Albums", "${Text.count(packed.groups.size, "album")} · ${Text.count(lib.songs.size, "song")}" +
-                (packed.packed?.let { "\nSingle tracks are packed into “${Naming.SINGLES}”" } ?: ""), listOf(
-                "A–Z" to { setSort("albumSort", 0) }, "By artist" to { setSort("albumSort", 1) }, "Most songs" to { setSort("albumSort", 2) },
+            listOf<Row>(HeaderRow(tr("Albums", "Albümler"), "${Text.count(packed.groups.size, "album")} · ${Text.count(lib.songs.size, "song")}" +
+                (packed.packed?.let { tr("\nSingle tracks are packed into “${Packing.singlesTitle}”", "\nTek parçalar “${Packing.singlesTitle}” içinde toplanır") } ?: ""), listOf(
+                "A–Z" to { setSort("albumSort", 0) }, tr("By artist", "Sanatçıya göre") to { setSort("albumSort", 1) }, tr("Most songs", "En çok şarkı") to { setSort("albumSort", 2) },
             ), accent = sort)) + albumGrid(listOfNotNull(packed.packed) + packed.groups)
         }
         3 -> {
             val packed = lib.packedGenres
-            if (lib.genres.isEmpty()) listOf(EmptyRow("No genre tags found.")) else
-                (packed.groups.map { g -> GroupRow(g.title, g.stats, g.songs.first().id, { openGroup(g, null) }, { groupMenu(g, "genre songs") }) } +
-                    listOfNotNull(packed.packed?.let { p -> GroupRow(p.title, "Genres with fewer than 3 songs · " + p.stats, p.songs.first().id, { openPacked(p) }, { groupMenu(p, "genre songs") }) }))
+            if (lib.genres.isEmpty()) listOf(EmptyRow(tr("No genre tags found.", "Tür etiketi bulunamadı."))) else
+                (packed.groups.map { g -> GroupRow(g.title, g.stats, g.songs.first().id, { openGroup(g, null) }, { groupMenu(g, K_GENRE) }) } +
+                    listOfNotNull(packed.packed?.let { p -> GroupRow(p.title, tr("Genres with fewer than 3 songs · ", "3'ten az şarkılı türler · ") + p.stats, p.songs.first().id, { openPacked(p) }, { groupMenu(p, K_GENRE) }) }))
         }
-        else -> listOf<Row>(HeaderRow("Folders", "Single-subfolder chains are merged; single files are packed into “${FolderTree.LOOSE}”", emptyList())) +
+        else -> listOf<Row>(HeaderRow(tr("Folders", "Klasörler"), tr("Single-subfolder chains are merged; single files are packed into “${FolderTree.looseTitle}”",
+            "Tek alt klasörlü zincirler birleştirilir; tek dosyalar “${FolderTree.looseTitle}” içinde toplanır"), emptyList())) +
             lib.folderTree.map { folderRow(it) }
     }
 
@@ -729,16 +742,16 @@ class MainActivity : Activity() {
     private fun playCounts(): Map<Long, Int> = Store.history.entries.associate { it.id to it.count }
 
     private fun folderRow(n: FolderNode) =
-        GroupRow(n.title, n.stats, n.all.first().id, { openFolder(n) }, { groupMenu(Group(n.key, n.title, n.all), "folder contents", strong = n.loose || n.count >= 50) }, artSongs = n.all, mosaic = true)
+        GroupRow(n.title, n.stats, n.all.first().id, { openFolder(n) }, { groupMenu(Group(n.key, n.title, n.all), K_FOLDER, strong = n.loose || n.count >= 50) }, artSongs = n.all, mosaic = true)
 
     private fun openFolder(n: FolderNode) {
         pushDrill(n.title) {
             val fresh = Library.index.folderTree.firstNotNullOfOrNull { it.find(n.key) } ?: n
             val rows = ArrayList<Row>()
-            rows += HeaderRow(fresh.title, fresh.stats, playButtons(fresh.all) + eraseButton(fresh.all, "folder contents", fresh.title, fresh.loose || fresh.count >= 50))
+            rows += HeaderRow(fresh.title, fresh.stats, playButtons(fresh.all) + eraseButton(fresh.all, K_FOLDER, fresh.title, fresh.loose || fresh.count >= 50))
             fresh.children.forEach { rows += folderRow(it) }
             if (fresh.songs.isNotEmpty()) {
-                if (fresh.children.isNotEmpty()) rows += SectionRow("Files here (${fresh.songs.size})")
+                if (fresh.children.isNotEmpty()) rows += SectionRow(tr("Files here (${fresh.songs.size})", "Buradaki dosyalar (${fresh.songs.size})"))
                 fresh.songs.forEachIndexed { i, s -> rows += SongRow(s, fresh.songs, i) }
             }
             rows
@@ -752,17 +765,19 @@ class MainActivity : Activity() {
         if (v.isEmpty()) {
             val needPerm = Build.VERSION.SDK_INT >= 33 && !Library.hasVideoPermission(this)
             return listOf(EmptyRow(
-                if (needPerm) "Videos from Plain Youtube need the “Videos” permission.\nWithout it LocalMusic lists audio only."
-                else "No videos from Plain Youtube yet.\nSaved and cached videos appear here by themselves.",
-                if (needPerm) "Allow videos" to { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) } else null,
+                if (needPerm) tr("Videos from Plain Youtube need the “Videos” permission.\nWithout it LocalMusic lists audio only.",
+                    "Plain Youtube videoları için “Videolar” izni gerekir.\nİzin olmadan LocalMusic yalnızca sesleri listeler.")
+                else tr("No videos from Plain Youtube yet.\nSaved and cached videos appear here by themselves.",
+                    "Henüz Plain Youtube videosu yok.\nKaydedilen ve önbellekteki videolar burada kendiliğinden görünür."),
+                if (needPerm) tr("Allow videos", "Videolara izin ver") to { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) } else null,
             ))
         }
         val on = videoOn()
         val rows = ArrayList<Row>()
-        rows += HeaderRow("Videos", "${Text.count(v.size, "video")} · ${Text.count(lib.videoChannels.size, "channel")} · newest first", listOf(
-            "Play all" to { Player.playList(v.map { it.id }, 0); if (on) openNowPlaying() },
-            "Shuffle" to { Player.shufflePlay(v.map { it.id }); if (on) openNowPlaying() },
-            (if (on) "Picture: on" else "Picture: off") to { Store.prefs.edit().putBoolean("video", !on).apply(); render() },
+        rows += HeaderRow(tr("Videos", "Videolar"), "${Text.count(v.size, "video")} · ${Text.count(lib.videoChannels.size, "channel")} · " + tr("newest first", "önce en yeniler"), listOf(
+            tr("Play all", "Tümünü oynat") to { Player.playList(v.map { it.id }, 0); if (on) openNowPlaying() },
+            tr("Shuffle", "Karıştır") to { Player.shufflePlay(v.map { it.id }); if (on) openNowPlaying() },
+            (if (on) tr("Picture: on", "Görüntü: açık") else tr("Picture: off", "Görüntü: kapalı")) to { Store.prefs.edit().putBoolean("video", !on).apply(); render() },
         ), accent = if (on) 2 else -1)
         for (ch in lib.videoChannels) {
             rows += SectionRow("${ch.title} · ${ch.count}")
@@ -774,12 +789,13 @@ class MainActivity : Activity() {
     private fun playlistRows(lib: LibraryIndex): List<Row> {
         val byPath = lib.byPath
         val rows = ArrayList<Row>()
-        rows += HeaderRow("Playlists", "${Store.playlists.size} playlist${if (Store.playlists.size == 1) "" else "s"}", listOf("New playlist" to { newPlaylist(null) }))
+        rows += HeaderRow(tr("Playlists", "Çalma listeleri"), Text.count(Store.playlists.size, "playlist"), listOf(tr("New playlist", "Yeni çalma listesi") to { newPlaylist(null) }))
         for (p in Store.playlists) {
             val songs = p.resolve(lib.byId, byPath)
-            rows += GroupRow(p.name, "${songs.size} songs · ${Text.time(songs.sumOf { it.durationMs })}", songs.firstOrNull()?.id ?: -1, { openPlaylist(p) }, { playlistMenu(p) })
+            rows += GroupRow(p.name, tr("${songs.size} songs", "${songs.size} şarkı") + " · ${Text.time(songs.sumOf { it.durationMs })}", songs.firstOrNull()?.id ?: -1, { openPlaylist(p) }, { playlistMenu(p) })
         }
-        if (Store.playlists.isEmpty()) rows += EmptyRow("No playlists yet. Use ⋮ on any song → Add to playlist, or create one here.")
+        if (Store.playlists.isEmpty()) rows += EmptyRow(tr("No playlists yet. Use ⋮ on any song → Add to playlist, or create one here.",
+            "Henüz çalma listesi yok. Bir şarkıda ⋮ → Çalma listesine ekle'yi kullanın ya da burada oluşturun."))
         return rows
     }
 
@@ -790,26 +806,26 @@ class MainActivity : Activity() {
         val albums = lib.searchGroups(lib.albums, query).take(4)
         val songs = lib.search(query)
         if (artists.isNotEmpty()) {
-            rows += SectionRow("Artists")
-            artists.forEach { g -> rows += GroupRow(g.title, g.stats, g.songs.first().id, { openArtist(g) }, { groupMenu(g, "artist") }, round = true, artSongs = ArtPick.artist(g.songs, plays)) }
+            rows += SectionRow(tr("Artists", "Sanatçılar"))
+            artists.forEach { g -> rows += GroupRow(g.title, g.stats, g.songs.first().id, { openArtist(g) }, { groupMenu(g, K_ARTIST) }, round = true, artSongs = ArtPick.artist(g.songs, plays)) }
         }
         if (albums.isNotEmpty()) {
-            rows += SectionRow("Albums")
-            albums.forEach { g -> rows += GroupRow(g.title, g.artist + " · " + g.sub, g.songs.first().id, { openAlbum(g) }, { groupMenu(g, "album") }) }
+            rows += SectionRow(tr("Albums", "Albümler"))
+            albums.forEach { g -> rows += GroupRow(g.title, g.artist + " · " + g.sub, g.songs.first().id, { openAlbum(g) }, { groupMenu(g, K_ALBUM) }) }
         }
         if (songs.isNotEmpty()) {
-            rows += SectionRow("Songs (${songs.size})")
+            rows += SectionRow(tr("Songs (${songs.size})", "Şarkılar (${songs.size})"))
             songs.forEachIndexed { i, s -> rows += SongRow(s, songs, i) }
         }
-        if (rows.isEmpty()) rows += EmptyRow("Nothing matches “$query”.")
+        if (rows.isEmpty()) rows += EmptyRow(tr("Nothing matches “$query”.", "“$query” ile eşleşen bir şey yok."))
         return rows
     }
 
     private fun playButtons(songs: List<Song>): List<Pair<String, () -> Unit>> = listOf(
-        "Play" to { Player.playList(songs.map { it.id }, 0) },
-        "Shuffle" to { Player.shufflePlay(songs.map { it.id }) },
-        "Add to queue" to { Player.addToQueue(songs); toast("Added ${songs.size} to queue") },
-        "Add to playlist" to { addToPlaylist(songs) },
+        tr("Play", "Oynat") to { Player.playList(songs.map { it.id }, 0) },
+        tr("Shuffle", "Karıştır") to { Player.shufflePlay(songs.map { it.id }) },
+        tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(songs); toast(tr("Added ${songs.size} to queue", "${songs.size} şarkı sıraya eklendi")) },
+        tr("Add to playlist", "Çalma listesine ekle") to { addToPlaylist(songs) },
     )
 
     private fun openGroup(g: Group, sub: String?) {
@@ -834,25 +850,58 @@ class MainActivity : Activity() {
 
     private fun albumGrid(albums: List<Group>): List<Row> = albums.chunked(3).map { AlbumPairRow(it) }
 
+    // Erase kinds: internal keys (English); eraseLabel/eraseWhat turn them into the shown text.
+    private val K_ALBUM = "album"
+    private val K_ARTIST = "artist"
+    private val K_ALL_IN = "all in"
+    private val K_GENRE = "genre songs"
+    private val K_FOLDER = "folder contents"
+    private val K_SINGLES = "all single tracks"
+    private val K_NEW = "these new pieces"
+
+    /** Menu item: "Erase album (12 songs)…". */
+    private fun eraseLabel(kind: String, count: String): String = tr("Erase $kind ($count)…", when (kind) {
+        K_ALBUM -> "Albümü sil"
+        K_ARTIST -> "Sanatçıyı sil"
+        K_ALL_IN -> "Tümünü sil"
+        K_GENRE -> "Türün şarkılarını sil"
+        K_FOLDER -> "Klasör içeriğini sil"
+        K_SINGLES -> "Tüm tekli parçaları sil"
+        K_NEW -> "Bu yeni parçaları sil"
+        else -> "Sil"
+    } + " ($count)…")
+
+    /** What the confirmation names: "album “Karma”". */
+    private fun eraseWhat(kind: String, title: String): String = tr("$kind “$title”", when (kind) {
+        K_ALBUM -> "albüm “$title”"
+        K_ARTIST -> "sanatçı “$title”"
+        K_ALL_IN -> "“$title” içindekilerin tümü"
+        K_GENRE -> "“$title” türünün şarkıları"
+        K_FOLDER -> "“$title” klasörünün içeriği"
+        K_SINGLES -> "“$title” içindeki tüm tekli parçalar"
+        K_NEW -> "bu yeni parçalar: “$title”"
+        else -> "“$title”"
+    })
+
     /** Long-press on an artist/album/genre/folder: play it without opening it, or erase it ([kind]: "album", "artist"...). */
     private fun groupMenu(g: Group, kind: String = "", strong: Boolean = false) {
         menu(g.title, listOf(
-            "Play" to { Player.playList(g.songs.map { it.id }, 0) },
-            "Shuffle" to { Player.shufflePlay(g.songs.map { it.id }) },
-            "Play next" to { Player.playNext(g.songs); toast("Plays next") },
-            "Add to queue" to { Player.addToQueue(g.songs); toast("Added ${g.songs.size} to queue") },
-            "Add to playlist…" to { addToPlaylist(g.songs) },
+            tr("Play", "Oynat") to { Player.playList(g.songs.map { it.id }, 0) },
+            tr("Shuffle", "Karıştır") to { Player.shufflePlay(g.songs.map { it.id }) },
+            tr("Play next", "Sonra çal") to { Player.playNext(g.songs); toast(tr("Plays next", "Sonra çalacak")) },
+            tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(g.songs); toast(tr("Added ${g.songs.size} to queue", "${g.songs.size} şarkı sıraya eklendi")) },
+            tr("Add to playlist…", "Çalma listesine ekle…") to { addToPlaylist(g.songs) },
         ) + (if (kind.isEmpty()) emptyList() else listOf(eraseItem(g.songs, kind, g.title, strong))))
     }
 
     /** "Erase album (12 songs)…" → confirmation with count and size → one trash request. */
     private fun eraseItem(songs: List<Song>, kind: String, title: String, strong: Boolean = false): Pair<String, () -> Unit> {
         val set = EraseSet.of(songs)
-        return "Erase $kind (${set.summary.substringBeforeLast(" · ")})…" to { eraser.confirm(set, "$kind “$title”", strong) }
+        return eraseLabel(kind, set.summary.substringBeforeLast(" · ")) to { eraser.confirm(set, eraseWhat(kind, title), strong) }
     }
 
     private fun eraseButton(songs: List<Song>, kind: String, title: String, strong: Boolean = false): Pair<String, () -> Unit> =
-        "Erase…" to { eraser.confirm(EraseSet.of(songs), "$kind “$title”", strong) }
+        tr("Erase…", "Sil…") to { eraser.confirm(EraseSet.of(songs), eraseWhat(kind, title), strong) }
 
     /** Artist page: play everything (merged) or pick an album. */
     private fun openArtist(g: Group) {
@@ -863,18 +912,18 @@ class MainActivity : Activity() {
             val albums = lib.albumsOf(fresh)
             val rows = ArrayList<Row>()
             rows += HeaderRow(fresh.title, fresh.stats, listOf(
-                "Play all" to { Player.playList(fresh.songs.map { it.id }, 0) },
-                "Shuffle all" to { Player.shufflePlay(fresh.songs.map { it.id }) },
-                "Add to queue" to { Player.addToQueue(fresh.songs); toast("Added ${fresh.songs.size} to queue") },
-                "Add to playlist" to { addToPlaylist(fresh.songs) },
-                eraseButton(fresh.songs, "artist", fresh.title),
+                tr("Play all", "Tümünü oynat") to { Player.playList(fresh.songs.map { it.id }, 0) },
+                tr("Shuffle all", "Tümünü karıştır") to { Player.shufflePlay(fresh.songs.map { it.id }) },
+                tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(fresh.songs); toast(tr("Added ${fresh.songs.size} to queue", "${fresh.songs.size} şarkı sıraya eklendi")) },
+                tr("Add to playlist", "Çalma listesine ekle") to { addToPlaylist(fresh.songs) },
+                eraseButton(fresh.songs, K_ARTIST, fresh.title),
             ))
             if (albums.size > 1 || albums.firstOrNull()?.let { it.count != fresh.count } == true) {
                 val packed = Packing.albums(albums) // single tracks: one "Singles" tile
-                rows += SectionRow("Albums (${packed.groups.size})")
+                rows += SectionRow(tr("Albums (${packed.groups.size})", "Albümler (${packed.groups.size})"))
                 rows += albumGrid(packed.groups + listOfNotNull(packed.packed))
             }
-            rows += SectionRow("All songs (${fresh.count})")
+            rows += SectionRow(tr("All songs (${fresh.count})", "Tüm şarkılar (${fresh.count})"))
             fresh.songs.forEachIndexed { i, s -> rows += SongRow(s, fresh.songs, i) }
             rows
         }
@@ -886,7 +935,7 @@ class MainActivity : Activity() {
         pushDrill(g.title) {
             val fresh = Library.index.albums.firstOrNull { it.key == g.key } ?: g
             val info = listOfNotNull(fresh.artist, fresh.year.takeIf { it > 0 }?.toString()).joinToString(" · ")
-            listOf<Row>(HeaderRow(fresh.title, info + "\n" + fresh.stats, playButtons(fresh.songs) + eraseButton(fresh.songs, "album", fresh.title, Packing.isPacked(fresh)))) +
+            listOf<Row>(HeaderRow(fresh.title, info + "\n" + fresh.stats, playButtons(fresh.songs) + eraseButton(fresh.songs, K_ALBUM, fresh.title, Packing.isPacked(fresh)))) +
                 fresh.songs.mapIndexed { i, s -> SongRow(s, fresh.songs, i, inAlbum = true) }
         }
     }
@@ -896,12 +945,13 @@ class MainActivity : Activity() {
             val lib = Library.index
             val songs = p.resolve(lib.byId, lib.songs.associateBy { it.path.lowercase() })
             val editing = editPlaylist === p
-            val actions = if (editing) listOf("Done" to { editPlaylist = null; Store.savePlaylists(); render() })
-            else playButtons(songs).take(2) + listOf("Edit" to { editPlaylist = p; render() }, "More" to { playlistMenu(p) })
+            val actions = if (editing) listOf(tr("Done", "Bitti") to { editPlaylist = null; Store.savePlaylists(); render() })
+            else playButtons(songs).take(2) + listOf(tr("Edit", "Düzenle") to { editPlaylist = p; render() }, tr("More", "Diğer") to { playlistMenu(p) })
             val rows = ArrayList<Row>()
-            rows += HeaderRow(p.name, "${songs.size} songs · ${Text.time(songs.sumOf { it.durationMs })}" + if (editing) "\nDrag ≡ to reorder, ✕ to remove" else "", actions)
+            rows += HeaderRow(p.name, tr("${songs.size} songs", "${songs.size} şarkı") + " · ${Text.time(songs.sumOf { it.durationMs })}" +
+                if (editing) tr("\nDrag ≡ to reorder, ✕ to remove", "\nSıralamak için ≡ sürükleyin, kaldırmak için ✕") else "", actions)
             songs.forEachIndexed { i, s -> rows += SongRow(s, songs, i, if (editing) SongRow.Mode.PLAYLIST_EDIT else SongRow.Mode.NORMAL, p) }
-            if (songs.isEmpty()) rows += EmptyRow("Empty. Add songs with ⋮ → Add to playlist.")
+            if (songs.isEmpty()) rows += EmptyRow(tr("Empty. Add songs with ⋮ → Add to playlist.", "Boş. ⋮ → Çalma listesine ekle ile şarkı ekleyin."))
             rows
         }
     }
@@ -952,7 +1002,7 @@ class MainActivity : Activity() {
 
     private fun updateSelection() {
         val sel = selection ?: return
-        selCount.text = "${sel.size} selected"
+        selCount.text = tr("${sel.size} selected", "${sel.size} seçili")
         selBar.visibility = View.VISIBLE
         mini.visibility = View.GONE
         adapter.notifyDataSetChanged()
@@ -988,7 +1038,7 @@ class MainActivity : Activity() {
                 val bytes = trash.sumOf { it.size }
                 if (trash.isEmpty() || isFinishing) { spaceBar.visibility = View.GONE; return@runOnUiThread }
                 if (eraser.onLowSpace(free, trash)) { spaceBar.visibility = View.GONE; return@runOnUiThread }
-                spaceBar.text = "Low storage — trash holds ${Text.bytes(bytes)} · Empty trash"
+                spaceBar.text = tr("Low storage — trash holds ${Text.bytes(bytes)} · Empty trash", "Depolama az — çöp kutusunda ${Text.bytes(bytes)} var · Çöp kutusunu boşalt")
                 spaceBar.visibility = View.VISIBLE
             }
         }.start()
@@ -996,55 +1046,56 @@ class MainActivity : Activity() {
 
     fun songMenu(s: Song, playlist: Playlist? = null, selectable: Boolean = false) {
         val items = ArrayList<Pair<String, () -> Unit>>()
-        if (selectable && selection == null && nowPlaying == null && overlays.isEmpty()) items += "Select" to { startSelection(s) }
-        items += "Play next" to { Player.playNext(listOf(s)); toast("Plays next") }
-        items += "Add to queue" to { Player.addToQueue(listOf(s)); toast("Added to queue") }
-        items += "Add to playlist…" to { addToPlaylist(listOf(s)) }
-        if (playlist != null) items += "Remove from this playlist" to {
+        if (selectable && selection == null && nowPlaying == null && overlays.isEmpty()) items += tr("Select", "Seç") to { startSelection(s) }
+        items += tr("Play next", "Sonra çal") to { Player.playNext(listOf(s)); toast(tr("Plays next", "Sonra çalacak")) }
+        items += tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(listOf(s)); toast(tr("Added to queue", "Sıraya eklendi")) }
+        items += tr("Add to playlist…", "Çalma listesine ekle…") to { addToPlaylist(listOf(s)) }
+        if (playlist != null) items += tr("Remove from this playlist", "Bu listeden kaldır") to {
             val idx = playlist.entries.indexOfFirst { it.songId == s.id }
             if (idx >= 0) { playlist.entries.removeAt(idx); Store.savePlaylists(); render() }
         }
-        items += "Go to album" to { closeNowPlaying(); Library.index.albumOf(s)?.let { openAlbum(it) } }
-        items += "Go to artist" to { closeNowPlaying(); Library.index.artistOf(s)?.let { openArtist(it) } }
-        items += "Details" to {
+        items += tr("Go to album", "Albüme git") to { closeNowPlaying(); Library.index.albumOf(s)?.let { openAlbum(it) } }
+        items += tr("Go to artist", "Sanatçıya git") to { closeNowPlaying(); Library.index.artistOf(s)?.let { openArtist(it) } }
+        items += tr("Details", "Ayrıntılar") to {
             confirm(s.title, listOf(
-                "Artist: " + (s.inferredArtist?.let { "$it (from the folder)" } ?: s.artist.ifBlank { "—" }),
-                "Album: ${s.album.ifBlank { "—" }}", "Genre: ${s.genre.ifBlank { "—" }}",
-                "Length: ${Text.time(s.durationMs)}", "Size: ${Text.bytes(s.size)}", "File: ${s.path}",
-            ).let { if (s.isVideo) it + "Type: video (plays as audio unless “Video” is on in Now playing)" else it }
-                .let { if (s.cached) it + "Cached by Plain Youtube: it may remove this file later" else it }.joinToString("\n"), "OK") {}
+                tr("Artist: ", "Sanatçı: ") + (s.inferredArtist?.let { tr("$it (from the folder)", "$it (klasörden)") } ?: s.artist.ifBlank { "—" }),
+                tr("Album: ", "Albüm: ") + s.album.ifBlank { "—" }, tr("Genre: ", "Tür: ") + s.genre.ifBlank { "—" },
+                tr("Length: ", "Süre: ") + Text.time(s.durationMs), tr("Size: ", "Boyut: ") + Text.bytes(s.size), tr("File: ", "Dosya: ") + s.path,
+            ).let { if (s.isVideo) it + tr("Type: video (plays as audio unless “Video” is on in Now playing)", "Biçim: video (Şimdi çalınan ekranında “Video” açık değilse ses olarak çalar)") else it }
+                .let { if (s.cached) it + tr("Cached by Plain Youtube: it may remove this file later", "Plain Youtube önbelleğinde: bu dosyayı daha sonra kaldırabilir") else it }.joinToString("\n"), tr("OK", "Tamam")) {}
         }
-        if (s.externalUri == null && s.id >= 0) items += (if (s.isVideo) "Erase video…" else "Erase…") to {
-            eraser.confirm(EraseSet.of(listOf(s)), if (s.isVideo) "video “${s.title}”" else "“${s.title}”")
+        if (s.externalUri == null && s.id >= 0) items += (if (s.isVideo) tr("Erase video…", "Videoyu sil…") else tr("Erase…", "Sil…")) to {
+            eraser.confirm(EraseSet.of(listOf(s)), if (s.isVideo) tr("video “${s.title}”", "video “${s.title}”") else "“${s.title}”")
         }
         menu(s.title, items)
     }
 
     fun addToPlaylist(songs: List<Song>) {
         val items = ArrayList<Pair<String, () -> Unit>>()
-        items += "＋ New playlist…" to { newPlaylist(songs) }
-        for (p in Store.playlists) items += p.name to { Store.addToPlaylist(p, songs); toast("Added to ${p.name}"); render() }
-        menu("Add ${if (songs.size == 1) "“${songs[0].title}”" else "${songs.size} songs"} to", items)
+        items += tr("＋ New playlist…", "＋ Yeni çalma listesi…") to { newPlaylist(songs) }
+        for (p in Store.playlists) items += p.name to { Store.addToPlaylist(p, songs); toast(tr("Added to ${p.name}", "Eklendi: ${p.name}")); render() }
+        val what = if (songs.size == 1) "“${songs[0].title}”" else tr("${songs.size} songs", "${songs.size} şarkı")
+        menu(tr("Add $what to", "Ekle: $what"), items)
     }
 
     private fun newPlaylist(songs: List<Song>?) {
-        askText("New playlist", "", "Create") { name ->
+        askText(tr("New playlist", "Yeni çalma listesi"), "", tr("Create", "Oluştur")) { name ->
             val p = Store.newPlaylist(name)
-            if (songs != null) { Store.addToPlaylist(p, songs); toast("Added to $name") }
+            if (songs != null) { Store.addToPlaylist(p, songs); toast(tr("Added to $name", "Eklendi: $name")) }
             render()
         }
     }
 
     private fun playlistMenu(p: Playlist) {
         menu(p.name, listOf(
-            "Rename" to { askText("Rename playlist", p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill[drill.size - 1] = Drill(it, drill.last().rows); render() } },
-            "Edit order / remove songs" to { if (drill.isEmpty()) openPlaylist(p); editPlaylist = p; render() },
-            "Erase songs in playlist (files)…" to {
+            tr("Rename", "Yeniden adlandır") to { askText(tr("Rename playlist", "Listeyi yeniden adlandır"), p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill[drill.size - 1] = Drill(it, drill.last().rows); render() } },
+            tr("Edit order / remove songs", "Sırayı düzenle / şarkı kaldır") to { if (drill.isEmpty()) openPlaylist(p); editPlaylist = p; render() },
+            tr("Erase songs in playlist (files)…", "Listedeki şarkıları sil (dosyalar)…") to {
                 val lib = Library.index
-                eraser.confirm(EraseSet.of(p, lib.byId, lib.byPath), "the songs in playlist “${p.name}” (the playlist stays)", strong = true)
+                eraser.confirm(EraseSet.of(p, lib.byId, lib.byPath), tr("the songs in playlist “${p.name}” (the playlist stays)", "“${p.name}” listesindeki şarkılar (liste kalır)"), strong = true)
             },
-            "Delete playlist (keeps songs)" to {
-                confirm("Delete “${p.name}”?", "Only the playlist is deleted, not the songs.", "Delete") {
+            tr("Delete playlist (keeps songs)", "Listeyi sil (şarkılar kalır)") to {
+                confirm(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"), tr("Only the playlist is deleted, not the songs.", "Yalnızca liste silinir, şarkılar silinmez."), tr("Delete", "Sil")) {
                     Store.playlists.remove(p); Store.savePlaylists()
                     if (drill.isNotEmpty()) popDrill() else render()
                 }
@@ -1054,34 +1105,49 @@ class MainActivity : Activity() {
 
     private fun mainMenu() {
         menu(null, listOf(
-            "Organize library…" to { openOrganizer() },
-            "Trash" to { openTrash() },
-            "Sleep timer" to { sleepMenu() },
-            "Rescan music" to { loadLibrary(); toast("Rescanning…") },
-            "Clear listening history" to {
-                confirm("Clear listening history?", "Recently listened and Most played start over. Songs and playlists stay.", "Clear") { Store.clearHistory(); render() }
+            tr("Organize library…", "Kitaplığı düzenle…") to { openOrganizer() },
+            tr("Trash", "Çöp kutusu") to { openTrash() },
+            tr("Sleep timer", "Uyku zamanlayıcısı") to { sleepMenu() },
+            tr("Rescan music", "Müziği yeniden tara") to { loadLibrary(); toast(tr("Rescanning…", "Yeniden taranıyor…")) },
+            tr("Clear listening history", "Dinleme geçmişini temizle") to {
+                confirm(tr("Clear listening history?", "Dinleme geçmişi temizlensin mi?"),
+                    tr("Recently listened and Most played start over. Songs and playlists stay.", "Son dinlenenler ve En çok çalınanlar sıfırlanır. Şarkılar ve çalma listeleri kalır."),
+                    tr("Clear", "Temizle")) { Store.clearHistory(); render() }
             },
         ) + (if (Build.VERSION.SDK_INT >= 31 && !Eraser.canManage(this)) listOf(
-            "Media management (erase without asking)…" to { runCatching { startActivity(Eraser.manageMediaIntent(this)) }; Unit },
+            tr("Media management (erase without asking)…", "Medya yönetimi (sormadan sil)…") to { runCatching { startActivity(Eraser.manageMediaIntent(this)) }; Unit },
         ) else emptyList()) + (if (Build.VERSION.SDK_INT >= 33 && Library.hasPermission(this) && !Library.hasVideoPermission(this)) listOf(
-            "Show Plain Youtube videos…" to { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) },
+            tr("Show Plain Youtube videos…", "Plain Youtube videolarını göster…") to { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) },
         ) else emptyList()) + listOf(
-            "About" to {
-                confirm("LocalMusic", "Plays only music files stored on this phone.\n\nNo internet permission: the app cannot go online.\nNo background polling: it only works while music plays or while you look at it.\n\n${Library.index.songs.size} songs in the library.", "OK") {}
+            tr("About", "Hakkında") to {
+                confirm("LocalMusic", tr("Plays only music files stored on this phone.\n\nNo internet permission: the app cannot go online.\nNo background polling: it only works while music plays or while you look at it.\n\n${Library.index.songs.size} songs in the library.",
+                    "Yalnızca bu telefonda kayıtlı müzik dosyalarını çalar.\n\nİnternet izni yok: uygulama çevrimiçi olamaz.\nArka planda yoklama yok: yalnızca müzik çalarken ya da siz ona bakarken çalışır.\n\nKitaplıkta ${Library.index.songs.size} şarkı var."), tr("OK", "Tamam")) {}
             },
+            PlainLang.label() to { PlainLang.choose(this, menuBtn) { onLanguageChanged() } },
             PlainUpdate.label(this) to { PlainUpdate.check(this) },
         ))
     }
 
+    /**
+     * After a language change: rebuild the library index (it bakes in labels such as "Various artists") and recreate the
+     * activity so every string is built again. Playback lives in Player/PlaybackService and goes on; the tab and library
+     * section come back from prefs (onStop saves them), an opened sub-page (artist, album...) closes.
+     */
+    private fun onLanguageChanged() {
+        Library.relabel()
+        if (Player.playing) PlaybackService.sync(this) // notification buttons in the new language
+        recreate()
+    }
+
     fun sleepMenu() {
         val items = ArrayList<Pair<String, () -> Unit>>()
-        if (Player.sleepAt > 0 || Player.sleepEndOfSong) items += "Turn off timer" to { Player.setSleepMinutes(0); toast("Sleep timer off") }
-        for (m in listOf(15, 30, 45, 60, 90)) items += "$m minutes" to { Player.setSleepMinutes(m); toast("Pausing in $m min") }
-        items += "End of this song" to { Player.setSleepEndOfSong(); toast("Pausing after this song") }
+        if (Player.sleepAt > 0 || Player.sleepEndOfSong) items += tr("Turn off timer", "Zamanlayıcıyı kapat") to { Player.setSleepMinutes(0); toast(tr("Sleep timer off", "Uyku zamanlayıcısı kapalı")) }
+        for (m in listOf(15, 30, 45, 60, 90)) items += tr("$m minutes", "$m dakika") to { Player.setSleepMinutes(m); toast(tr("Pausing in $m min", "$m dk sonra duraklar")) }
+        items += tr("End of this song", "Bu şarkının sonunda") to { Player.setSleepEndOfSong(); toast(tr("Pausing after this song", "Bu şarkıdan sonra duraklar")) }
         val title = when {
-            Player.sleepAt > 0 -> "Sleep timer: ${Text.time(Player.sleepAt - android.os.SystemClock.elapsedRealtime())} left"
-            Player.sleepEndOfSong -> "Sleep timer: end of song"
-            else -> "Sleep timer"
+            Player.sleepAt > 0 -> Text.time(Player.sleepAt - android.os.SystemClock.elapsedRealtime()).let { tr("Sleep timer: $it left", "Uyku zamanlayıcısı: $it kaldı") }
+            Player.sleepEndOfSong -> tr("Sleep timer: end of song", "Uyku zamanlayıcısı: şarkı sonu")
+            else -> tr("Sleep timer", "Uyku zamanlayıcısı")
         }
         menu(title, items)
     }
@@ -1122,7 +1188,7 @@ class MainActivity : Activity() {
     fun openQueue() = showOverlay(QueueView(this))
 
     private fun openOrganizer() {
-        if (!Library.hasPermission(this)) { toast("Allow music access first"); return }
+        if (!Library.hasPermission(this)) { toast(tr("Allow music access first", "Önce müzik erişimine izin verin")); return }
         organizer = OrganizerView(this).also { showOverlay(it) }
     }
 
@@ -1260,8 +1326,8 @@ class MainActivity : Activity() {
         t.addView(text(r.title, 18f, C.TEXT, bold = true))
         r.sub?.let { t.addView(text(it, 12f, C.DIM)) }
         addView(t, lpL(0, WRAP, 1f))
-        r.onPlay?.let { fn -> addView(icon(R.drawable.ic_play, 40, 10, C.TEXT, "Play all") { fn() }) }
-        r.onSeeAll?.let { fn -> addView(text("See all", 13f, C.ACCENT, bold = true).apply { setPadding(dp(10), dp(8), dp(8), dp(8)); setOnClickListener { fn() } }) }
+        r.onPlay?.let { fn -> addView(icon(R.drawable.ic_play, 40, 10, C.TEXT, tr("Play all", "Tümünü oynat")) { fn() }) }
+        r.onSeeAll?.let { fn -> addView(text(tr("See all", "Tümünü gör"), 13f, C.ACCENT, bold = true).apply { setPadding(dp(10), dp(8), dp(8), dp(8)); setOnClickListener { fn() } }) }
     }
 
     class ShelfCard(ctx: MainActivity) : LinearLayout(ctx) {
@@ -1326,14 +1392,14 @@ class MainActivity : Activity() {
     }
 
     class SongHolder(ctx: MainActivity) : LinearLayout(ctx) {
-        val handle = ctx.icon(R.drawable.ic_drag, 40, 9, C.LABEL, "Drag to reorder")
+        val handle = ctx.icon(R.drawable.ic_drag, 40, 9, C.LABEL, tr("Drag to reorder", "Sıralamak için sürükleyin"))
         val art = ArtView(ctx, ctx.dpf(4))
         val num = ctx.text("", 14f, C.LABEL).apply { gravity = Gravity.CENTER }
         val title = ctx.text("", 15f)
         val sub = ctx.text("", 13f, C.DIM)
         val dur = ctx.text("", 12f, C.LABEL)
-        val more = ctx.icon(R.drawable.ic_more, 40, 10, C.LABEL, "More")
-        val remove = ctx.icon(R.drawable.ic_close, 40, 11, C.LABEL, "Remove")
+        val more = ctx.icon(R.drawable.ic_more, 40, 10, C.LABEL, tr("More", "Diğer"))
+        val remove = ctx.icon(R.drawable.ic_close, 40, 11, C.LABEL, tr("Remove", "Kaldır"))
         private var badge: TextView? = null // "VIDEO" / "CACHED", created the first time this row needs one
 
         fun showBadge(label: String?) {
@@ -1390,7 +1456,7 @@ class MainActivity : Activity() {
         if (selecting) { h.more.visibility = View.GONE; if (picked) h.title.setTextColor(C.ACCENT) }
         h.remove.visibility = if (draggable) View.VISIBLE else View.GONE
         h.dur.visibility = if (draggable) View.GONE else View.VISIBLE
-        h.showBadge(if (draggable) null else listOfNotNull(if (s.isVideo) "VIDEO" else null, if (s.cached) "CACHED" else null).joinToString(" · ").ifEmpty { null })
+        h.showBadge(if (draggable) null else listOfNotNull(if (s.isVideo) PlainLang.upper(tr("Video", "Video")) else null, if (s.cached) PlainLang.upper(tr("Cached", "Önbellekte")) else null).joinToString(" · ").ifEmpty { null })
         h.remove.setOnClickListener {
             when (r.mode) {
                 SongRow.Mode.PLAYLIST_EDIT -> r.playlist?.let { p ->
@@ -1438,7 +1504,7 @@ class MainActivity : Activity() {
 
     class AlbumCard(ctx: MainActivity) : LinearLayout(ctx) {
         val art = SquareArtView(ctx, ctx.dpf(8))
-        val play = ctx.icon(R.drawable.ic_play, 30, 7, 0xFF000000.toInt(), "Play album")
+        val play = ctx.icon(R.drawable.ic_play, 30, 7, 0xFF000000.toInt(), tr("Play album", "Albümü oynat"))
         val title = ctx.text("", 13f, C.TEXT, bold = true)
         val sub = ctx.text("", 11.5f, C.DIM, lines = 2)
 
@@ -1473,7 +1539,7 @@ class MainActivity : Activity() {
         if (Packing.isPacked(g)) c.art.bindMosaic(g.songs, dp(120)) else c.art.bindAny(ArtPick.album(g.songs), dp(120))
         c.background = ripple(null)
         c.setOnClickListener { if (Packing.isPacked(g)) openPacked(g) else openAlbum(g) }
-        c.setOnLongClickListener { if (Packing.isPacked(g)) groupMenu(g, "all single tracks", strong = true) else groupMenu(g, "album"); true }
+        c.setOnLongClickListener { if (Packing.isPacked(g)) groupMenu(g, K_SINGLES, strong = true) else groupMenu(g, K_ALBUM); true }
         c.play.setOnClickListener { Player.playList(g.songs.map { it.id }, 0) }
     }
 

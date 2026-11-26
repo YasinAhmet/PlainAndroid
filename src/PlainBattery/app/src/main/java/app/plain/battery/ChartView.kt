@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.View
+import app.plain.lang.tr
 import java.util.Calendar
 
 /**
@@ -74,7 +75,7 @@ class ChartView(context: Context) : View(context) {
 
         val pts = samples.filter { it.time >= start && it.level >= 0 }
         if (pts.size < 2) {
-            c.drawText("Collecting… one sample every ~15 min", left + 8 * dp, (top + bottom) / 2, text)
+            c.drawText(tr("Collecting… one sample every ~15 min", "Toplanıyor… ~15 dk'da bir ölçüm"), left + 8 * dp, (top + bottom) / 2, text)
             return
         }
         val path = Path()

@@ -1,5 +1,6 @@
 package app.plain.maps
 
+import app.plain.lang.tr
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File
@@ -201,11 +202,11 @@ class PbfExtract(private val file: File) {
     // ------------------------------------------------------------------ passes
     fun run(onNode: (OsmEl) -> Unit, onWay: (OsmEl) -> Unit, onRelation: (OsmEl) -> Unit) {
         passRelations()
-        progress("${rels.size} relations")
+        progress(tr("${rels.size} relations", "${rels.size} ilişki"))
         passWays()
-        progress("${ways.size} ways")
+        progress(tr("${ways.size} ways", "${ways.size} yol"))
         passNodes(onNode)
-        progress("${needNodes.size} way nodes")
+        progress(tr("${needNodes.size} way nodes", "${needNodes.size} yol noktası"))
         emitWays(onWay)
         emitRelations(onRelation)
     }

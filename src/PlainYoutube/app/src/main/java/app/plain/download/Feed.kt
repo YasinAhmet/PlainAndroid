@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.InputStream
 import java.util.zip.ZipInputStream
+import app.plain.lang.tr
 
 /** A followed channel (kept locally; no account). */
 data class Follow(val id: String, val title: String, val added: Long = 0)
@@ -151,11 +152,11 @@ object Rss {
     fun isoMillis(s: String): Long = try { java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli() } catch (_: Exception) { 0 }
 
     fun viewsText(n: Long): String = when {
-        n == 1L -> "1 view"
-        n < 1000 -> "$n views"
-        n < 1_000_000 -> trim1(n / 1e3) + "K views"
-        n < 1_000_000_000 -> trim1(n / 1e6) + "M views"
-        else -> trim1(n / 1e9) + "B views"
+        n == 1L -> tr("1 view", "1 görüntüleme")
+        n < 1000 -> tr("$n views", "$n görüntüleme")
+        n < 1_000_000 -> trim1(n / 1e3) + tr("K views", " B görüntüleme")
+        n < 1_000_000_000 -> trim1(n / 1e6) + tr("M views", " Mn görüntüleme")
+        else -> trim1(n / 1e9) + tr("B views", " Mr görüntüleme")
     }
 
     private fun trim1(d: Double): String {
@@ -272,10 +273,10 @@ object Bulk {
 
     fun summary(queued: Int, p: Plan): String {
         val parts = ArrayList<String>()
-        parts += "Queued $queued"
-        if (p.skippedDone > 0) parts += "skipped ${p.skippedDone} already downloaded or queued"
-        if (p.skippedLive > 0) parts += "${p.skippedLive} live/upcoming"
-        if (p.overLimit > 0) parts += "${p.overLimit} over the $MAX limit"
+        parts += tr("Queued $queued", "Sıraya alındı: $queued")
+        if (p.skippedDone > 0) parts += tr("skipped ${p.skippedDone} already downloaded or queued", "zaten indirilmiş ya da sırada olan ${p.skippedDone} atlandı")
+        if (p.skippedLive > 0) parts += tr("${p.skippedLive} live/upcoming", "${p.skippedLive} canlı/yakında")
+        if (p.overLimit > 0) parts += tr("${p.overLimit} over the $MAX limit", "${p.overLimit} tanesi $MAX sınırını aşıyor")
         return parts.joinToString(", ")
     }
 }
@@ -285,15 +286,15 @@ object Ago {
     fun text(then: Long, now: Long): String {
         if (then <= 0) return ""
         val s = maxOf(0L, (now - then) / 1000)
-        fun f(n: Long, unit: String) = "$n $unit${if (n == 1L) "" else "s"} ago"
+        fun f(n: Long, unit: String, trUnit: String) = tr("$n $unit${if (n == 1L) "" else "s"} ago", "$n $trUnit önce")
         return when {
-            s < 60 -> "just now"
-            s < 3600 -> "${s / 60} min ago"
-            s < 86400 -> f(s / 3600, "hour")
-            s < 7 * 86400 -> f(s / 86400, "day")
-            s < 30 * 86400 -> f(s / (7 * 86400), "week")
-            s < 365 * 86400 -> f(s / (30 * 86400), "month")
-            else -> f(s / (365 * 86400), "year")
+            s < 60 -> tr("just now", "az önce")
+            s < 3600 -> tr("${s / 60} min ago", "${s / 60} dk önce")
+            s < 86400 -> f(s / 3600, "hour", "saat")
+            s < 7 * 86400 -> f(s / 86400, "day", "gün")
+            s < 30 * 86400 -> f(s / (7 * 86400), "week", "hafta")
+            s < 365 * 86400 -> f(s / (30 * 86400), "month", "ay")
+            else -> f(s / (365 * 86400), "year", "yıl")
         }
     }
 }

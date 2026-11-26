@@ -1,5 +1,6 @@
 package app.plain.setup
 
+import app.plain.lang.tr
 import org.json.JSONObject
 
 /**
@@ -20,7 +21,12 @@ data class Entry(
     val summary: String,
     /** Earlier releases (newest first), online only — what "Older versions" offers. */
     val history: List<Entry> = emptyList(),
-)
+    /** Turkish summary ("summary_tr" in apps.json); empty when the catalog has none. */
+    val summaryTr: String = "",
+) {
+    /** The summary in the app's language. */
+    val shownSummary: String get() = tr(summary, summaryTr.ifEmpty { summary })
+}
 
 /** Where an install would come from: the APK inside Setup, a download from the releases, or a backup on the phone. */
 enum class Source { BUNDLED, ONLINE, LOCAL }
@@ -66,6 +72,7 @@ object Catalog {
             sha256 = o.optString("sha256").lowercase(),
             minSdk = o.optInt("minSdk", parent?.minSdk ?: 1),
             summary = parent?.summary ?: o.optString("summary"),
+            summaryTr = parent?.summaryTr ?: o.optString("summary_tr"),
         )
     }
 

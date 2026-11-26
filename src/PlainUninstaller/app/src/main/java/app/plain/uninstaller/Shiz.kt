@@ -2,6 +2,7 @@ package app.plain.uninstaller
 
 import android.content.Context
 import android.content.pm.PackageManager
+import app.plain.lang.tr
 import rikka.shizuku.Shizuku
 import java.io.InputStream
 import java.lang.reflect.Method
@@ -59,7 +60,7 @@ object Shiz {
 
     /** Runs `sh -c [cmd]` as the shell user. Blocking: call from a background thread. Never throws. */
     fun run(cmd: String): ShellResult {
-        val m = newProcess ?: return ShellResult(-1, "", "Shizuku API not available")
+        val m = newProcess ?: return ShellResult(-1, "", tr("Shizuku API not available", "Shizuku API'si kullanılamıyor"))
         return try {
             val p = m.invoke(null, arrayOf("sh", "-c", cmd), null, null) as Process
             try {

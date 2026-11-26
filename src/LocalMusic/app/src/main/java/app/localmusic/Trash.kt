@@ -1,5 +1,7 @@
 package app.localmusic
 
+import app.plain.lang.tr
+
 /**
  * Pure rules for erasing (unit-tested). "Erase" = Android's MediaStore trash: restorable for ~30 days, then deleted by
  * Android. Plain Youtube trashes through the same MediaStore, so both apps see each other's erases on the next reload.
@@ -21,7 +23,7 @@ class EraseSet private constructor(val songs: List<Song>) {
 
     /** A few titles for the confirmation, "… and N more". */
     fun preview(n: Int = 5): String =
-        songs.take(n).joinToString("\n") { "• " + it.title } + if (songs.size > n) "\n… and ${songs.size - n} more" else ""
+        songs.take(n).joinToString("\n") { "• " + it.title } + if (songs.size > n) tr("\n… and ${songs.size - n} more", "\n… ve ${songs.size - n} tane daha") else ""
 
     companion object {
         /** Library files only (files opened from other apps are not ours to trash), each once. */

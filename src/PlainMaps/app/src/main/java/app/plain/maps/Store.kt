@@ -2,6 +2,7 @@ package app.plain.maps
 
 import android.database.sqlite.SQLiteDatabase
 import android.util.LruCache
+import app.plain.lang.tr
 import java.io.File
 
 /** Transport modes (line.mode / stop.mode). */
@@ -14,8 +15,9 @@ object Mode {
     const val TRAIN = 5
 
     fun name(m: Int) = when (m) {
-        BUS -> "Bus"; METRO -> "Metro"; TRAM -> "Tram"; CABLE -> "Funicular / cable car"; FERRY -> "Ferry"; TRAIN -> "Train"
-        else -> "Line"
+        BUS -> tr("Bus", "Otobüs"); METRO -> "Metro"; TRAM -> tr("Tram", "Tramvay"); CABLE -> tr("Funicular / cable car", "Füniküler / teleferik")
+        FERRY -> tr("Ferry", "Vapur"); TRAIN -> tr("Train", "Tren")
+        else -> tr("Line", "Hat")
     }
 
     fun defaultColor(m: Int) = when (m) {
@@ -243,14 +245,14 @@ class Store(val file: File) {
         ) { Hit(HitKind.LINE, it.getLong(0), it.getString(2) ?: "", Mode.name(it.getInt(3)), 0.0, 0.0, it.getInt(4), it.getString(1)) }
         if (kinds and Kinds.STOPS != 0) out += q("SELECT id,code,name,lat,lon,mode FROM stop WHERE norm LIKE ? LIMIT 300", like) { stopOf(it) }
             .sortedBy { dist(it.lat, it.lon) }.distinctBy { it.name + "|" + (it.lat * 200).toInt() + "|" + (it.lon * 200).toInt() }.take(25)
-            .map { Hit(HitKind.STOP, it.id.toLong(), it.name, Mode.name(it.mode) + " stop" + (if (it.code.isNotEmpty() && it.mode == Mode.BUS) " · ${it.code}" else ""), it.lat, it.lon, Mode.defaultColor(it.mode), null) }
+            .map { Hit(HitKind.STOP, it.id.toLong(), it.name, tr(Mode.name(it.mode) + " stop", if (it.mode == Mode.FERRY) "İskele" else Mode.name(it.mode) + " durağı") + (if (it.code.isNotEmpty() && it.mode == Mode.BUS) " · ${it.code}" else ""), it.lat, it.lon, Mode.defaultColor(it.mode), null) }
         val catSql = cats?.let { if (it.isEmpty()) " AND 0" else " AND cat IN (${it.joinToString(",")})" } ?: ""
         if (kinds and Kinds.PLACES != 0) out += q("$PSQL WHERE norm LIKE ?$catSql LIMIT 400", like) { poiOf(it) }
             .sortedWith(compareBy({ if (it.cat == Poi.PLACE) it.rank - 10 else 0 }, { dist(it.lat, it.lon) })).take(30)
             .map { Hit(HitKind.PLACE, it.id, it.name.ifEmpty { it.label }, it.label, it.lat, it.lon, Poi.color(it.cat), null) }
         if (kinds and Kinds.STREETS != 0) out += q("SELECT name,lat,lon FROM street WHERE norm LIKE ? LIMIT 300", like) { Triple(it.getString(0) ?: "", it.getDouble(1), it.getDouble(2)) }
             .sortedBy { dist(it.second, it.third) }.distinctBy { it.first }.take(20)
-            .map { Hit(HitKind.STREET, 0, it.first, "Street", it.second, it.third, 0xFF9E9E9E.toInt(), null) }
+            .map { Hit(HitKind.STREET, 0, it.first, tr("Street", "Sokak"), it.second, it.third, 0xFF9E9E9E.toInt(), null) }
         return out
     }
 
@@ -299,8 +301,10 @@ class Store(val file: File) {
 
     fun counts(): String {
         fun n(sql: String) = q(sql) { it.getLong(0) }.firstOrNull() ?: 0L
-        return "${n("SELECT count(*) FROM line WHERE mode=0")} bus lines · ${n("SELECT count(*) FROM line WHERE mode>0")} rail/ferry lines · " +
-            "${n("SELECT count(*) FROM stop")} stops · ${n("SELECT count(*) FROM poi WHERE cat<>${Poi.PLACE}")} places"
+        val bus = n("SELECT count(*) FROM line WHERE mode=0"); val rail = n("SELECT count(*) FROM line WHERE mode>0")
+        val stops = n("SELECT count(*) FROM stop"); val places = n("SELECT count(*) FROM poi WHERE cat<>${Poi.PLACE}")
+        return tr("$bus bus lines · $rail rail/ferry lines · $stops stops · $places places",
+            "$bus otobüs hattı · $rail raylı/vapur hattı · $stops durak · $places yer")
     }
 }
 
@@ -350,6 +354,6 @@ object Times {
 
     fun mins(sec: Int, now: Int): String {
         val m = (sec - now) / 60
-        return if (m <= 0) "now" else if (m < 60) "$m min" else clock(sec)
+        return if (m <= 0) tr("now", "şimdi") else if (m < 60) tr("$m min", "$m dk") else clock(sec)
     }
 }

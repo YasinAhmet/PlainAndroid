@@ -17,6 +17,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.util.Locale
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
@@ -77,7 +79,7 @@ class TrailScreen(private val act: MainActivity) {
             orientation = LinearLayout.VERTICAL
             background = roundRect(C.PANEL, act.dpf(12))
             setPadding(act.dp(12), act.dp(8), act.dp(8), act.dp(8))
-            addView(act.text("Planned trail", 12f, C.DIM))
+            addView(act.text(tr("Planned trail", "Planlanan rota"), 12f, C.DIM))
             addView(spinner, lpL(MATCH, act.dp(40)))
             addView(noMaps)
         }
@@ -112,7 +114,7 @@ class TrailScreen(private val act: MainActivity) {
         }
         side.addView(layerBtn, lpL(act.dp(46), act.dp(46)).apply { bottomMargin = act.dp(8) })
         // private-land overlay: tap = on/off, hold = what the colours mean
-        landBtn = sideBtn("Land") { toggleLand() }.apply {
+        landBtn = sideBtn(tr("Land", "Arazi")) { toggleLand() }.apply {
             textSize = 11f
             isSingleLine = true
             setPadding(0, 0, 0, 0)
@@ -129,7 +131,7 @@ class TrailScreen(private val act: MainActivity) {
             textSize = 16f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             elevation = act.dpf(6)
-            setOnClickListener { if (!on) startTrail() else act.toast("Hold the button to stop.") }
+            setOnClickListener { if (!on) startTrail() else act.toast(tr("Hold the button to stop.", "Durdurmak için düğmeye basılı tutun.")) }
             setOnLongClickListener { if (on) askStop(); on }
         }
         view.addView(power, lpF(act.dp(84), act.dp(84), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = act.dp(14) })
@@ -198,7 +200,7 @@ class TrailScreen(private val act: MainActivity) {
         act.prefs.edit().putBoolean("compass", !Prefs.compass(act)).apply()
         applySettings()
         Dev.event("compass", "needle tapped → ${if (compassOn) "heading-up" else "north-up"}")
-        act.toast(if (compassOn) "Heading up: the map turns with you." else "North up.")
+        act.toast(if (compassOn) tr("Heading up: the map turns with you.", "Yön yukarı: harita sizinle döner.") else tr("North up.", "Kuzey yukarı."))
     }
 
     private fun updateSensor() {
@@ -206,7 +208,7 @@ class TrailScreen(private val act: MainActivity) {
         if (want && !compass.running) {
             val s = compass.sensor
             if (s == null) {
-                if (compassOn) act.toast("This phone has no compass sensor.")
+                if (compassOn) act.toast(tr("This phone has no compass sensor.", "Bu telefonda pusula sensörü yok."))
                 return
             }
             setDeclination()
@@ -242,33 +244,33 @@ class TrailScreen(private val act: MainActivity) {
         val out = ArrayList<String>(3)
         if (Trail.active) {
             val parts = ArrayList<String>()
-            parts += if (Trail.lastLat.isNaN()) "GPS searching…" else "GPS ±${Trail.lastAcc.roundToInt()} m"
-            if (Trail.lastSats >= 0) parts += "${Trail.lastSats} sats"
+            parts += if (Trail.lastLat.isNaN()) tr("GPS searching…", "GPS aranıyor…") else "GPS ±${Trail.lastAcc.roundToInt()} m"
+            if (Trail.lastSats >= 0) parts += tr("${Trail.lastSats} sats", "${Trail.lastSats} uydu")
             if (!Trail.lastCn0.isNaN()) parts += "${Trail.lastCn0.roundToInt()} dB-Hz"
             if (!Trail.lastSpeed.isNaN()) parts += "${"%.1f".format(Locale.US, Trail.lastSpeed * 3.6)} km/h"
             out += parts.joinToString(" · ")
         } else {
-            out += "GPS off — press START to record"
+            out += tr("GPS off — press START to record", "GPS kapalı — kayıt için BAŞLA'ya basın")
         }
         val h = compass.heading
         if (compass.running && !h.isNaN()) {
-            var line = "Facing ${h.roundToInt()}° ${Heading.cardinal(h)}"
-            if (!Trail.lastCourse.isNaN()) line += " · moving ${Trail.lastCourse.roundToInt()}° ${Heading.cardinal(Trail.lastCourse.toDouble())}"
-            if (compass.accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW) line += " · compass unsure: move the phone in a figure-8"
+            var line = tr("Facing", "Yön") + " ${h.roundToInt()}° ${Heading.cardinal(h)}"
+            if (!Trail.lastCourse.isNaN()) line += " · " + tr("moving", "gidiş") + " ${Trail.lastCourse.roundToInt()}° ${Heading.cardinal(Trail.lastCourse.toDouble())}"
+            if (compass.accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW) line += tr(" · compass unsure: move the phone in a figure-8", " · pusula emin değil: telefonu 8 çizerek hareket ettirin")
             out += line
         }
         val lat = Geo.lat(map.cy)
         val lon = Geo.lon(map.cx)
         val mpp = Geo.metersPerUnit(lat) / map.world()
         val detail = when {
-            map.drawnZ < 0 -> "no offline map here"
-            map.drawnZ < map.tileZ -> "z${map.drawnZ} scaled ×${1 shl (map.tileZ - map.drawnZ)} (less detail)"
-            else -> "full detail"
+            map.drawnZ < 0 -> tr("no offline map here", "burada çevrimdışı harita yok")
+            map.drawnZ < map.tileZ -> tr("z${map.drawnZ} scaled ×${1 shl (map.tileZ - map.drawnZ)} (less detail)", "z${map.drawnZ} ×${1 shl (map.tileZ - map.drawnZ)} büyütülmüş (az ayrıntı)")
+            else -> tr("full detail", "tam ayrıntı")
         }
         val img = if (map.layer == Layer.SAT) Packs.all().firstOrNull {
             Layer.SAT in it.layers && it.satMs > 0 && lat in it.bbox.s..it.bbox.n && lon in it.bbox.w..it.bbox.e
         }?.satMs else null
-        out += "Map z${map.tileZ} · $detail · ${"%.1f".format(Locale.US, mpp)} m/px" + (img?.let { " · imagery ${Season.month(it)}" } ?: "")
+        out += tr("Map", "Harita") + " z${map.tileZ} · $detail · ${"%.1f".format(Locale.US, mpp)} m/px" + (img?.let { " · " + tr("imagery", "görüntü") + " ${Season.month(it)}" } ?: "")
         return out
     }
 
@@ -279,7 +281,7 @@ class TrailScreen(private val act: MainActivity) {
         return avail.firstOrNull { it.name == saved } ?: avail.firstOrNull() ?: Layer.TOPO
     }
 
-    private fun layerLabel() = if (map.layer == Layer.TOPO) "Sat" else "Topo"
+    private fun layerLabel() = if (map.layer == Layer.TOPO) tr("Sat", "Uydu") else "Topo"
 
     private fun toggleLand() {
         val on = !Prefs.land(act)
@@ -289,12 +291,12 @@ class TrailScreen(private val act: MainActivity) {
         if (on && !prefs.getBoolean("landLegendSeen", false)) {
             prefs.edit().putBoolean("landLegendSeen", true).apply()
             act.showLandLegend()
-        } else act.toast(if (on) "Private land shown · hold Land for the colours" else "Private land hidden")
+        } else act.toast(if (on) tr("Private land shown · hold Land for the colours", "Özel arazi gösteriliyor · renkler için Arazi'ye basılı tutun") else tr("Private land hidden", "Özel arazi gizlendi"))
     }
 
     private fun toggleLayer() {
         val other = if (map.layer == Layer.TOPO) Layer.SAT else Layer.TOPO
-        if (!Packs.has(other)) { act.toast("No offline ${other.label.lowercase()} map downloaded."); return }
+        if (!Packs.has(other)) { act.toast(tr("No offline ${other.label.lowercase()} map downloaded.", "İndirilmiş çevrimdışı ${PlainLang.lower(other.label)} haritası yok.")); return }
         map.layer = other
         prefs.edit().putString("trailLayer", other.name).apply()
         layerBtn.text = layerLabel()
@@ -303,7 +305,7 @@ class TrailScreen(private val act: MainActivity) {
 
     private fun loadPlans() {
         plans = Store.list(Kind.PLAN)
-        val names = listOf("— No planned trail —") + plans.map { "${it.name}  ·  ${Fmt.dist(it.distM)}" }
+        val names = listOf(tr("— No planned trail —", "— Planlanan rota yok —")) + plans.map { "${it.name}  ·  ${Fmt.dist(it.distM)}" }
         spinner.adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, names)
         val wanted = if (Trail.active) Trail.planId else prefs.getString("trailPlan", null)
         val idx = plans.indexOfFirst { it.id == wanted }
@@ -322,8 +324,10 @@ class TrailScreen(private val act: MainActivity) {
         }
         val packs = Packs.all()
         noMaps.text = if (packs.isEmpty())
-            "No offline maps yet — download one in the Plan tab on Wi-Fi. You can still record without a map."
-        else "${packs.size} offline map${if (packs.size > 1) "s" else ""} · pinch, drag and double-tap to look around"
+            tr("No offline maps yet — download one in the Plan tab on Wi-Fi. You can still record without a map.",
+                "Henüz çevrimdışı harita yok — Plan sekmesinden Wi-Fi'da indirin. Harita olmadan da kayıt yapabilirsiniz.")
+        else tr("${packs.size} offline map${if (packs.size > 1) "s" else ""} · pinch, drag and double-tap to look around",
+            "${packs.size} çevrimdışı harita · gezinmek için sıkıştırın, sürükleyin, çift dokunun")
     }
 
     private var planBox: BBox? = null
@@ -356,7 +360,7 @@ class TrailScreen(private val act: MainActivity) {
         act.withLocationPermission {
             val lm = act.getSystemService(LocationManager::class.java)
             if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                act.confirm("Location is off", "Turn on Location (GPS) to record your trail.", "Open settings") {
+                act.confirm(tr("Location is off", "Konum kapalı"), tr("Turn on Location (GPS) to record your trail.", "Rotanızı kaydetmek için Konum'u (GPS) açın."), tr("Open settings", "Ayarları aç")) {
                     act.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                 }
                 return@withLocationPermission
@@ -365,12 +369,13 @@ class TrailScreen(private val act: MainActivity) {
             if (lim != null) {
                 Dev.event("battery-saver", "on at START: $lim")
                 android.app.AlertDialog.Builder(act)
-                    .setTitle("Battery saver will stop your track")
-                    .setMessage("Android's battery saver is on and $lim — your recording would stop in your pocket.\n\nTurn battery saver off before recording.")
-                    .setPositiveButton("Battery settings") { _, _ ->
+                    .setTitle(tr("Battery saver will stop your track", "Pil tasarrufu kaydınızı durdurur"))
+                    .setMessage(tr("Android's battery saver is on and $lim — your recording would stop in your pocket.\n\nTurn battery saver off before recording.",
+                        "Android pil tasarrufu açık: $lim — kaydınız cepteyken durur.\n\nKayda başlamadan pil tasarrufunu kapatın."))
+                    .setPositiveButton(tr("Battery settings", "Pil ayarları")) { _, _ ->
                         try { act.startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)) } catch (_: Exception) {}
                     }
-                    .setNegativeButton("Start anyway") { _, _ -> beginTrail() }
+                    .setNegativeButton(tr("Start anyway", "Yine de başla")) { _, _ -> beginTrail() }
                     .show()
                 return@withLocationPermission
             }
@@ -386,7 +391,7 @@ class TrailScreen(private val act: MainActivity) {
         try {
             Trail.start(act, plan?.id, plan?.name)
         } catch (e: Exception) {
-            act.toast(e.message ?: "Could not start recording.")
+            act.toast(e.message ?: tr("Could not start recording.", "Kayıt başlatılamadı."))
             Downloads.resumeAfterTrail(act)
             return
         }
@@ -400,7 +405,8 @@ class TrailScreen(private val act: MainActivity) {
         act.setTrailMode(v)
         offBar.visibility = if (v) View.GONE else View.VISIBLE
         statsBox.visibility = if (v) View.VISIBLE else View.GONE
-        power.text = if (v) "STOP\n(hold)" else "START"
+        power.text = if (v) tr("STOP\n(hold)", "DUR\n(uzun bas)") else tr("START", "BAŞLA")
+        power.textSize = if (PlainLang.turkish) 14f else 16f
         cam.visibility = if (v) View.VISIBLE else View.GONE
         if (v) refreshPhotos() else map.markers = emptyList()
         power.background = ripple(oval(if (v) C.RED else C.GREEN))
@@ -426,15 +432,16 @@ class TrailScreen(private val act: MainActivity) {
         // once per recording, the moment GPS locks: the right time to switch on airplane mode
         if (Trail.gps == Trail.Gps.OK && prefs.getLong("airTipFor", 0L) != Trail.startTime) {
             prefs.edit().putLong("airTipFor", Trail.startTime).apply()
-            if (!Power.airplaneOn(act)) act.toast("GPS locked ✓ Switch on airplane mode now to save battery — GPS keeps working offline.")
+            if (!Power.airplaneOn(act)) act.toast(tr("GPS locked ✓ Switch on airplane mode now to save battery — GPS keeps working offline.",
+                "GPS kilitlendi ✓ Pil için şimdi uçak modunu açın — GPS çevrimdışı çalışmaya devam eder."))
         }
         updateStats()
         map.invalidate()
     }
 
     private fun locate() {
-        if (!on) { act.toast("Your position shows after you press START."); return }
-        if (Trail.lastLat.isNaN()) { act.toast("Waiting for GPS…"); return }
+        if (!on) { act.toast(tr("Your position shows after you press START.", "Konumunuz BAŞLA'ya bastıktan sonra görünür.")); return }
+        if (Trail.lastLat.isNaN()) { act.toast(tr("Waiting for GPS…", "GPS bekleniyor…")); return }
         map.follow = true
         map.setMe(Trail.lastLat, Trail.lastLon, Trail.lastAcc)
     }
@@ -446,29 +453,29 @@ class TrailScreen(private val act: MainActivity) {
         val acc = Trail.lastAcc.roundToInt()
         val g = when (Trail.gps) {
             Trail.Gps.OK -> "GPS ±$acc m"
-            Trail.Gps.SEARCHING -> if (Trail.lastLat.isNaN()) "Searching for GPS…" else "Weak GPS ±$acc m"
-            Trail.Gps.RESTING -> "Resting · GPS paused"
-            Trail.Gps.DISABLED -> "Location is turned off!"
-            Trail.Gps.NO_PERMISSION -> "No location permission"
-            Trail.Gps.OFF -> "Starting…"
+            Trail.Gps.SEARCHING -> if (Trail.lastLat.isNaN()) tr("Searching for GPS…", "GPS aranıyor…") else tr("Weak GPS ±$acc m", "Zayıf GPS ±$acc m")
+            Trail.Gps.RESTING -> tr("Resting · GPS paused", "Mola · GPS duraklatıldı")
+            Trail.Gps.DISABLED -> tr("Location is turned off!", "Konum kapalı!")
+            Trail.Gps.NO_PERMISSION -> tr("No location permission", "Konum izni yok")
+            Trail.Gps.OFF -> tr("Starting…", "Başlatılıyor…")
         }
         val ele = if (Trail.eleNow.isNaN()) "" else " · ${Trail.eleNow.roundToInt()} m"
         tSub.text = "↑ ${Trail.ascentM.roundToInt()} m$ele · $g"
     }
 
     private fun askStop() {
-        val def = (Trail.planName ?: "Trail") + " · " + Fmt.date(Trail.startTime)
+        val def = (Trail.planName ?: tr("Trail", "Rota")) + " · " + Fmt.date(Trail.startTime)
         val et = EditText(act).apply { setText(def); setSingleLine() }
         val box = FrameLayout(act).apply { setPadding(act.dp(20), act.dp(8), act.dp(20), 0); addView(et) }
         AlertDialog.Builder(act)
-            .setTitle("Stop and save this trail?")
+            .setTitle(tr("Stop and save this trail?", "Rota durdurulup kaydedilsin mi?"))
             .setMessage("${Fmt.dist(Trail.distM)} · ${Fmt.dur((System.currentTimeMillis() - Trail.startTime) / 1000)} · ↑ ${Trail.ascentM.roundToInt()} m")
             .setView(box)
-            .setPositiveButton("Save") { _, _ -> finish(et.text.toString().trim().ifEmpty { def }, true) }
-            .setNeutralButton("Discard") { _, _ ->
-                act.confirm("Discard this trail?", "The recorded track will be deleted.", "Discard") { finish(null, false) }
+            .setPositiveButton(tr("Save", "Kaydet")) { _, _ -> finish(et.text.toString().trim().ifEmpty { def }, true) }
+            .setNeutralButton(tr("Discard", "At")) { _, _ ->
+                act.confirm(tr("Discard this trail?", "Bu rota atılsın mı?"), tr("The recorded track will be deleted.", "Kaydedilen iz silinecek."), tr("Discard", "At")) { finish(null, false) }
             }
-            .setNegativeButton("Keep recording", null)
+            .setNegativeButton(tr("Keep recording", "Kayda devam"), null)
             .show()
     }
 
@@ -476,16 +483,16 @@ class TrailScreen(private val act: MainActivity) {
         val e = try {
             Trail.stop(act, name, save)
         } catch (ex: Exception) {
-            act.toast("Could not save: ${ex.message}")
+            act.toast(tr("Could not save: ${ex.message}", "Kaydedilemedi: ${ex.message}"))
             return
         }
         setOn(false)
         Downloads.resumeAfterTrail(act)
         act.toast(
             when {
-                e != null -> "Saved “${e.name}” · find it in Plan › Past trails"
-                save -> "Nothing was recorded."
-                else -> "Trail discarded."
+                e != null -> tr("Saved “${e.name}” · find it in Plan › Past trails", "Kaydedildi: “${e.name}” · Plan › Geçmiş rotalar")
+                save -> tr("Nothing was recorded.", "Hiçbir şey kaydedilmedi.")
+                else -> tr("Trail discarded.", "Rota atıldı.")
             }
         )
     }

@@ -10,6 +10,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.AtomicFile
 import java.io.File
+import app.plain.lang.tr
 
 /** Settings in SharedPreferences, download history in files/history.json. Everything local and private. */
 object Store {
@@ -40,6 +41,7 @@ object Store {
         queueFile = AtomicFile(File(ctx.filesDir, "queue.json"))
         cache = CacheStore(File(ctx.externalCacheDir ?: ctx.cacheDir, "stream"))
         modes = ctx.getSharedPreferences("modes", Context.MODE_PRIVATE)
+        audioLangs = ctx.getSharedPreferences("audio_langs", Context.MODE_PRIVATE)
         val app = ctx.applicationContext
         cache.publicDeleter = { m -> CachePublisher.deletePublic(app, m) }
         val loaded = try { JobCodec.decode(String(file.readFully(), Charsets.UTF_8)) } catch (_: Exception) { ArrayList() }
@@ -54,6 +56,7 @@ object Store {
     lateinit var cache: CacheStore
         private set
     private lateinit var modes: SharedPreferences
+    private lateinit var audioLangs: SharedPreferences
 
     /** Size limits in GB (⋮ → Cache limits), 20 GB each by default. */
     var videoCapGb: Int
@@ -87,6 +90,12 @@ object Store {
 
     /** The user's Watch/Listen choice per video. */
     fun mode(videoId: String): PlayMode? = when (modes.getString(videoId, null)) { "W" -> PlayMode.WATCH; "L" -> PlayMode.LISTEN; else -> null }
+    /** Audio language picked for a dubbed video ("tr"); null = the original track (the default, not stored). */
+    fun audioLang(videoId: String): String? = audioLangs.getString(videoId, null)
+    fun setAudioLang(videoId: String, lang: String?) {
+        audioLangs.edit().apply { if (lang == null) remove(videoId) else putString(videoId, lang) }.apply()
+    }
+
     fun setMode(videoId: String, m: PlayMode) { modes.edit().putString(videoId, if (m == PlayMode.WATCH) "W" else "L").apply() }
 
     /** Content region used for videos blocked in this country ("" = off). See [InnerTube.info]. */
@@ -504,7 +513,7 @@ object Saver {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
             if (kind == Kind.AUDIO) put(MediaStore.Audio.Media.IS_MUSIC, 1)
         }
-        return cr.insert(collection(kind), v) ?: throw java.io.IOException("Can't create the file in ${relPath.trimEnd('/')}")
+        return cr.insert(collection(kind), v) ?: throw java.io.IOException(tr("Can't create the file in ${relPath.trimEnd('/')}", "Dosya oluşturulamıyor: ${relPath.trimEnd('/')}"))
     }
 
     fun displayName(cr: ContentResolver, uri: Uri): String? =

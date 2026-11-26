@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.view.View
+import app.plain.lang.tr
 
 // OLED palette: black chrome, thin outlines instead of grey fills, no pure white text
 const val TEXT = 0xFFE4E4E4.toInt()
@@ -30,7 +31,7 @@ class ShutterButton(ctx: Context) : View(ctx) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    init { isClickable = true; contentDescription = "Shutter" }
+    init { isClickable = true; contentDescription = tr("Shutter", "Deklanşör") }
 
     override fun setPressed(pressed: Boolean) { super.setPressed(pressed); invalidate() }
 

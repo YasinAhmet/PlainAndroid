@@ -14,10 +14,13 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.view.KeyEvent
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        PlainLang.init(this)
         Player.init(this)
     }
 }
@@ -37,11 +40,12 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
+        PlainLang.init(this)
         super.onCreate()
         Player.init(this)
         instance = this
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(CHANNEL, tr("Playback", "Çalma"), NotificationManager.IMPORTANCE_LOW).apply {
                 setShowBadge(false)
                 setSound(null, null)
                 enableVibration(false)
@@ -130,9 +134,9 @@ class PlaybackService : Service() {
                 .setOnlyAlertOnce(true)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setCategory(Notification.CATEGORY_TRANSPORT)
-                .addAction(action(c, R.drawable.ic_prev, "Previous", ControlReceiver.PREV))
-                .addAction(if (playing) action(c, R.drawable.ic_pause, "Pause", ControlReceiver.TOGGLE) else action(c, R.drawable.ic_play, "Play", ControlReceiver.TOGGLE))
-                .addAction(action(c, R.drawable.ic_next, "Next", ControlReceiver.NEXT))
+                .addAction(action(c, R.drawable.ic_prev, tr("Previous", "Önceki"), ControlReceiver.PREV))
+                .addAction(if (playing) action(c, R.drawable.ic_pause, tr("Pause", "Duraklat"), ControlReceiver.TOGGLE) else action(c, R.drawable.ic_play, tr("Play", "Oynat"), ControlReceiver.TOGGLE))
+                .addAction(action(c, R.drawable.ic_next, tr("Next", "Sonraki"), ControlReceiver.NEXT))
                 .setStyle(Notification.MediaStyle().setMediaSession(Player.session.sessionToken).setShowActionsInCompactView(0, 1, 2))
                 .build()
         }
@@ -142,6 +146,7 @@ class PlaybackService : Service() {
 /** Notification buttons. */
 class ControlReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
+        PlainLang.init(c)
         Player.init(c)
         when (i.action) {
             TOGGLE -> Player.toggle()
@@ -170,6 +175,7 @@ class MediaButtonReceiver : BroadcastReceiver() {
         val ev = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
         else @Suppress("DEPRECATION") i.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
         if (ev == null || ev.action != KeyEvent.ACTION_DOWN || ev.repeatCount > 0) return
+        PlainLang.init(c)
         Player.init(c)
         Player.handleKey(ev.keyCode)
     }

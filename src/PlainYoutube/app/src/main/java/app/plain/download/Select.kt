@@ -1,5 +1,7 @@
 package app.plain.download
 
+import app.plain.lang.tr
+
 /** Selection on a list page (videos on most pages, channels on Following). Pure, unit-tested. */
 class Selection {
     val ids = LinkedHashSet<String>()
@@ -40,13 +42,13 @@ object UnfollowText {
 
     /** "Unfollow Alpha?" or "Unfollow 7 channels?" + up to [show] names + "+K more". */
     fun confirm(names: List<String>, show: Int = 5): String {
-        if (names.size == 1) return "Unfollow ${names[0].ifEmpty { "this channel" }}?"
-        val sb = StringBuilder("Unfollow ${names.size} channels?")
+        if (names.size == 1) return tr("Unfollow ${names[0].ifEmpty { "this channel" }}?", "Takip bırakılsın mı: ${names[0].ifEmpty { "bu kanal" }}")
+        val sb = StringBuilder(tr("Unfollow ${names.size} channels?", "${names.size} kanalın takibi bırakılsın mı?"))
         for (n in names.take(show)) sb.append("\n• ").append(n)
-        if (names.size > show) sb.append("\n+${names.size - show} more")
+        if (names.size > show) sb.append(tr("\n+${names.size - show} more", "\n+${names.size - show} tane daha"))
         return sb.toString()
     }
 
     fun undoBar(n: Int, youtube: Boolean): String =
-        (if (n == 1) "Unfollowed" else "Unfollowed $n") + if (youtube) " · YouTube unsubscribes can't be undone here" else ""
+        (if (n == 1) tr("Unfollowed", "Takip bırakıldı") else tr("Unfollowed $n", "$n kanalın takibi bırakıldı")) + if (youtube) tr(" · YouTube unsubscribes can't be undone here", " · YouTube abonelik iptalleri burada geri alınamaz") else ""
 }

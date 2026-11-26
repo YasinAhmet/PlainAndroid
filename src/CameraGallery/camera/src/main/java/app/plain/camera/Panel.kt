@@ -9,6 +9,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import app.plain.lang.tr
 import kotlin.math.roundToInt
 
 /** Small builders for the Advanced tab's chips and option rows (OLED style). */
@@ -89,7 +90,7 @@ fun Context.sliderRow(
     }
     row.addView(bar, LinearLayout.LayoutParams(0, px(36), 1f))
     row.addView(v)
-    if (onReset != null) row.addView(text("Reset", 12f, TEXT2).apply {
+    if (onReset != null) row.addView(text(tr("Reset", "Sıfırla"), 12f, TEXT2).apply {
         setPadding(px(10), px(6), px(10), px(6))
         setOnClickListener { onReset() }
     })

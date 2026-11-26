@@ -5,10 +5,12 @@ import android.app.job.JobService
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import app.plain.lang.PlainLang
 
 /** The periodic job: one sample, plus a per-app snapshot about once an hour. */
 class SampleJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
+        PlainLang.init(this)
         if (!Tracker.isTracking(this)) { Tracker.cancel(this); return false }
         Thread {
             try { Tracker(this).record("job") } catch (_: Exception) {}
@@ -26,6 +28,7 @@ class SampleJob : JobService() {
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        PlainLang.init(context)
         if (!Tracker.isTracking(context)) return
         Tracker.schedule(context)
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {

@@ -1,5 +1,6 @@
 package app.plain.camera
 
+import app.plain.lang.tr
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -31,7 +32,10 @@ enum class Aspect(val label: String, val ratio: Double) {
     FOUR_THREE("4:3", 4.0 / 3),
     SIXTEEN_NINE("16:9", 16.0 / 9),
     SQUARE("1:1", 1.0),
-    FULL("Full", 0.0),
+    FULL("Full", 0.0);
+
+    /** What the aspect dropdown shows (the [label] follows the app language). */
+    val display: String get() = if (this == FULL) tr("Full", "Tam") else label
 }
 
 object Sizes {

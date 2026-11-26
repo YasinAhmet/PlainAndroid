@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import app.plain.lang.tr
 import java.io.File
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -36,7 +37,7 @@ object Organizer {
         class Row(val id: Long, val uri: Uri, val rel: String, val name: String, val size: Long, val dur: Long, val mime: String,
                   val bitrate: Int, val store: RawTags, val skip: String?)
         val rows = ArrayList<Row>()
-        progress("Listing audio files…")
+        progress(tr("Listing audio files…", "Ses dosyaları listeleniyor…"))
         cr.query(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), cols.toTypedArray(), null, null, null)?.use { c ->
             fun s(n: String) = c.getString(c.getColumnIndexOrThrow(n))
             fun l(n: String) = c.getLong(c.getColumnIndexOrThrow(n))
@@ -72,7 +73,7 @@ object Organizer {
         // Tags straight from the files.
         val files = ArrayList<FileInfo>(rows.size)
         rows.forEachIndexed { i, r ->
-            if (i % 10 == 0) progress("Reading tags ${i + 1} / ${rows.size}")
+            if (i % 10 == 0) progress(tr("Reading tags ${i + 1} / ${rows.size}", "Etiketler okunuyor ${i + 1} / ${rows.size}"))
             var raw = r.store
             var bitrate = r.bitrate
             if (r.skip == null) {
@@ -106,7 +107,7 @@ object Organizer {
         val hashed = files.map { f ->
             if (f.id !in toHash) f else {
                 done++
-                progress("Comparing contents $done / ${toHash.size}")
+                progress(tr("Comparing contents $done / ${toHash.size}", "İçerikler karşılaştırılıyor $done / ${toHash.size}"))
                 f.copy(hash = md5(ctx, uris.getValue(f.id)))
             }
         }
@@ -137,8 +138,8 @@ object Organizer {
         val ok = ArrayList<Pair<Plan.Move, String>>()
         val bad = ArrayList<Pair<Plan.Move, String>>()
         moves.forEachIndexed { i, m ->
-            if (i % 5 == 0) progress("Moving ${i + 1} / ${moves.size}")
-            val uri = uris[m.file.id] ?: run { bad += m to "no uri"; return@forEachIndexed }
+            if (i % 5 == 0) progress(tr("Moving ${i + 1} / ${moves.size}", "Taşınıyor ${i + 1} / ${moves.size}"))
+            val uri = uris[m.file.id] ?: run { bad += m to tr("no uri", "uri yok"); return@forEachIndexed }
             try {
                 val v = ContentValues().apply {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, m.toDir)
@@ -146,7 +147,7 @@ object Organizer {
                 }
                 val n = cr.update(uri, v, null, null)
                 val now = currentPath(ctx, uri)
-                if (n > 0 && now != null) ok += m to now else bad += m to "not updated (now: ${now ?: "?"})"
+                if (n > 0 && now != null) ok += m to now else bad += m to tr("not updated (now: ${now ?: "?"})", "güncellenmedi (şu an: ${now ?: "?"})")
             } catch (e: Exception) {
                 bad += m to (e.message ?: e.javaClass.simpleName)
             }
@@ -177,39 +178,44 @@ object Organizer {
     fun report(ctx: Context, plan: Plan, result: Result?, trashed: Set<Long>, trashAsked: Boolean): String {
         val sb = StringBuilder()
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(Date())
-        sb.appendLine("LocalMusic organiser report — $stamp").appendLine()
+        sb.appendLine(tr("LocalMusic organiser report — $stamp", "LocalMusic düzenleme raporu — $stamp")).appendLine()
         val moved = result?.moved.orEmpty()
         val failed = result?.failed.orEmpty()
-        sb.appendLine("Moved: ${moved.size}   Failed: ${failed.size}   Already in place: ${plan.inPlace.size}   Left where they were (your choice): ${plan.keptByUser.size}")
+        sb.appendLine(tr("Moved: ${moved.size}   Failed: ${failed.size}   Already in place: ${plan.inPlace.size}   Left where they were (your choice): ${plan.keptByUser.size}",
+            "Taşınan: ${moved.size}   Başarısız: ${failed.size}   Zaten yerinde: ${plan.inPlace.size}   Yerinde bırakılan (sizin seçiminiz): ${plan.keptByUser.size}"))
         val removedOk = plan.removals.filter { it.file.id in trashed }
-        sb.appendLine("Duplicates sent to trash: ${removedOk.size} of ${plan.removals.size} (${Text.bytes(removedOk.sumOf { it.file.size })} freed)" +
-            if (trashAsked && removedOk.size < plan.removals.size) " — the rest stayed where they were" else "")
-        sb.appendLine("Not music, left alone: ${plan.skipped.size}").appendLine()
+        val freed = Text.bytes(removedOk.sumOf { it.file.size })
+        sb.appendLine(tr("Duplicates sent to trash: ${removedOk.size} of ${plan.removals.size} ($freed freed)",
+            "Çöp kutusuna gönderilen kopyalar: ${removedOk.size} / ${plan.removals.size} ($freed boşaldı)") +
+            if (trashAsked && removedOk.size < plan.removals.size) tr(" — the rest stayed where they were", " — kalanlar yerinde kaldı") else "")
+        sb.appendLine(tr("Not music, left alone: ${plan.skipped.size}", "Müzik değil, dokunulmadı: ${plan.skipped.size}")).appendLine()
 
         val targets = moved.map { it.first.file } + plan.inPlace + plan.keptByUser
         val albums = plan.albumFolders
         val artists = albums.map { it.substringBefore('/').lowercase() }.distinct()
         val genres = targets.map { it.tags.genre }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
-        sb.appendLine("Categories: ${artists.size} artists, ${albums.size} albums, ${genres.size} genres")
-        genres.entries.sortedByDescending { it.value }.forEach { sb.appendLine("  genre ${it.key}: ${it.value}") }
+        sb.appendLine(tr("Categories: ${artists.size} artists, ${albums.size} albums, ${genres.size} genres",
+            "Kategoriler: ${artists.size} sanatçı, ${albums.size} albüm, ${genres.size} tür"))
+        genres.entries.sortedByDescending { it.value }.forEach { sb.appendLine(tr("  genre ${it.key}: ${it.value}", "  tür ${it.key}: ${it.value}")) }
         sb.appendLine()
         if (removedOk.isNotEmpty()) {
-            sb.appendLine("== Duplicates removed (in Android trash for 30 days; restore from ⋮ → Recently removed)")
-            removedOk.forEach { sb.appendLine("  ${it.file.path}   [kept ${it.keep.path}]") }
+            sb.appendLine(tr("== Duplicates removed (in Android trash for 30 days; restore from ⋮ → Recently removed)",
+                "== Kaldırılan kopyalar (30 gün Android çöp kutusunda; ⋮ → Son silinenler'den geri yükleyin)"))
+            removedOk.forEach { sb.appendLine(tr("  ${it.file.path}   [kept ${it.keep.path}]", "  ${it.file.path}   [tutulan: ${it.keep.path}]")) }
             sb.appendLine()
         }
         if (failed.isNotEmpty()) {
-            sb.appendLine("== Failed moves")
+            sb.appendLine(tr("== Failed moves", "== Başarısız taşımalar"))
             failed.forEach { (m, why) -> sb.appendLine("  ${m.file.path} -> ${m.toPath}: $why") }
             sb.appendLine()
         }
         if (moved.isNotEmpty()) {
-            sb.appendLine("== Moved")
+            sb.appendLine(tr("== Moved", "== Taşınanlar"))
             moved.forEach { (m, now) -> sb.appendLine("  ${m.file.path} -> $now") }
             sb.appendLine()
         }
         if (plan.skipped.isNotEmpty()) {
-            sb.appendLine("== Left alone (not music)")
+            sb.appendLine(tr("== Left alone (not music)", "== Dokunulmayanlar (müzik değil)"))
             plan.skipped.forEach { sb.appendLine("  ${it.path}  (${it.skipReason})") }
         }
         val text = sb.toString()
@@ -225,7 +231,7 @@ object Organizer {
 
     /** Short text for the plan screen to show what each file is. */
     fun describe(f: FileInfo): String {
-        val kbps = if (f.lossless) "lossless" else "${(f.effectiveBitrate + 500) / 1000} kbps"
+        val kbps = if (f.lossless) tr("lossless", "kayıpsız") else "${(f.effectiveBitrate + 500) / 1000} kbps"
         return "${f.ext.uppercase(Locale.ROOT)} · $kbps · ${Text.bytes(f.size)} · ${Text.time(f.durationMs)}"
     }
 }

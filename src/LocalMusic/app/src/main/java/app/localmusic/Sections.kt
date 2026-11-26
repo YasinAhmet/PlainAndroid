@@ -1,5 +1,7 @@
 package app.localmusic
 
+import app.plain.lang.tr
+
 /**
  * Pure grouping for the library screens (unit-tested in LogicTest.kt): packing small groups, the collapsed folder
  * tree, "new pieces" and the play history. Everything works on the in-memory LibraryIndex; nothing touches files on disk.
@@ -14,6 +16,12 @@ object Packing {
 
     fun isPacked(g: Group) = g.key.startsWith('\u0000')
 
+    // Shown titles of the packed groups (the English constants stay for keys and tests). LibraryIndex builds these once
+    // per load; Library.relabel() rebuilds the index after a language change.
+    val oneOffsTitle get() = tr(ONE_OFFS, "Az şarkılı sanatçılar")
+    val singlesTitle get() = tr(Naming.SINGLES, "Tekliler")
+    val otherGenreTitle get() = tr(OTHER_GENRE, "Diğer")
+
     /** The groups that stay as they are, plus the one group the small ones were packed into (null = nothing packed). */
     class Packed(val groups: List<Group>, val packed: Group?)
 
@@ -25,7 +33,7 @@ object Packing {
         val (small, big) = artists.partition { it.count <= max || it.key == UNKNOWN_KEY }
         if (small.isEmpty()) return Packed(artists, null)
         val songs = small.flatMap { it.songs }.sortedWith(BY_ARTIST)
-        return Packed(big, Group(ONE_OFFS_KEY, ONE_OFFS, songs, artist = Text.count(small.size, "artist")))
+        return Packed(big, Group(ONE_OFFS_KEY, oneOffsTitle, songs, artist = Text.count(small.size, "artist")))
     }
 
     /** Album grid: single-track albums (of any artists) become one "Singles" tile. A lone one stays as it is. */
@@ -34,7 +42,7 @@ object Packing {
         if (one.size < 2) return Packed(albums, null)
         val songs = one.flatMap { it.songs }.sortedWith(BY_ARTIST)
         val artists = songs.map { it.artistKey }.distinct().size
-        return Packed(many, Group(SINGLES_KEY, Naming.SINGLES, songs, artist = if (artists == 1) songs[0].mainArtist else Text.count(artists, "artist")))
+        return Packed(many, Group(SINGLES_KEY, singlesTitle, songs, artist = if (artists == 1) songs[0].mainArtist else Text.count(artists, "artist")))
     }
 
     /** Genres with fewer than [min] songs go into "Other" (merged with a real "Other" genre if there is one). */
@@ -42,7 +50,7 @@ object Packing {
         val (small, big) = genres.partition { it.count < min || Text.fold(it.title) == "other" }
         if (small.isEmpty()) return Packed(genres, null)
         val songs = small.flatMap { it.songs }.sortedWith(BY_ARTIST)
-        return Packed(big, Group(OTHER_KEY, OTHER_GENRE, songs, albumCount = songs.map { it.albumKey }.distinct().size))
+        return Packed(big, Group(OTHER_KEY, otherGenreTitle, songs, albumCount = songs.map { it.albumKey }.distinct().size))
     }
 }
 
@@ -69,6 +77,15 @@ object FolderTree {
     const val LOOSE = "Loose files"
     const val PLAIN = "Plain Youtube"
     const val PLAIN_CACHED = "Plain Youtube · cached"
+    const val PHONE = "Phone storage"
+    val looseTitle get() = tr(LOOSE, "Tek dosyalar")
+
+    /** Shown name of a root (keys stay English: they come from the English label). */
+    private fun rootTitle(name: String): String = when (name) {
+        PLAIN_CACHED -> tr(PLAIN_CACHED, "Plain Youtube · önbellek")
+        PHONE -> tr(PHONE, "Telefon belleği")
+        else -> name
+    }
     private val ROOT_ORDER = listOf("music", "download", PLAIN.lowercase(), PLAIN_CACHED.lowercase())
 
     /** Root label and the folder names below it. Plain Youtube's music and video trees share one root per channel. */
@@ -78,7 +95,7 @@ object FolderTree {
             val cached = PlainYoutube.isCached(relPath)
             return (if (cached) PLAIN_CACHED else PLAIN) to parts.drop(if (cached) 3 else 2)
         }
-        return (parts.firstOrNull() ?: "Phone storage") to parts.drop(1)
+        return (parts.firstOrNull() ?: PHONE) to parts.drop(1)
     }
 
     private class B(val name: String) {
@@ -94,7 +111,7 @@ object FolderTree {
             for (p in rest) b = b.kids.getOrPut(p.lowercase()) { B(p) }
             b.songs += s
         }
-        return roots.values.map { finish(it, it.name, it.name.lowercase()) }
+        return roots.values.map { finish(it, rootTitle(it.name), it.name.lowercase()) }
             .sortedWith(compareBy({ ROOT_ORDER.indexOf(it.key.substringBefore('/')).let { i -> if (i < 0) ROOT_ORDER.size else i } }, { Text.sortKey(it.title) }))
     }
 
@@ -103,7 +120,7 @@ object FolderTree {
         val single = kids.filter { it.children.isEmpty() && it.songs.size == 1 }
         val children = ArrayList(if (single.size >= 2) kids - single.toSet() else kids)
         children.sortBy { Text.sortKey(it.title) }
-        if (single.size >= 2) children += FolderNode(LOOSE, "$key/\u0000loose", emptyList(), single.flatMap { it.songs }.sortedBy { it.sortTitle }, loose = true)
+        if (single.size >= 2) children += FolderNode(looseTitle, "$key/\u0000loose", emptyList(), single.flatMap { it.songs }.sortedBy { it.sortTitle }, loose = true)
         var node = FolderNode(title, key, children, b.songs.sortedWith(compareBy({ it.sortTitle }, { it.id })))
         while (node.songs.isEmpty() && node.children.size == 1 && !node.children[0].loose) {
             val c = node.children[0]
@@ -142,7 +159,7 @@ object NewPieces {
                     val album = cluster.first().album.takeIf { key(cluster.first()).startsWith("a|") }
                     val artist = LibraryIndex.majority(cluster.map { it.mainArtist })
                     out += Item(ordered, album?.let { LibraryIndex.majority(cluster.map { s -> s.album }) } ?: artist,
-                        "${cluster.size} new" + if (album != null) " · $artist" else "", cluster.maxOf { it.dateAdded })
+                        tr("${cluster.size} new", "${cluster.size} yeni") + if (album != null) " · $artist" else "", cluster.maxOf { it.dateAdded })
                 } else cluster.forEach { out += Item(listOf(it), it.title, it.shownArtist, it.dateAdded) }
                 cluster = ArrayList()
             }

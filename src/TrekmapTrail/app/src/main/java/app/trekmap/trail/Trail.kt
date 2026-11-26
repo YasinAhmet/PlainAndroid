@@ -18,6 +18,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import org.json.JSONObject
 import java.io.BufferedWriter
 import java.io.File
@@ -173,7 +175,7 @@ object Trail {
             )
         } catch (e: Exception) {
             Dev.event("trail", "cannot start: $e")
-            throw IllegalStateException("Phone storage is full — free some space to record.")
+            throw IllegalStateException(tr("Phone storage is full — free some space to record.", "Telefon hafızası dolu — kayıt için yer açın."))
         }
         active = true
         gps = Gps.SEARCHING
@@ -213,10 +215,11 @@ object Trail {
     private fun watchBatterySaver(s: Service) {
         val r = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
+                PlainLang.init(c)
                 val lim = Power.saverLimitsGps(c)
                 devEvent("battery-saver", lim ?: "changed (no GPS limit)", alsoApp = true)
-                if (lim != null && active) Notif.warn(c, "Battery saver may stop your track",
-                    "Battery saver $lim. Turn it off, or keep the screen on, to keep recording.")
+                if (lim != null && active) Notif.warn(c, tr("Battery saver may stop your track", "Pil tasarrufu kaydınızı durdurabilir"),
+                    tr("Battery saver $lim. Turn it off, or keep the screen on, to keep recording.", "Pil tasarrufu $lim. Kaydın sürmesi için kapatın ya da ekranı açık tutun."))
             }
         }
         val f = android.content.IntentFilter(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
@@ -357,7 +360,7 @@ object Trail {
                 }
             }
             if (data.isNotEmpty()) {
-                val n = name ?: "Trail ${Fmt.date(startTime)}"
+                val n = name ?: (tr("Trail", "Rota") + " ${Fmt.date(startTime)}")
                 val id = Store.newId()
                 val photos = Photos.moveRecToTrack(ctx, id) // before the GPX is written, so photos become waypoints
                 entry = Store.save(
@@ -571,7 +574,7 @@ object Trail {
         } catch (e: Exception) {
             if (!writeFailed) {
                 writeFailed = true
-                appCtx?.let { Notif.warn(it, "Track could not be saved", "Phone storage may be full — free some space to keep recording.") }
+                appCtx?.let { Notif.warn(it, tr("Track could not be saved", "İz kaydedilemedi"), tr("Phone storage may be full — free some space to keep recording.", "Telefon hafızası dolu olabilir — kaydın sürmesi için yer açın.")) }
                 Dev.event("trail", "track write failed: $e")
             }
         }

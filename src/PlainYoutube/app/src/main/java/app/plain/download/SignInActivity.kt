@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import app.plain.lang.PlainLang
 import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
@@ -14,6 +15,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
+import app.plain.lang.tr
 
 /**
  * Path A: sign in to YouTube inside the app.
@@ -45,6 +47,7 @@ class SignInActivity : Activity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         Store.init(this); Account.init(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(C.BG) }
@@ -53,8 +56,8 @@ class SignInActivity : Activity() {
             v.setPadding(0, ins.systemWindowInsetTop, 0, ins.systemWindowInsetBottom); ins
         }
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(4), dp(12), dp(4)) }
-        bar.addView(icon(R.drawable.ic_close, desc = "Cancel") { cancel() })
-        statusV = text("Sign in to YouTube · only YouTube's sign-in cookies are kept", 13f, C.DIM, lines = 2)
+        bar.addView(icon(R.drawable.ic_close, desc = tr("Cancel", "İptal")) { cancel() })
+        statusV = text(tr("Sign in to YouTube · only YouTube's sign-in cookies are kept", "YouTube'da oturum açın · yalnızca YouTube'un oturum çerezleri saklanır"), 13f, C.DIM, lines = 2)
         bar.addView(statusV, lpL(0, WRAP, 1f))
         root.addView(bar, lpL(MATCH, WRAP))
         root.addView(View(this).apply { setBackgroundColor(C.LINE) }, lpL(MATCH, dp(1)))
@@ -75,7 +78,7 @@ class SignInActivity : Activity() {
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                if (refusedUrl(url)) refuse("Google's page: ${Uri.parse(url).path}")
+                if (refusedUrl(url)) refuse(tr("Google's page: ${Uri.parse(url).path}", "Google sayfası: ${Uri.parse(url).path}"))
             }
 
             override fun onPageFinished(view: WebView, url: String) = check(view, url)
@@ -87,7 +90,7 @@ class SignInActivity : Activity() {
 
     private fun check(view: WebView, url: String) {
         if (finishing) return
-        if (refusedUrl(url)) { refuse("Google's page: ${Uri.parse(url).path}"); return }
+        if (refusedUrl(url)) { refuse(tr("Google's page: ${Uri.parse(url).path}", "Google sayfası: ${Uri.parse(url).path}")); return }
         val host = Uri.parse(url).host.orEmpty()
         if (host == "youtube.com" || host.endsWith(".youtube.com")) {
             val cm = CookieManager.getInstance()
@@ -95,21 +98,21 @@ class SignInActivity : Activity() {
             if (CookiePolicy.signedIn(cookies)) { success(cookies); return }
             if (cookies.any { it.name.endsWith("SAPISID") } && cookies.none { it.name == "LOGIN_INFO" }) {
                 // signed in, but the WebView didn't hand over the HttpOnly cookies
-                refuse("Signed in, but this phone's WebView didn't give the app YouTube's HttpOnly sign-in cookies.")
+                refuse(tr("Signed in, but this phone's WebView didn't give the app YouTube's HttpOnly sign-in cookies.", "Oturum açıldı, ancak bu telefonun WebView'i YouTube'un HttpOnly oturum çerezlerini uygulamaya vermedi."))
             }
             return
         }
         if (host == "accounts.google.com") {
             // read-only: look for Google's refusal message in the page text (changes nothing on the page)
             view.evaluateJavascript("(document.body && document.body.innerText || '').slice(0, 4000)") { t ->
-                if (!finishing && t != null && refusedText(t)) refuse("Google said: This browser or app may not be secure / Couldn't sign you in.")
+                if (!finishing && t != null && refusedText(t)) refuse(tr("Google said: This browser or app may not be secure / Couldn't sign you in.", "Google yanıtı: Bu tarayıcı veya uygulama güvenli olmayabilir / Oturumunuz açılamadı."))
             }
         }
     }
 
     private fun success(cookies: List<Cookie>) {
         finishing = true
-        statusV.text = "Signed in · saving and clearing the sign-in page's data…"
+        statusV.text = tr("Signed in · saving and clearing the sign-in page's data…", "Oturum açıldı · kaydediliyor ve oturum açma sayfasının verileri temizleniyor…")
         wipe()
         Thread {
             val jar = CookieJar(cookies)

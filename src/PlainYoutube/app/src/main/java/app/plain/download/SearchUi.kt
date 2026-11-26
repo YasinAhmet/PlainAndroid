@@ -21,6 +21,7 @@ import android.widget.TextView
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.util.concurrent.Executors
+import app.plain.lang.tr
 
 /**
  * The Search tab: Feed (followed channels' RSS) | Search (InnerTube WEB), plus a back stack of channel / playlist
@@ -37,7 +38,7 @@ class SearchScreen(private val act: MainActivity) {
     private val segBar = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(8), act.dp(4), act.dp(16), act.dp(4)) }
     private val selBar = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(4), act.dp(4), act.dp(16), act.dp(4)); visibility = View.GONE }
     private val host = FrameLayout(act)
-    private val backBtn = act.icon(R.drawable.ic_back, desc = "Back") { onBack() }
+    private val backBtn = act.icon(R.drawable.ic_back, desc = tr("Back", "Geri")) { onBack() }
 
     /** 2.3 app-wide Back history: page pushes and Feed/Search/Lists switches are reported to MainActivity. */
     var onNav: ((NavStep) -> Unit)? = null
@@ -84,23 +85,23 @@ class SearchScreen(private val act: MainActivity) {
 
     init {
         segBar.addView(backBtn)
-        feedChip = Chip(act, "Feed") { showBase(feedPage) }
-        searchChip = Chip(act, "Search") { showBase(searchPage) }
+        feedChip = Chip(act, tr("Feed", "Akış")) { showBase(feedPage) }
+        searchChip = Chip(act, tr("Search", "Ara")) { showBase(searchPage) }
         segBar.addView(feedChip)
         segBar.addView(View(act), lpL(act.dp(8), 1))
         segBar.addView(searchChip)
-        listsChip = Chip(act, "Lists") { showBase(listsPage) }
+        listsChip = Chip(act, tr("Lists", "Listeler")) { showBase(listsPage) }
         segBar.addView(View(act), lpL(act.dp(8), 1))
         segBar.addView(listsChip)
         view.addView(segBar, lpL(MATCH, WRAP))
 
-        selBar.addView(act.icon(R.drawable.ic_close, desc = "Stop selecting") { top.endSelection() })
+        selBar.addView(act.icon(R.drawable.ic_close, desc = tr("Stop selecting", "Seçimi bitir")) { top.endSelection() })
         selBar.addView(selCount, lpL(0, WRAP, 1f))
-        selBar.addView(act.pill("All") { top.selectAll() })
+        selBar.addView(act.pill(tr("All", "Tümü")) { top.selectAll() })
         selBar.addView(View(act), lpL(act.dp(8), 1))
-        selGo = act.pill("Download", C.ACCENT, C.ACCENT) { top.selGo() }
+        selGo = act.pill(tr("Download", "İndir"), C.ACCENT, C.ACCENT) { top.selGo() }
         selBar.addView(selGo)
-        selMore = act.icon(R.drawable.ic_more, desc = "More for the selection") { selectionMenu() }
+        selMore = act.icon(R.drawable.ic_more, desc = tr("More for the selection", "Seçim için diğer")) { selectionMenu() }
         selBar.addView(selMore)
         view.addView(selBar, lpL(MATCH, WRAP))
         view.addView(host, lpL(MATCH, 0, 1f))
@@ -186,7 +187,7 @@ class SearchScreen(private val act: MainActivity) {
         segBar.visibility = if (p.selecting) View.GONE else View.VISIBLE
         selBar.visibility = if (p.selecting) View.VISIBLE else View.GONE
         val n = p.sel.size
-        selCount.text = "$n selected"
+        selCount.text = tr("$n selected", "$n seçili")
         selGo.text = p.selLabel(n)
         selMore.visibility = if (p.selMenu) View.VISIBLE else View.GONE
         selGo.isEnabled = n > 0
@@ -206,11 +207,11 @@ class SearchScreen(private val act: MainActivity) {
     }
 
     fun eraseDownloaded(js: List<Job>, what: String) {
-        if (js.isEmpty()) { act.toast("Nothing downloaded from $what"); return }
-        android.app.AlertDialog.Builder(act).setTitle("Erase ${js.size} downloaded file${if (js.size == 1) "" else "s"}?")
-            .setMessage("From $what. They go to the trash (restorable for about 30 days; Undo right after).")
-            .setPositiveButton("Erase") { _, _ -> act.eraseJobs(js) }
-            .setNegativeButton("Cancel", null).show()
+        if (js.isEmpty()) { act.toast(tr("Nothing downloaded from $what", "İndirilmiş bir şey yok: $what")); return }
+        android.app.AlertDialog.Builder(act).setTitle(tr("Erase ${js.size} downloaded file${if (js.size == 1) "" else "s"}?", "İndirilen ${js.size} dosya silinsin mi?"))
+            .setMessage(tr("From $what. They go to the trash (restorable for about 30 days; Undo right after).", "Kaynak: $what. Dosyalar çöpe gider (yaklaşık 30 gün geri yüklenebilir; hemen ardından Geri al)."))
+            .setPositiveButton(tr("Erase", "Sil")) { _, _ -> act.eraseJobs(js) }
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     /** Opens a channel page (hold menu "Visit channel", the player's Channel button). */
@@ -220,11 +221,11 @@ class SearchScreen(private val act: MainActivity) {
         val p = top
         val sel = p.selectedItems()
         if (sel.isEmpty()) return
-        act.menu("${sel.size} selected", listOf(
-            "Download ${sel.size}…" to { bulk(sel, p.albumHint, music = p.musicDefault) { p.endSelection() } },
-            "Cache ${sel.size}" to { cacheItems(sel, p.albumHint, p.musicDefault); p.endSelection() },
-            "Add to play queue" to { Hold.enqueue(act, sel.map { PlayQueue.of(it, null, p.albumHint) }); p.endSelection() },
-            "Add to list…" to { Hold.addToList(act, sel) { p.endSelection() } },
+        act.menu(tr("${sel.size} selected", "${sel.size} seçili"), listOf(
+            tr("Download ${sel.size}…", "${sel.size} tanesini indir…") to { bulk(sel, p.albumHint, music = p.musicDefault) { p.endSelection() } },
+            tr("Cache ${sel.size}", "${sel.size} tanesini önbelleğe al") to { cacheItems(sel, p.albumHint, p.musicDefault); p.endSelection() },
+            tr("Add to play queue", "Çalma sırasına ekle") to { Hold.enqueue(act, sel.map { PlayQueue.of(it, null, p.albumHint) }); p.endSelection() },
+            tr("Add to list…", "Listeye ekle…") to { Hold.addToList(act, sel) { p.endSelection() } },
         ))
     }
 
@@ -246,12 +247,12 @@ class SearchScreen(private val act: MainActivity) {
                 Job(id = base + k, videoId = it.id, title = it.title, channel = "", durationSec = it.durationSec,
                     kind = if (music || Store.mode(it.id) == PlayMode.LISTEN) Kind.AUDIO else Kind.VIDEO, audioFmt = AudioFmt.M4A, audioQ = AudioQ.HIGH,
                     height = Store.watchP, codec = VCodec.AVC, album = Albums.pick(null, false, album), cache = true,
-                    batch = batch, batchTitle = "Cache · " + (title ?: album ?: "${todo.size} videos"))
+                    batch = batch, batchTitle = tr("Cache · ", "Önbellek · ") + (title ?: album ?: tr("${todo.size} videos", "${todo.size} video")))
             })
             act.askNotificationsOnce()
             DownloadService.start(act)
         }
-        act.toast("Caching ${todo.size}" + if (vids.size > todo.size) " (${vids.size - todo.size} already cached or queued)" else "")
+        act.toast(tr("Caching ${todo.size}", "Önbelleğe alınıyor: ${todo.size}") + if (vids.size > todo.size) tr(" (${vids.size - todo.size} already cached or queued)", " (${vids.size - todo.size} tanesi zaten önbellekte ya da sırada)") else "")
     }
 
     /** From the Download tab / a shared link / the search box. */
@@ -268,22 +269,22 @@ class SearchScreen(private val act: MainActivity) {
 
     private fun resolveAndOpen(url: String) {
         val g = calls.gen
-        act.toast("Opening…")
+        act.toast(tr("Opening…", "Açılıyor…"))
         io.execute {
             val r = try { Result.success(WebApi.resolve(act, calls, g, url)) } catch (e: Throwable) { Result.failure(e) }
             main.post {
                 if (g != calls.gen || !shown) return@post
-                r.fold({ if (it is Target.ChannelUrl) act.toast("Not found") else open(it) }, { act.toast(errText(it)) })
+                r.fold({ if (it is Target.ChannelUrl) act.toast(tr("Not found", "Bulunamadı")) else open(it) }, { act.toast(errText(it)) })
             }
         }
     }
 
     private fun errText(e: Throwable): String = when (e) {
-        is NoWifi -> "Not on Wi-Fi (Wi-Fi only is on)"
-        is java.net.UnknownHostException -> "No internet connection"
-        is java.net.SocketTimeoutException -> "Network timed out"
-        is NotFound, is YtError, is AccountExpired -> e.message ?: "Not found"
-        else -> "Couldn't load: ${e.message ?: e.javaClass.simpleName}"
+        is NoWifi -> tr("Not on Wi-Fi (Wi-Fi only is on)", "Wi-Fi bağlı değil (Yalnızca Wi-Fi açık)")
+        is java.net.UnknownHostException -> tr("No internet connection", "İnternet bağlantısı yok")
+        is java.net.SocketTimeoutException -> tr("Network timed out", "Ağ zaman aşımına uğradı")
+        is NotFound, is YtError, is AccountExpired -> e.message ?: tr("Not found", "Bulunamadı")
+        else -> tr("Couldn't load: ${e.message ?: e.javaClass.simpleName}", "Yüklenemedi: ${e.message ?: e.javaClass.simpleName}")
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -292,8 +293,8 @@ class SearchScreen(private val act: MainActivity) {
     /** Ask once for the options, then queue [items] (videos only), skipping what is already downloaded or queued. */
     fun bulk(items: List<Item>, album: String? = null, title: String? = null, music: Boolean = false, after: () -> Unit = {}) {
         val vids = items.filter { it.isVideo }
-        if (vids.isEmpty()) { act.toast("No videos selected"); return }
-        bulkTracks(listOf(album to vids), title ?: album ?: "${vids.size} selected videos", music, after)
+        if (vids.isEmpty()) { act.toast(tr("No videos selected", "Seçili video yok")); return }
+        bulkTracks(listOf(album to vids), title ?: album ?: tr("${vids.size} selected videos", "Seçili ${vids.size} video"), music, after)
     }
 
     /**
@@ -303,7 +304,7 @@ class SearchScreen(private val act: MainActivity) {
      */
     fun bulkTracks(lists: List<Pair<String?, List<Item>>>, title: String, music: Boolean, after: () -> Unit = {}) {
         val n = lists.flatMap { it.second }.filter { it.isVideo }.distinctBy { it.id }.size
-        if (n == 0) { act.toast("Nothing to download"); return }
+        if (n == 0) { act.toast(tr("Nothing to download", "İndirilecek bir şey yok")); return }
         BulkDialog(act, n, music) { kind, fmt, q, height ->
             if (!act.wifiOk()) return@BulkDialog
             val active = Store.activeIds()
@@ -321,7 +322,7 @@ class SearchScreen(private val act: MainActivity) {
                 })
                 DownloadService.start(act)
             }
-            act.message("Download", Collect.summary(plan.take.size, plan))
+            act.message(tr("Download", "İndir"), Collect.summary(plan.take.size, plan))
             after()
         }.show()
     }
@@ -331,18 +332,25 @@ class SearchScreen(private val act: MainActivity) {
 
     fun importDialog() {
         android.app.AlertDialog.Builder(act)
-            .setTitle("Import subscriptions")
-            .setMessage(
+            .setTitle(tr("Import subscriptions", "Abonelikleri içe aktar"))
+            .setMessage(tr(
                 "Your YouTube subscriptions can be imported once from a Google Takeout file (no sign-in in this app):\n\n" +
                     "1. On takeout.google.com tap \"Deselect all\".\n" +
                     "2. Tick \"YouTube and YouTube Music\".\n" +
                     "3. \"All YouTube data included\" → keep only \"subscriptions\".\n" +
                     "4. Next step → Create export, then download it on this phone.\n\n" +
                     "Then choose the .zip (or subscriptions.csv from inside it). Channels are added to Following; nothing " +
-                    "is removed."
-            )
-            .setPositiveButton("Choose file…") { _, _ -> act.pickTakeout() }
-            .setNegativeButton("Cancel", null)
+                    "is removed.",
+                "YouTube abonelikleriniz bir Google Takeout dosyasından bir kez içe aktarılabilir (bu uygulamada oturum açmadan):\n\n" +
+                    "1. takeout.google.com'da \"Tümünün seçimini kaldır\"a dokunun.\n" +
+                    "2. \"YouTube ve YouTube Music\"i işaretleyin.\n" +
+                    "3. \"Tüm YouTube verileri dahil\" → yalnızca \"abonelikler\"i bırakın.\n" +
+                    "4. Sonraki adım → Dışa aktarma oluştur, sonra bu telefona indirin.\n\n" +
+                    "Ardından .zip dosyasını (ya da içindeki subscriptions.csv'yi) seçin. Kanallar Takip edilenler'e eklenir; hiçbir şey " +
+                    "kaldırılmaz."
+            ))
+            .setPositiveButton(tr("Choose file…", "Dosya seç…")) { _, _ -> act.pickTakeout() }
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 
@@ -367,15 +375,15 @@ class SearchScreen(private val act: MainActivity) {
                 if (act.isDestroyed) return@post
                 r.fold({ list ->
                     if (list.isEmpty()) {
-                        act.message("Import", "No channels found in that file. Pick the Takeout .zip or its subscriptions.csv.")
+                        act.message(tr("Import", "İçe aktar"), tr("No channels found in that file. Pick the Takeout .zip or its subscriptions.csv.", "Bu dosyada kanal bulunamadı. Takeout .zip dosyasını ya da içindeki subscriptions.csv'yi seçin."))
                         return@fold
                     }
                     val now = System.currentTimeMillis()
                     val (merged, added) = Follows.merge(Store.follows(), list.map { it.copy(added = now) })
                     Store.setFollows(merged)
-                    act.message("Import", "Found ${list.size} channels, $added new. Following ${merged.size} channels now.")
+                    act.message(tr("Import", "İçe aktar"), tr("Found ${list.size} channels, $added new. Following ${merged.size} channels now.", "${list.size} kanal bulundu, $added yeni. Artık ${merged.size} kanal takip ediliyor."))
                     if (shown && top === feedPage) feedPage.onShow() else feedPage.updateInfo()
-                }, { e -> act.message("Import", "Couldn't read the file: ${e.message ?: e.javaClass.simpleName}") })
+                }, { e -> act.message(tr("Import", "İçe aktar"), tr("Couldn't read the file: ${e.message ?: e.javaClass.simpleName}", "Dosya okunamadı: ${e.message ?: e.javaClass.simpleName}")) })
             }
         }
     }
@@ -391,15 +399,15 @@ class SearchScreen(private val act: MainActivity) {
         if (!i.members) return false
         Store.markMembers(i.id)
         if (Account.usable) return false
-        act.toast(if (Account.expired) "Members-only — account expired: import new cookies in ⋮ → Account" else Account.SIGNED_OUT)
+        act.toast(if (Account.expired) tr("Members-only — account expired: import new cookies in ⋮ → Account", "Üyelere özel — hesabın süresi doldu: ⋮ → Hesap'tan yeni çerezleri içe aktarın") else Account.SIGNED_OUT)
         return true
     }
 
     /** A channel's members-only videos (its UUMO… playlist), asked with the account (members-tab purpose only). */
     inner class MembersPage(private val channelId: String, private val name: String) : ListPage() {
         init {
-            head.addView(act.text("Members-only · ${name.ifEmpty { "Channel" }}", 18f, C.TEXT, bold = true, lines = 2).apply { setPadding(0, act.dp(4), 0, 0) })
-            head.addView(act.text("Asked with your account (only this list and members-only videos use it)", 12f, C.BLUE, lines = 2)
+            head.addView(act.text(tr("Members-only · ", "Üyelere özel · ") + name.ifEmpty { tr("Channel", "Kanal") }, 18f, C.TEXT, bold = true, lines = 2).apply { setPadding(0, act.dp(4), 0, 0) })
+            head.addView(act.text(tr("Asked with your account (only this list and members-only videos use it)", "Hesabınızla soruldu (yalnızca bu liste ve üyelere özel videolar kullanır)"), 12f, C.BLUE, lines = 2)
                 .apply { setPadding(0, act.dp(2), 0, act.dp(6)) })
         }
 
@@ -410,7 +418,7 @@ class SearchScreen(private val act: MainActivity) {
                 loadedOnce = true
                 items.clear()
                 append(mark(Browse.page(o)))
-                setStatus(if (items.isEmpty()) Browse.alert(o) ?: "No members-only videos here (or this account isn't a member)" else null)
+                setStatus(if (items.isEmpty()) Browse.alert(o) ?: tr("No members-only videos here (or this account isn't a member)", "Burada üyelere özel video yok (ya da bu hesap üye değil)") else null)
             }
         }
 
@@ -432,7 +440,7 @@ class SearchScreen(private val act: MainActivity) {
 
         /** Rows that can be selected on this page (videos; channels on Following). */
         open fun selectable(i: Item) = i.isVideo
-        open fun selLabel(n: Int) = "Download $n"
+        open fun selLabel(n: Int) = tr("Download $n", "$n tanesini indir")
         open val selMenu get() = true
         open fun selGo() { bulk(selectedItems(), albumHint, music = musicDefault) { endSelection() } }
         /** Hold menu of a channel row offers "Select" (Following). */
@@ -441,7 +449,7 @@ class SearchScreen(private val act: MainActivity) {
         val head = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(16), 0, act.dp(16), act.dp(4)) }
         private val status = act.text("", 13f, C.DIM, lines = 4).apply { setPadding(act.dp(16), act.dp(4), act.dp(16), act.dp(4)); visibility = View.GONE }
         val list = ListView(act)
-        private val more = act.pill("Load more") { if (loadedOnce) loadMore() else retry() }
+        private val more = act.pill(tr("Load more", "Daha fazla yükle")) { if (loadedOnce) loadMore() else retry() }
         private val footNote = act.text("", 13f, C.LABEL).apply { gravity = Gravity.CENTER }
         val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
 
@@ -491,9 +499,9 @@ class SearchScreen(private val act: MainActivity) {
 
         fun refreshFooter() {
             when {
-                loading -> { more.visibility = View.GONE; footNote.text = "Loading…"; footNote.visibility = View.VISIBLE }
-                loadedOnce && token != null -> { more.text = "Load more"; more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
-                !loadedOnce && canRetry -> { more.text = "Retry"; more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
+                loading -> { more.visibility = View.GONE; footNote.text = tr("Loading…", "Yükleniyor…"); footNote.visibility = View.VISIBLE }
+                loadedOnce && token != null -> { more.text = tr("Load more", "Daha fazla yükle"); more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
+                !loadedOnce && canRetry -> { more.text = tr("Retry", "Yeniden dene"); more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
                 else -> { more.visibility = View.GONE; footNote.visibility = View.GONE }
             }
         }
@@ -587,21 +595,21 @@ class SearchScreen(private val act: MainActivity) {
                 IKind.CHANNEL -> {
                     val followed = Store.isFollowed(i.id)
                     act.menu(i.title, listOfNotNull(
-                        if (channelSelect) "Select" to { startSelection(i) } else null,
-                        "Open channel" to { push(ChannelPage(i.id, i.title)) },
-                        "Download all music…" to { push(ChannelPage(i.id, i.title).apply { autoAll = "music" }) },
-                        (if (followed) "Unfollow" else "Follow") to {
+                        if (channelSelect) tr("Select", "Seç") to { startSelection(i) } else null,
+                        tr("Open channel", "Kanalı aç") to { push(ChannelPage(i.id, i.title)) },
+                        tr("Download all music…", "Tüm müzikleri indir…") to { push(ChannelPage(i.id, i.title).apply { autoAll = "music" }) },
+                        (if (followed) tr("Unfollow", "Takibi bırak") else tr("Follow", "Takip et")) to {
                             if (followed) UnfollowUi.unfollow(act, listOf(i.id to i.title)) { onFollowsChanged() }
-                            else { Store.follow(i.id, i.title); act.toast("Following ${i.title}"); onFollowsChanged() }
+                            else { Store.follow(i.id, i.title); act.toast(tr("Following ${i.title}", "Takip ediliyor: ${i.title}")); onFollowsChanged() }
                         },
                     ))
                 }
                 IKind.PLAYLIST -> act.menu(i.title, listOf(
-                    "Open" to { push(PlaylistPage(i.id, i.title)) },
-                    "Download all…" to { push(PlaylistPage(i.id, i.title).apply { auto = "download" }) },
-                    "Cache all" to { push(PlaylistPage(i.id, i.title).apply { auto = "cache" }) },
-                    "Listen all" to { push(PlaylistPage(i.id, i.title).apply { auto = "listen" }) },
-                    "Add to list…" to { push(PlaylistPage(i.id, i.title).apply { auto = "list" }) },
+                    tr("Open", "Aç") to { push(PlaylistPage(i.id, i.title)) },
+                    tr("Download all…", "Tümünü indir…") to { push(PlaylistPage(i.id, i.title).apply { auto = "download" }) },
+                    tr("Cache all", "Tümünü önbelleğe al") to { push(PlaylistPage(i.id, i.title).apply { auto = "cache" }) },
+                    tr("Listen all", "Tümünü dinle") to { push(PlaylistPage(i.id, i.title).apply { auto = "listen" }) },
+                    tr("Add to list…", "Listeye ekle…") to { push(PlaylistPage(i.id, i.title).apply { auto = "list" }) },
                 ))
             }
         }
@@ -619,7 +627,7 @@ class SearchScreen(private val act: MainActivity) {
 
     inner class FeedPage : ListPage() {
         private val info = act.text("", 12f, C.LABEL, lines = 2)
-        private val followingBtn = act.pill("Following") { push(FollowingPage()) }
+        private val followingBtn = act.pill(tr("Following", "Takip edilenler")) { push(FollowingPage()) }
         private var refreshing = false
         private var doneN = 0
         private var totalN = 0
@@ -635,9 +643,9 @@ class SearchScreen(private val act: MainActivity) {
             val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(4), 0, act.dp(6)) }
             row.addView(followingBtn)
             row.addView(View(act), lpL(act.dp(8), 1))
-            row.addView(act.pill("Import…") { importDialog() })
+            row.addView(act.pill(tr("Import…", "İçe aktar…")) { importDialog() })
             row.addView(View(act), lpL(0, 1, 1f))
-            row.addView(act.pill("Refresh") { refresh(true) })
+            row.addView(act.pill(tr("Refresh", "Yenile")) { refresh(true) })
             head.addView(row, lpL(MATCH, WRAP))
             head.addView(info, lpL(MATCH, WRAP))
             head.addView(filterFlow, lpL(MATCH, WRAP))
@@ -648,27 +656,29 @@ class SearchScreen(private val act: MainActivity) {
         private fun renderFilters() {
             filterFlow.removeAllViews()
             fun toggle(label: String, on: Boolean, set: (Boolean) -> FeedFilters) = filterFlow.addView(filterChip(label, on) { setFF(set(!on)) })
-            toggle("Members only", ff.membersOnly) { ff.copy(membersOnly = it) }
-            toggle("Hide Shorts", ff.hideShorts) { ff.copy(hideShorts = it) }
-            toggle("Hide downloaded", ff.hideDownloaded) { ff.copy(hideDownloaded = it) }
-            toggle("Music only", ff.musicOnly) { ff.copy(musicOnly = it) }
+            toggle(tr("Members only", "Yalnızca üyeler"), ff.membersOnly) { ff.copy(membersOnly = it) }
+            toggle(tr("Hide Shorts", "Shorts'u gizle"), ff.hideShorts) { ff.copy(hideShorts = it) }
+            toggle(tr("Hide downloaded", "İndirilenleri gizle"), ff.hideDownloaded) { ff.copy(hideDownloaded = it) }
+            toggle(tr("Music only", "Yalnızca müzik"), ff.musicOnly) { ff.copy(musicOnly = it) }
             val follows = Store.follows()
             val picked = ff.channels.count { id -> follows.any { it.id == id } }
-            filterFlow.addView(filterChip(if (picked == 0) "All channels" else "$picked channel${if (picked == 1) "" else "s"}", picked > 0) {
-                if (follows.isEmpty()) { act.toast("Not following any channel"); return@filterChip }
-                checks("Channels (none = all)", follows.map { it.title }, follows.map { it.id in ff.channels }.toBooleanArray()) { b ->
+            filterFlow.addView(filterChip(if (picked == 0) tr("All channels", "Tüm kanallar") else tr("$picked channel${if (picked == 1) "" else "s"}", "$picked kanal"), picked > 0) {
+                if (follows.isEmpty()) { act.toast(tr("Not following any channel", "Hiçbir kanal takip edilmiyor")); return@filterChip }
+                checks(tr("Channels (none = all)", "Kanallar (hiçbiri = tümü)"), follows.map { it.title }, follows.map { it.id in ff.channels }.toBooleanArray()) { b ->
                     setFF(ff.copy(channels = follows.filterIndexed { i, _ -> b[i] }.map { it.id }.toSet()))
                 }
             })
             filterFlow.addView(filterChip(ff.age.label, ff.age != FAge.ALL) {
-                act.menu("Age", FAge.values().map { a -> (if (a == ff.age) "✓ " else "   ") + a.label to { setFF(ff.copy(age = a)) } })
+                act.menu(tr("Age", "Tarih"), FAge.values().map { a -> (if (a == ff.age) "✓ " else "   ") + a.label to { setFF(ff.copy(age = a)) } })
             })
             filterFlow.addView(filterChip(ff.sort.label, ff.sort != FSort.NEWEST) {
-                act.menu("Sort", FSort.values().map { o -> (if (o == ff.sort) "✓ " else "   ") + o.label to { setFF(ff.copy(sort = o)) } })
+                act.menu(tr("Sort", "Sırala"), FSort.values().map { o -> (if (o == ff.sort) "✓ " else "   ") + o.label to { setFF(ff.copy(sort = o)) } })
             })
-            if (!ff.isDefault) filterFlow.addView(act.pill("Reset") { setFF(FeedFilters()) })
-            note.text = if (ff.membersOnly) "Members-only uploads aren't in channel RSS: they're found on Refresh, from each channel's public " +
-                "members list (no account needed), so this may lag until you tap Refresh." else ""
+            if (!ff.isDefault) filterFlow.addView(act.pill(tr("Reset", "Sıfırla")) { setFF(FeedFilters()) })
+            note.text = if (ff.membersOnly) tr("Members-only uploads aren't in channel RSS: they're found on Refresh, from each channel's public " +
+                "members list (no account needed), so this may lag until you tap Refresh.",
+                "Üyelere özel yüklemeler kanal RSS'inde yok: Yenile'de her kanalın herkese açık üye listesinden bulunur " +
+                "(hesap gerekmez), bu yüzden Yenile'ye dokunana kadar gecikebilir.") else ""
             note.visibility = if (ff.membersOnly) View.VISIBLE else View.GONE
         }
 
@@ -691,22 +701,24 @@ class SearchScreen(private val act: MainActivity) {
             val all = Store.loadFeed().items
             items += ff.apply(all, System.currentTimeMillis()) { Store.downloadedAny(it) }
             adapter.notifyDataSetChanged()
-            setStatus(if (all.isNotEmpty() && items.isEmpty()) "Nothing in the feed passes the filters" else null)
+            setStatus(if (all.isNotEmpty() && items.isEmpty()) tr("Nothing in the feed passes the filters", "Akışta filtrelere uyan bir şey yok") else null)
             updateInfo()
         }
 
         fun updateInfo() {
             val n = Store.follows().size
-            followingBtn.text = "Following ($n)"
+            followingBtn.text = tr("Following ($n)", "Takip edilenler ($n)")
             info.text = when {
-                n == 0 -> "Follow channels (open one from Search → Channels and tap Follow), or import your YouTube " +
-                    "subscriptions with Import…. Their newest videos show up here."
-                refreshing -> "Refreshing… $doneN of $totalN channels"
+                n == 0 -> tr("Follow channels (open one from Search → Channels and tap Follow), or import your YouTube " +
+                    "subscriptions with Import…. Their newest videos show up here.",
+                    "Kanalları takip edin (Ara → Kanallar'dan birini açıp Takip et'e dokunun) ya da YouTube aboneliklerinizi " +
+                    "İçe aktar… ile ekleyin. En yeni videoları burada görünür.")
+                refreshing -> tr("Refreshing… $doneN of $totalN channels", "Yenileniyor… $doneN / $totalN kanal")
                 else -> {
                     val last = Store.loadFeed().lastRefresh
-                    (if (last > 0) "Updated ${Ago.text(last, System.currentTimeMillis())}" else "Not loaded yet") +
-                        (if (noWifi) " · not on Wi-Fi, showing the saved feed" else "") +
-                        (if (failedN > 0) " · $failedN channels failed" else "")
+                    (if (last > 0) tr("Updated ${Ago.text(last, System.currentTimeMillis())}", "Güncellendi: ${Ago.text(last, System.currentTimeMillis())}") else tr("Not loaded yet", "Henüz yüklenmedi")) +
+                        (if (noWifi) tr(" · not on Wi-Fi, showing the saved feed", " · Wi-Fi bağlı değil, kayıtlı akış gösteriliyor") else "") +
+                        (if (failedN > 0) tr(" · $failedN channels failed", " · $failedN kanal başarısız") else "")
                 }
             }
         }
@@ -724,7 +736,7 @@ class SearchScreen(private val act: MainActivity) {
                 noWifi = e is NoWifi
                 failedN = 0
                 updateInfo()
-                if (e !is NoWifi) act.toast("No network")
+                if (e !is NoWifi) act.toast(tr("No network", "Ağ yok"))
                 return
             }
             refreshing = true; doneN = 0; failedN = 0; totalN = due.size
@@ -782,7 +794,7 @@ class SearchScreen(private val act: MainActivity) {
         /** Filter for long lists (Takeout import, subscriptions sync): name, accents and case ignored. */
         private val filter: EditText by lazy {
             EditText(act).apply {
-                hint = "Filter channels"
+                hint = tr("Filter channels", "Kanalları filtrele")
                 setHintTextColor(C.LABEL); setTextColor(C.TEXT); textSize = 14f; isSingleLine = true
                 background = act.outline(act.dpf(18))
                 setPadding(act.dp(14), act.dp(8), act.dp(14), act.dp(8))
@@ -790,14 +802,14 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         init {
-            head.addView(act.text("Following", 18f, C.TEXT, bold = true).apply { setPadding(0, act.dp(4), 0, act.dp(2)) })
-            head.addView(act.text("Tap to open; long-press for Unfollow / Select.", 12f, C.LABEL))
+            head.addView(act.text(tr("Following", "Takip edilenler"), 18f, C.TEXT, bold = true).apply { setPadding(0, act.dp(4), 0, act.dp(2)) })
+            head.addView(act.text(tr("Tap to open; long-press for Unfollow / Select.", "Açmak için dokunun; Takibi bırak / Seç için basılı tutun."), 12f, C.LABEL))
             val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(6), 0, act.dp(4)) }
             row.addView(filter, lpL(0, WRAP, 1f))
             row.addView(View(act), lpL(act.dp(8), 1))
-            row.addView(act.pill("Select") { items.firstOrNull()?.let { startSelection(it) } ?: act.toast("Nothing to select") })
+            row.addView(act.pill(tr("Select", "Seç")) { items.firstOrNull()?.let { startSelection(it) } ?: act.toast(tr("Nothing to select", "Seçilecek bir şey yok")) })
             row.addView(View(act), lpL(act.dp(8), 1))
-            row.addView(act.pill("Import…") { importDialog() })
+            row.addView(act.pill(tr("Import…", "İçe aktar…")) { importDialog() })
             head.addView(row, lpL(MATCH, WRAP))
             filter.addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -807,7 +819,7 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         override fun selectable(i: Item) = i.kind == IKind.CHANNEL
-        override fun selLabel(n: Int) = "Unfollow $n"
+        override fun selLabel(n: Int) = tr("Unfollow $n", "Takibi bırak ($n)")
         override val selMenu get() = false
         override val channelSelect get() = true
         override fun selGo() {
@@ -828,9 +840,9 @@ class SearchScreen(private val act: MainActivity) {
             if (selecting) { sel.retain(items.map { it.id }.toSet()); if (top === this) updateSelBar() }
             adapter.notifyDataSetChanged()
             setStatus(when {
-                all.isEmpty() -> "Not following any channel yet."
-                items.isEmpty() -> "No followed channel matches \"$q\"."
-                q.isNotBlank() -> "${items.size} of ${all.size}"
+                all.isEmpty() -> tr("Not following any channel yet.", "Henüz hiçbir kanal takip edilmiyor.")
+                items.isEmpty() -> tr("No followed channel matches \"$q\".", "Takip edilen hiçbir kanal \"$q\" ile eşleşmiyor.")
+                q.isNotBlank() -> tr("${items.size} of ${all.size}", "${items.size} / ${all.size}")
                 else -> null
             })
         }
@@ -848,13 +860,13 @@ class SearchScreen(private val act: MainActivity) {
         val st = on.copyOf()
         android.app.AlertDialog.Builder(act).setTitle(title)
             .setMultiChoiceItems(labels.toTypedArray(), st) { _, i, c -> st[i] = c }
-            .setPositiveButton("Apply") { _, _ -> done(st) }
-            .setNegativeButton("Cancel", null).show()
+            .setPositiveButton(tr("Apply", "Uygula")) { _, _ -> done(st) }
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     inner class SearchPage : ListPage() {
         private val box = EditText(act)
-        private val types = listOf("Videos", "Channels", "Playlists")
+        private val types = listOf(tr("Videos", "Videolar"), tr("Channels", "Kanallar"), tr("Playlists", "Çalma listeleri"))
         private val chips = ArrayList<Chip>()
         private var f = Store.searchFilters
         private var query = ""
@@ -868,7 +880,7 @@ class SearchScreen(private val act: MainActivity) {
         init {
             contUrl = Clients.SEARCH_URL
             box.apply {
-                hint = "Search YouTube, or paste a channel / playlist link"
+                hint = tr("Search YouTube, or paste a channel / playlist link", "YouTube'da arayın ya da kanal / çalma listesi bağlantısı yapıştırın")
                 setSingleLine()
                 inputType = InputType.TYPE_CLASS_TEXT
                 imeOptions = EditorInfo.IME_ACTION_SEARCH
@@ -880,7 +892,7 @@ class SearchScreen(private val act: MainActivity) {
             val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(4), 0, 0) }
             row.addView(box, lpL(0, WRAP, 1f))
             row.addView(View(act), lpL(act.dp(8), 1))
-            row.addView(act.pill("Search", C.ACCENT, C.ACCENT) { submit() })
+            row.addView(act.pill(tr("Search", "Ara"), C.ACCENT, C.ACCENT) { submit() })
             head.addView(row, lpL(MATCH, WRAP))
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(10), 0, act.dp(4)) }
             types.forEachIndexed { i, label ->
@@ -898,27 +910,27 @@ class SearchScreen(private val act: MainActivity) {
             filterFlow.removeAllViews()
             if (f.videos) {
                 filterFlow.addView(filterChip(f.date.label, f.date != SDate.ANY) {
-                    act.menu("Upload date", SDate.values().map { d -> (if (d == f.date) "✓ " else "   ") + d.label to { setF(f.copy(date = d)) } })
+                    act.menu(tr("Upload date", "Yükleme tarihi"), SDate.values().map { d -> (if (d == f.date) "✓ " else "   ") + d.label to { setF(f.copy(date = d)) } })
                 })
                 filterFlow.addView(filterChip(f.dur.label, f.dur != SDur.ANY) {
-                    act.menu("Duration", SDur.values().map { d -> (if (d == f.dur) "✓ " else "   ") + d.label to { setF(f.copy(dur = d)) } })
+                    act.menu(tr("Duration", "Süre"), SDur.values().map { d -> (if (d == f.dur) "✓ " else "   ") + d.label to { setF(f.copy(dur = d)) } })
                 })
             }
             val sorts = if (f.videos) SSort.values().toList() else listOf(SSort.RELEVANCE, SSort.POPULAR)
-            filterFlow.addView(filterChip("Sort: " + f.effSort.label, f.effSort != SSort.RELEVANCE) {
-                act.menu("Sort by", sorts.map { s -> (if (s == f.effSort) "✓ " else "   ") + s.label to { setF(f.copy(sort = s)) } })
+            filterFlow.addView(filterChip(tr("Sort: ", "Sırala: ") + f.effSort.label, f.effSort != SSort.RELEVANCE) {
+                act.menu(tr("Sort by", "Sıralama"), sorts.map { s -> (if (s == f.effSort) "✓ " else "   ") + s.label to { setF(f.copy(sort = s)) } })
             })
             val feats = listOf(f.hideShorts, f.hideLive, f.membersOnly, f.musicOnly, f.hideDownloaded)
             val n = feats.count { it }
-            filterFlow.addView(filterChip(if (n == 0) "Features" else "Features ($n)", n > 0) {
-                checks("Features", listOf("Hide Shorts", "Hide live", "Members-only only", "Music only (\"- Topic\" channels)", "Hide downloaded"), feats.toBooleanArray()) { b ->
+            filterFlow.addView(filterChip(if (n == 0) tr("Features", "Özellikler") else tr("Features ($n)", "Özellikler ($n)"), n > 0) {
+                checks(tr("Features", "Özellikler"), listOf(tr("Hide Shorts", "Shorts'u gizle"), tr("Hide live", "Canlıları gizle"), tr("Members-only only", "Yalnızca üyelere özel"), tr("Music only (\"- Topic\" channels)", "Yalnızca müzik (\"- Topic\" kanalları)"), tr("Hide downloaded", "İndirilenleri gizle")), feats.toBooleanArray()) { b ->
                     setF(f.copy(hideShorts = b[0], hideLive = b[1], membersOnly = b[2], musicOnly = b[3], hideDownloaded = b[4]))
                 }
             })
-            if (!f.isDefault) filterFlow.addView(act.pill("Reset") { setF(SearchFilters(type = f.type)) })
+            if (!f.isDefault) filterFlow.addView(act.pill(tr("Reset", "Sıfırla")) { setF(SearchFilters(type = f.type)) })
             val lines = ArrayList<String>()
-            if (f.membersOnly) lines += "Search is always anonymous, and YouTube leaves members-only videos out of it, so this is usually empty: open a channel's Members list instead."
-            if (f.effSort == SSort.NEWEST) lines += "YouTube no longer sorts search by date: the loaded results are sorted here."
+            if (f.membersOnly) lines += tr("Search is always anonymous, and YouTube leaves members-only videos out of it, so this is usually empty: open a channel's Members list instead.", "Arama her zaman anonimdir ve YouTube üyelere özel videoları aramaya katmaz, bu yüzden bu genelde boştur: bunun yerine bir kanalın Üyeler listesini açın.")
+            if (f.effSort == SSort.NEWEST) lines += tr("YouTube no longer sorts search by date: the loaded results are sorted here.", "YouTube artık aramayı tarihe göre sıralamıyor: yüklenen sonuçlar burada sıralanır.")
             note.text = lines.joinToString("\n")
             note.visibility = if (lines.isEmpty()) View.GONE else View.VISIBLE
         }
@@ -945,7 +957,7 @@ class SearchScreen(private val act: MainActivity) {
             if (box.text.isBlank()) return
             when (val t = Links.classify(box.text.toString(), bareId = false)) {
                 is Target.Query -> { query = t.text; cancelNet(); doSearch() }
-                Target.None -> setStatus("That link isn't a YouTube video, channel or playlist", true)
+                Target.None -> setStatus(tr("That link isn't a YouTube video, channel or playlist", "Bu bağlantı bir YouTube videosu, kanalı ya da çalma listesi değil"), true)
                 else -> open(t)
             }
         }
@@ -957,8 +969,8 @@ class SearchScreen(private val act: MainActivity) {
             refreshFooter()
             setStatus(when {
                 !loadedOnce -> null
-                raw.isEmpty() -> "No results"
-                items.isEmpty() -> "None of the ${raw.size} loaded results pass the filters" + (if (token != null) " · Load more scans further" else "")
+                raw.isEmpty() -> tr("No results", "Sonuç yok")
+                items.isEmpty() -> tr("None of the ${raw.size} loaded results pass the filters", "Yüklenen ${raw.size} sonucun hiçbiri filtrelere uymuyor") + (if (token != null) tr(" · Load more scans further", " · Daha fazla yükle ile daha ileri taranır") else "")
                 else -> null
             })
         }
@@ -1006,9 +1018,9 @@ class SearchScreen(private val act: MainActivity) {
     // ---- Channel ----
 
     inner class ChannelPage(private val channelId: String, private var name: String) : ListPage() {
-        private val titleV = act.text(name.ifEmpty { "Channel" }, 18f, C.TEXT, bold = true, lines = 2)
+        private val titleV = act.text(name.ifEmpty { tr("Channel", "Kanal") }, 18f, C.TEXT, bold = true, lines = 2)
         private val subV = act.text("", 12f, C.LABEL)
-        private val followBtn = act.pill("Follow", C.ACCENT, C.ACCENT) { toggleFollow() }
+        private val followBtn = act.pill(tr("Follow", "Takip et"), C.ACCENT, C.ACCENT) { toggleFollow() }
         private val tabChips = LinkedHashMap<String, Chip>()
         /** Topic channels ("Artist - Topic") have no Videos tab on YouTube: their Music tab comes first. */
         private val topic get() = name.trim().endsWith(" - Topic")
@@ -1023,7 +1035,7 @@ class SearchScreen(private val act: MainActivity) {
         /** Hold menu "Download all music…" on a channel row. */
         var autoAll: String? = null
         private val collectV = act.text("", 12f, C.LABEL, lines = 2)
-        private val stopBtn = act.pill("Stop") { collecting = false; cancelNet(); showCollect(null) }
+        private val stopBtn = act.pill(tr("Stop", "Durdur")) { collecting = false; cancelNet(); showCollect(null) }
         @Volatile private var collecting = false
 
         init {
@@ -1034,13 +1046,13 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(followBtn)
             head.addView(row, lpL(MATCH, WRAP))
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(10), 0, act.dp(4)) }
-            for ((k, label) in listOf("music" to "Music", "videos" to "Videos", "shorts" to "Shorts", "playlists" to "Playlists")) {
+            for ((k, label) in listOf("music" to tr("Music", "Müzik"), "videos" to tr("Videos", "Videolar"), "shorts" to "Shorts", "playlists" to tr("Playlists", "Çalma listeleri"))) {
                 val c = Chip(act, label) { switchTab(k) }
                 tabChips[k] = c; flow.addView(c)
             }
-            flow.addView(act.pill("Download all…", C.ACCENT, C.ACCENT) { downloadAllMenu() })
+            flow.addView(act.pill(tr("Download all…", "Tümünü indir…"), C.ACCENT, C.ACCENT) { downloadAllMenu() })
             // members-only videos of this channel: only offered with an account (the list is asked with it)
-            if (Account.usable) flow.addView(act.pill("Members", C.BLUE, C.BLUE) { push(MembersPage(channelId, name)) })
+            if (Account.usable) flow.addView(act.pill(tr("Members", "Üyeler"), C.BLUE, C.BLUE) { push(MembersPage(channelId, name)) })
             head.addView(flow, lpL(MATCH, WRAP))
             val crow = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL }
             crow.addView(collectV, lpL(0, WRAP, 1f)); crow.addView(stopBtn)
@@ -1050,9 +1062,9 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         private fun updateHead() {
-            titleV.text = name.ifEmpty { "Channel" }
+            titleV.text = name.ifEmpty { tr("Channel", "Kanal") }
             val f = Store.isFollowed(channelId)
-            followBtn.text = if (f) "Following" else "Follow"
+            followBtn.text = if (f) tr("Following", "Takip ediliyor") else tr("Follow", "Takip et")
             followBtn.setTextColor(if (f) C.DIM else C.ACCENT)
             followBtn.background = ripple(act.outline(act.dpf(20), if (f) C.OUTLINE else C.ACCENT))
             tabChips.forEach { (k, c) ->
@@ -1067,7 +1079,7 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun toggleFollow() {
             if (Store.isFollowed(channelId)) { UnfollowUi.unfollow(act, listOf(channelId to name)) { updateHead(); feedPage.updateInfo() }; return }
-            else { Store.follow(channelId, name); act.toast("Following ${name.ifEmpty { "channel" }}: its new videos show up in Feed") }
+            else { Store.follow(channelId, name); act.toast(tr("Following ${name.ifEmpty { "channel" }}: its new videos show up in Feed", "Takip ediliyor: ${name.ifEmpty { "kanal" }} · yeni videoları Akış'ta görünür")) }
             updateHead()
             feedPage.updateInfo()
         }
@@ -1093,7 +1105,7 @@ class SearchScreen(private val act: MainActivity) {
                 items.clear()
                 append(Browse.page(o))
                 val empty = if (items.isEmpty()) Browse.emptyChannel(o) else null
-                setStatus(if (items.isEmpty()) empty?.let { "YouTube: $it" } ?: "Nothing here" else null)
+                setStatus(if (items.isEmpty()) empty?.let { "YouTube: $it" } ?: tr("Nothing here", "Burada bir şey yok") else null)
                 updateHead()
                 if (empty != null && k == "videos" && name.isNotEmpty() && !topic) findSimilar(empty)
                 else probeArtist()
@@ -1136,14 +1148,14 @@ class SearchScreen(private val act: MainActivity) {
                 items.clear()
                 val a = artist
                 if (a != null) {
-                    a.songsPlaylist?.let { items += Item(IKind.PLAYLIST, it, "All songs", channel = who(), count = "Songs") }
-                    a.videosPlaylist?.let { items += Item(IKind.PLAYLIST, it, "Music videos", channel = who(), count = "Videos") }
+                    a.songsPlaylist?.let { items += Item(IKind.PLAYLIST, it, tr("All songs", "Tüm şarkılar"), channel = who(), count = tr("Songs", "Şarkılar")) }
+                    a.videosPlaylist?.let { items += Item(IKind.PLAYLIST, it, tr("Music videos", "Müzik videoları"), channel = who(), count = tr("Videos", "Videolar")) }
                     addReleases(first)
                 }
                 token = if (cursors?.any { !it.done } == true) "music" else null
                 adapter.notifyDataSetChanged()
                 refreshFooter()
-                setStatus(if (items.isEmpty()) "YouTube Music lists no releases for this channel" else null)
+                setStatus(if (items.isEmpty()) tr("YouTube Music lists no releases for this channel", "YouTube Music bu kanal için yayın listelemiyor") else null)
                 updateHead()
                 autoAll?.let { autoAll = null; collectAll(it) }
             }
@@ -1193,20 +1205,20 @@ class SearchScreen(private val act: MainActivity) {
         private fun downloadAllMenu() {
             val music = topic || artist?.hasMusic == true
             val opts = ArrayList<Pair<String, () -> Unit>>()
-            if (music) opts += "All music (every album & single)" to { collectAll("music") }
-            if (!topic) opts += "All videos" to { collectAll("videos") }
-            if (music && !topic) opts += "Everything (music + videos)" to { collectAll("all") }
+            if (music) opts += tr("All music (every album & single)", "Tüm müzikler (her albüm ve single)") to { collectAll("music") }
+            if (!topic) opts += tr("All videos", "Tüm videolar") to { collectAll("videos") }
+            if (music && !topic) opts += tr("Everything (music + videos)", "Her şey (müzik + videolar)") to { collectAll("all") }
             val dl = downloadedFor(items.filter { it.isVideo }.mapTo(HashSet()) { it.id }, name)
-            if (dl.isNotEmpty()) opts += "Erase downloaded (${dl.size})…" to { eraseDownloaded(dl, name.ifEmpty { "this channel" }) }
+            if (dl.isNotEmpty()) opts += tr("Erase downloaded (${dl.size})…", "İndirilenleri sil (${dl.size})…") to { eraseDownloaded(dl, name.ifEmpty { tr("this channel", "bu kanal") }) }
             if (opts.size == 1) { opts[0].second(); return }
-            act.menu("Download all from ${name.ifEmpty { "this channel" }}", opts)
+            act.menu(tr("Download all from ", "Tümünü indir: ") + name.ifEmpty { tr("this channel", "bu kanal") }, opts)
         }
 
         /** Collect every list (progress + Stop), then one batch: each video once, album folder from its release. */
         private fun collectAll(what: String) {
             if (collecting) return
             collecting = true
-            showCollect("Collecting…")
+            showCollect(tr("Collecting…", "Toplanıyor…"))
             val g = calls.gen
             io.execute {
                 val lists = ArrayList<Pair<String?, List<Item>>>()
@@ -1227,7 +1239,7 @@ class SearchScreen(private val act: MainActivity) {
                                     val page = nextPage(g, c)
                                     for (r in page) {
                                         if (!collecting || fresh > Bulk.MAX) break@outer
-                                        main.post { showCollect("Collecting: ${releasesDone + 1} releases · $fresh new tracks") }
+                                        main.post { showCollect(tr("Collecting: ${releasesDone + 1} releases · $fresh new tracks", "Toplanıyor: ${releasesDone + 1} yayın · $fresh yeni parça")) }
                                         val tracks = playlistAll(g, r.id)
                                         for (t in tracks) if (seen.add(t.id) && t.id !in active && !Store.downloadedAny(t.id)) fresh++
                                         lists += r.title to tracks
@@ -1240,7 +1252,7 @@ class SearchScreen(private val act: MainActivity) {
                         }
                     }
                     if (what != "music" && collecting) {
-                        main.post { showCollect("Collecting videos…") }
+                        main.post { showCollect(tr("Collecting videos…", "Videolar toplanıyor…")) }
                         lists += null to channelVideosAll(g)
                     }
                 } catch (e: Throwable) { err = e }
@@ -1252,7 +1264,7 @@ class SearchScreen(private val act: MainActivity) {
                     if (err != null && lists.isEmpty()) { setStatus(errText(err!!), true); return@post }
                     if (stopped && lists.isEmpty()) return@post
                     val who = (artist?.name?.ifEmpty { null } ?: name).removeSuffix(" - Topic")
-                    val label = when (what) { "music" -> "All music"; "videos" -> "All videos"; else -> "Everything" }
+                    val label = when (what) { "music" -> tr("All music", "Tüm müzikler"); "videos" -> tr("All videos", "Tüm videolar"); else -> tr("Everything", "Her şey") }
                     bulkTracks(lists, "$who · $label", what != "videos")
                 }
             }
@@ -1277,7 +1289,7 @@ class SearchScreen(private val act: MainActivity) {
             var p = Browse.page(o)
             val out = ArrayList<Item>(p.items)
             while (p.continuation != null && out.size < 5000 && collecting) {
-                main.post { showCollect("Collecting videos… ${out.size}") }
+                main.post { showCollect(tr("Collecting videos… ${out.size}", "Videolar toplanıyor… ${out.size}")) }
                 o = WebApi.more(act, calls, g, Clients.BROWSE_URL, p.continuation!!, gl)
                 p = Browse.page(o); out += p.items
             }
@@ -1292,14 +1304,14 @@ class SearchScreen(private val act: MainActivity) {
          * YouTube's channel search doesn't list it): offer channels with a similar name found in video results.
          */
         private fun findSimilar(msg: String) {
-            setStatus("YouTube: $msg. Looking for channels with a similar name…")
+            setStatus(tr("YouTube: $msg. Looking for channels with a similar name…", "YouTube: $msg. Benzer adlı kanallar aranıyor…"))
             val q = name
             run(false, { g -> WebApi.search(act, calls, g, q, Clients.SEARCH_VIDEOS) }) { o ->
                 val owners = Browse.page(o).items.filter { it.channelId != null && it.channelId != channelId && Browse.similarName(q, it.channel) }
-                    .distinctBy { it.channelId }.map { Item(IKind.CHANNEL, it.channelId!!, it.channel, count = "Similar name, from video results") }
+                    .distinctBy { it.channelId }.map { Item(IKind.CHANNEL, it.channelId!!, it.channel, count = tr("Similar name, from video results", "Benzer ad, video sonuçlarından")) }
                 items += owners
                 adapter.notifyDataSetChanged()
-                setStatus(if (owners.isEmpty()) "YouTube: $msg" else "YouTube: $msg. Did you mean:")
+                setStatus(if (owners.isEmpty()) "YouTube: $msg" else tr("YouTube: $msg. Did you mean:", "YouTube: $msg. Bunu mu demek istediniz:"))
             }
         }
 
@@ -1330,10 +1342,10 @@ class SearchScreen(private val act: MainActivity) {
         var auto: String? = null
         /** YouTube Music albums (OLAK5uy_…) are music: audio is the default and the album name the folder. */
         private val music get() = playlistId.startsWith("OLAK")
-        private val titleV = act.text(name.ifEmpty { "Playlist" }, 18f, C.TEXT, bold = true, lines = 3)
+        private val titleV = act.text(name.ifEmpty { tr("Playlist", "Çalma listesi") }, 18f, C.TEXT, bold = true, lines = 3)
         private val ownerV = act.text("", 13f, C.DIM)
-        private val allBtn = act.pill("Download all", C.ACCENT, C.ACCENT) { downloadAll() }
-        private val stopBtn = act.pill("Stop") { stopAll() }
+        private val allBtn = act.pill(tr("Download all", "Tümünü indir"), C.ACCENT, C.ACCENT) { downloadAll() }
+        private val stopBtn = act.pill(tr("Stop", "Durdur")) { stopAll() }
         private val progressV = act.text("", 12f, C.LABEL)
         private var ownerId: String? = null
         private var count = ""
@@ -1352,11 +1364,11 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(allBtn)
             head.addView(row, lpL(MATCH, WRAP))
             val flow = FlowLayout(act).apply { setPadding(0, 0, 0, act.dp(4)) }
-            flow.addView(act.pill("Play all") { gatherThen { playAll(items, null, name) } })
-            flow.addView(act.pill("Listen all") { gatherThen { playAll(items, PlayMode.LISTEN, name) } })
-            flow.addView(act.pill("Cache all") { gatherThen { cacheItems(items, name, music, name) } })
-            flow.addView(act.pill("Erase downloaded…") {
-                gatherThen { eraseDownloaded(downloadedFor(items.filter { it.isVideo }.mapTo(HashSet()) { it.id }, null), name.ifEmpty { "this playlist" }) }
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { gatherThen { playAll(items, null, name) } })
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { gatherThen { playAll(items, PlayMode.LISTEN, name) } })
+            flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { gatherThen { cacheItems(items, name, music, name) } })
+            flow.addView(act.pill(tr("Erase downloaded…", "İndirilenleri sil…")) {
+                gatherThen { eraseDownloaded(downloadedFor(items.filter { it.isVideo }.mapTo(HashSet()) { it.id }, null), name.ifEmpty { tr("this playlist", "bu çalma listesi") }) }
             })
             head.addView(flow, lpL(MATCH, WRAP))
             stopBtn.visibility = View.GONE
@@ -1368,7 +1380,7 @@ class SearchScreen(private val act: MainActivity) {
             run(true, { g -> WebApi.browse(act, calls, g, "VL$playlistId", null) }) { o ->
                 Browse.alert(o)?.let { setStatus(it, true); return@run }
                 val h = Browse.playlistHead(o, playlistId)
-                if (h == null) { setStatus("This playlist can't be opened (private, or a Mix)", true); return@run }
+                if (h == null) { setStatus(tr("This playlist can't be opened (private, or a Mix)", "Bu çalma listesi açılamıyor (özel ya da bir Mix)"), true); return@run }
                 name = h.title; ownerName = h.owner; ownerId = h.ownerId; count = h.count
                 region = o.optString("_gl").ifEmpty { null }
                 titleV.text = name
@@ -1376,7 +1388,7 @@ class SearchScreen(private val act: MainActivity) {
                 loadedOnce = true
                 items.clear()
                 append(Browse.page(o))
-                setStatus(if (items.isEmpty()) "This playlist is empty" else null)
+                setStatus(if (items.isEmpty()) tr("This playlist is empty", "Bu çalma listesi boş") else null)
                 updateProgress()
                 when (auto) {
                     "download" -> downloadAll()
@@ -1390,7 +1402,7 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun updateProgress() {
             val n = items.count { it.isVideo }
-            progressV.text = if (gathering) "Loading all… $n videos" else if (token != null) "$n loaded" + (if (count.isNotEmpty()) " of $count" else "") else "$n videos"
+            progressV.text = if (gathering) tr("Loading all… $n videos", "Tümü yükleniyor… $n video") else if (token != null) tr("$n loaded", "$n yüklendi") + (if (count.isNotEmpty()) tr(" of $count", " / $count") else "") else tr("$n videos", "$n video")
             stopBtn.visibility = if (gathering) View.VISIBLE else View.GONE
             allBtn.visibility = if (gathering) View.GONE else View.VISIBLE
         }
@@ -1437,7 +1449,7 @@ class SearchScreen(private val act: MainActivity) {
     /** Play all / Listen all: replaces the play queue and opens the player on it. */
     fun playAll(items: List<Item>, mode: PlayMode?, album: String?) {
         val e = items.filter { it.isVideo && !it.live }.map { PlayQueue.of(it, mode, album) }
-        if (e.isEmpty()) { act.toast("Nothing to play"); return }
+        if (e.isEmpty()) { act.toast(tr("Nothing to play", "Oynatılacak bir şey yok")); return }
         Store.setQueue(PlayQueue().replace(e))
         PlayerActivity.queue(act)
     }
@@ -1445,11 +1457,11 @@ class SearchScreen(private val act: MainActivity) {
     // ---- Lists (local, "categorize") ----
 
     inner class ListsPage : ListPage() {
-        private val queueBtn = act.pill("Play queue") { if (Store.queue().items.isEmpty()) act.toast("The play queue is empty") else PlayerActivity.queue(act) }
+        private val queueBtn = act.pill(tr("Play queue", "Çalma sırası")) { if (Store.queue().items.isEmpty()) act.toast(tr("The play queue is empty", "Çalma sırası boş")) else PlayerActivity.queue(act) }
 
         init {
             val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(4), 0, act.dp(6)) }
-            row.addView(act.pill("New list…") { Hold.newList(act) { fill() } })
+            row.addView(act.pill(tr("New list…", "Yeni liste…")) { Hold.newList(act) { fill() } })
             row.addView(View(act), lpL(0, 1, 1f))
             row.addView(queueBtn)
             head.addView(row, lpL(MATCH, WRAP))
@@ -1461,22 +1473,22 @@ class SearchScreen(private val act: MainActivity) {
 
         fun fill() {
             items.clear()
-            Store.lists().forEach { items += Item(IKind.PLAYLIST, "local:" + it.id, it.name, count = "${it.items.size} videos", thumbId = it.items.firstOrNull()?.id) }
+            Store.lists().forEach { items += Item(IKind.PLAYLIST, "local:" + it.id, it.name, count = tr("${it.items.size} videos", "${it.items.size} video"), thumbId = it.items.firstOrNull()?.id) }
             adapter.notifyDataSetChanged()
-            queueBtn.text = "Play queue (${Store.queue().items.size})"
-            setStatus(if (items.isEmpty()) "No lists yet. Press & hold a video → Add to list…, or select several → ⋮ → Add to list…" else null)
+            queueBtn.text = tr("Play queue (${Store.queue().items.size})", "Çalma sırası (${Store.queue().items.size})")
+            setStatus(if (items.isEmpty()) tr("No lists yet. Press & hold a video → Add to list…, or select several → ⋮ → Add to list…", "Henüz liste yok. Bir videoyu basılı tutun → Listeye ekle… ya da birkaçını seçin → ⋮ → Listeye ekle…") else null)
         }
 
         override fun onLongTap(i: Item) {
             val l = Store.lists().firstOrNull { "local:" + it.id == i.id } ?: return
             act.menu(l.name, listOf(
-                "Open" to { push(LocalListPage(l.id)) },
-                "Play all" to { playAll(l.items, null, l.name) },
-                "Listen all" to { playAll(l.items, PlayMode.LISTEN, l.name) },
-                "Download all…" to { bulk(l.items, l.name) },
-                "Cache all" to { cacheItems(l.items, l.name) },
-                "Rename…" to { Hold.rename(act, l) { fill() } },
-                "Delete list" to { Store.setLists(VideoLists.delete(Store.lists(), l.id)); fill() },
+                tr("Open", "Aç") to { push(LocalListPage(l.id)) },
+                tr("Play all", "Tümünü oynat") to { playAll(l.items, null, l.name) },
+                tr("Listen all", "Tümünü dinle") to { playAll(l.items, PlayMode.LISTEN, l.name) },
+                tr("Download all…", "Tümünü indir…") to { bulk(l.items, l.name) },
+                tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(l.items, l.name) },
+                tr("Rename…", "Yeniden adlandır…") to { Hold.rename(act, l) { fill() } },
+                tr("Delete list", "Listeyi sil") to { Store.setLists(VideoLists.delete(Store.lists(), l.id)); fill() },
             ))
         }
     }
@@ -1488,10 +1500,10 @@ class SearchScreen(private val act: MainActivity) {
         init {
             head.addView(titleV.apply { setPadding(0, act.dp(4), 0, act.dp(4)) })
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
-            flow.addView(act.pill("Play all", C.ACCENT, C.ACCENT) { playAll(items, null, list()?.name) })
-            flow.addView(act.pill("Listen all") { playAll(items, PlayMode.LISTEN, list()?.name) })
-            flow.addView(act.pill("Download all…") { bulk(items, list()?.name) })
-            flow.addView(act.pill("Cache all") { cacheItems(items, list()?.name) })
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat"), C.ACCENT, C.ACCENT) { playAll(items, null, list()?.name) })
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { playAll(items, PlayMode.LISTEN, list()?.name) })
+            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, list()?.name) })
+            flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, list()?.name) })
             head.addView(flow, lpL(MATCH, WRAP))
         }
 
@@ -1502,14 +1514,14 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun fill() {
             val l = list()
-            titleV.text = l?.name ?: "List deleted"
+            titleV.text = l?.name ?: tr("List deleted", "Liste silindi")
             items.clear(); l?.items?.let { items += it }
             adapter.notifyDataSetChanged()
-            setStatus(if (items.isEmpty()) "Empty list" else null)
+            setStatus(if (items.isEmpty()) tr("Empty list", "Boş liste") else null)
         }
 
         override fun videoExtras(i: Item) = listOf<Pair<String, () -> Unit>>(
-            "Remove from this list" to { Store.setLists(VideoLists.removeItem(Store.lists(), listId, i.id)); fill() })
+            tr("Remove from this list", "Bu listeden kaldır") to { Store.setLists(VideoLists.removeItem(Store.lists(), listId, i.id)); fill() })
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -1581,21 +1593,21 @@ class SearchScreen(private val act: MainActivity) {
             title.text = i.title.ifEmpty { i.id }
             when (i.kind) {
                 IKind.CHANNEL -> {
-                    avatar.text = i.title.trim().take(1).uppercase()
+                    avatar.text = app.plain.lang.PlainLang.upper(i.title.trim().take(1))
                     channel.text = i.handle
                     meta.text = i.count
                     channel.setOnClickListener(null); channel.isClickable = false
                 }
                 IKind.PLAYLIST -> {
                     channel.text = i.channel
-                    meta.text = if (i.id.startsWith("local:")) "Local list" else "Playlist"
+                    meta.text = if (i.id.startsWith("local:")) tr("Local list", "Yerel liste") else tr("Playlist", "Çalma listesi")
                     badge.text = i.count
                 }
                 else -> {
                     channel.text = i.channel
                     val age = i.age.ifEmpty { Ago.text(i.published, System.currentTimeMillis()) }
                     meta.text = listOf(if (i.kind == IKind.SHORT) "Short" else "", i.views, age).filter { it.isNotEmpty() }.joinToString(" · ")
-                    badge.text = if (i.live) "LIVE" else Text.duration(i.durationSec)
+                    badge.text = if (i.live) tr("LIVE", "CANLI") else Text.duration(i.durationSec)
                 }
             }
             channel.visibility = if (channel.text.isNullOrEmpty()) View.GONE else View.VISIBLE
@@ -1609,7 +1621,7 @@ class SearchScreen(private val act: MainActivity) {
             if (i.isVideo) {
                 val queued = i.id in activeIds
                 val saved = Store.downloadedAny(i.id)
-                mark.text = when { queued -> "In the download queue"; saved -> "✓ Downloaded"; else -> "" }
+                mark.text = when { queued -> tr("In the download queue", "İndirme sırasında"); saved -> tr("✓ Downloaded", "✓ İndirildi"); else -> "" }
                 mark.setTextColor(if (queued) C.ACCENT else C.GREEN)
             } else mark.text = ""
             mark.visibility = if (mark.text.isNullOrEmpty()) View.GONE else View.VISIBLE
@@ -1632,7 +1644,7 @@ class SearchScreen(private val act: MainActivity) {
             } else {
                 check.text = "♪"
                 check.setTextColor(C.DIM)
-                check.contentDescription = "Listen"
+                check.contentDescription = tr("Listen", "Dinle")
                 check.setPadding(0, act.dp(12), 0, act.dp(12))
                 check.setOnClickListener { if (!membersBlocked(i)) PlayerActivity.stream(act, i.id, i.title, i.channel, mode = PlayMode.LISTEN, album = page.albumHint) }
             }
@@ -1686,40 +1698,40 @@ class BulkDialog(
             audioBox.visibility = if (kind == Kind.AUDIO) View.VISIBLE else View.GONE
             videoBox.visibility = if (kind == Kind.VIDEO) View.VISIBLE else View.GONE
         }
-        chipRow(kindRow, listOf("Audio", "Video (MP4)"), { (it == 0) == (kind == Kind.AUDIO) }) { kind = if (it == 0) Kind.AUDIO else Kind.VIDEO; showKind() }
+        chipRow(kindRow, listOf(tr("Audio", "Ses"), "Video (MP4)"), { (it == 0) == (kind == Kind.AUDIO) }) { kind = if (it == 0) Kind.AUDIO else Kind.VIDEO; showKind() }
         col.addView(kindRow)
 
-        audioBox.addView(label("Format"))
+        audioBox.addView(label(tr("Format", "Biçim")))
         val fmtRow = FlowLayout(act)
         chipRow(fmtRow, AudioFmt.values().map { it.label }, { AudioFmt.values()[it] == fmt }) { fmt = AudioFmt.values()[it] }
         audioBox.addView(fmtRow)
-        audioBox.addView(label("Quality"))
+        audioBox.addView(label(tr("Quality", "Kalite")))
         val qRow = FlowLayout(act)
-        chipRow(qRow, listOf("Best", "Small"), { AudioQ.values()[it] == q }) { q = AudioQ.values()[it] }
+        chipRow(qRow, listOf(tr("Best", "En iyi"), tr("Small", "Küçük")), { AudioQ.values()[it] == q }) { q = AudioQ.values()[it] }
         audioBox.addView(qRow)
         col.addView(audioBox)
 
-        videoBox.addView(label("Best quality up to"))
+        videoBox.addView(label(tr("Best quality up to", "En iyi kalite, en fazla")))
         val hs = listOf(2160, 1440, 1080, 720, 480, 360, 240, 144)
         val hRow = FlowLayout(act)
         chipRow(hRow, hs.map { "${it}p" }, { hs[it] == height || height !in hs && it == hs.indexOfFirst { h -> h <= height } }) { height = hs[it] }
         videoBox.addView(hRow)
-        videoBox.addView(act.text("Each video gets its best H.264 stream up to this height (lower if that's all it has).", 12f, C.LABEL, lines = 3)
+        videoBox.addView(act.text(tr("Each video gets its best H.264 stream up to this height (lower if that's all it has).", "Her video bu yüksekliğe kadarki en iyi H.264 akışıyla iner (yalnızca daha düşüğü varsa o)."), 12f, C.LABEL, lines = 3)
             .apply { setPadding(0, act.dp(8), 0, 0) })
         col.addView(videoBox)
-        col.addView(act.text("Already downloaded or queued videos are skipped.", 12f, C.LABEL, lines = 2).apply { setPadding(0, act.dp(12), 0, act.dp(4)) })
+        col.addView(act.text(tr("Already downloaded or queued videos are skipped.", "Zaten indirilmiş ya da sırada olan videolar atlanır."), 12f, C.LABEL, lines = 2).apply { setPadding(0, act.dp(12), 0, act.dp(4)) })
         showKind()
 
         val scroll = android.widget.ScrollView(act).apply { addView(col) }
         android.app.AlertDialog.Builder(act)
-            .setTitle("Download $n video" + if (n == 1) "" else "s")
+            .setTitle(tr("Download $n video" + (if (n == 1) "" else "s"), "$n video indir"))
             .setView(scroll)
-            .setPositiveButton("Download") { _, _ ->
+            .setPositiveButton(tr("Download", "İndir")) { _, _ ->
                 Store.kind = kind; Store.audioFmt = fmt; Store.audioQ = q
                 if (kind == Kind.VIDEO) Store.videoP = height
                 onGo(kind, fmt, q, height)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 }

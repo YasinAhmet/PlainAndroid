@@ -33,7 +33,11 @@ import android.widget.ScrollView
 import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.concurrent.Executors
 
 /**
@@ -57,7 +61,7 @@ class HomeActivity : Activity() {
 
     private lateinit var root: LinearLayout
     private lateinit var time: TextClock
-    private lateinit var date: TextClock
+    private lateinit var date: TextView
     private lateinit var toggle: TextView
     private lateinit var scroll: ScrollView
     private lateinit var list: LinearLayout
@@ -69,7 +73,13 @@ class HomeActivity : Activity() {
         }
     }
 
+    /** The date line is a plain TextView (in the app's language), so it needs the day to roll over. */
+    private val dateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) = updateDate()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         dark = prefs.getBoolean("dark", true)
         if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
@@ -85,11 +95,20 @@ class HomeActivity : Activity() {
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(packageReceiver, filter, RECEIVER_EXPORTED)
         else registerReceiver(packageReceiver, filter)
+
+        val dateFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_DATE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(dateReceiver, dateFilter, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(dateReceiver, dateFilter)
     }
 
     override fun onResume() {
         super.onResume()
         isResumed = true
+        updateDate()
         if (dirty) reload()
     }
 
@@ -100,6 +119,7 @@ class HomeActivity : Activity() {
 
     override fun onDestroy() {
         unregisterReceiver(packageReceiver)
+        unregisterReceiver(dateReceiver)
         worker.shutdownNow()
         super.onDestroy()
     }
@@ -129,9 +149,7 @@ class HomeActivity : Activity() {
             setOnClickListener { open(Intent(AlarmClock.ACTION_SHOW_ALARMS)) }
             setOnLongClickListener { offerUnhide(); true }
         }
-        date = TextClock(this).apply {
-            format24Hour = "EEEE, d MMMM"
-            format12Hour = "EEEE, d MMMM"
+        date = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             maxLines = 1
             setPadding(dp(12f), 0, 0, 0)
@@ -140,7 +158,7 @@ class HomeActivity : Activity() {
             text = "◐"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             gravity = Gravity.CENTER
-            contentDescription = "Dark mode"
+            contentDescription = tr("Dark mode", "Koyu mod")
             setOnClickListener {
                 dark = !dark
                 prefs.edit().putBoolean("dark", dark).apply()
@@ -183,6 +201,12 @@ class HomeActivity : Activity() {
         setContentView(root)
     }
 
+    /** Day and month names in the app's language (a TextClock would follow the phone's). */
+    private fun updateDate() {
+        if (!::date.isInitialized) return
+        date.text = SimpleDateFormat("EEEE, d MMMM", PlainLang.locale).format(Date())
+    }
+
     private val fg get() = if (dark) 0xFFEDEDED.toInt() else 0xFF161616.toInt()
     private val dim get() = if (dark) 0xFF9A9A9A.toInt() else 0xFF5F5F5F.toInt()
 
@@ -193,7 +217,7 @@ class HomeActivity : Activity() {
         time.setTextColor(fg)
         date.setTextColor(dim)
         toggle.setTextColor(dim)
-        toggle.contentDescription = if (dark) "Switch to light mode" else "Switch to dark mode"
+        toggle.contentDescription = if (dark) tr("Switch to light mode", "Açık moda geç") else tr("Switch to dark mode", "Koyu moda geç")
         if (Build.VERSION.SDK_INT >= 30) {
             val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             window.insetsController?.setSystemBarsAppearance(if (dark) 0 else light, light)
@@ -269,7 +293,7 @@ class HomeActivity : Activity() {
         list.removeAllViews()
         for (s in sections) {
             list.addView(TextView(this).apply {
-                text = s.title
+                text = sectionName(s.title)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 letterSpacing = 0.06f
@@ -320,20 +344,20 @@ class HomeActivity : Activity() {
     private fun open(i: Intent): Boolean = try {
         startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(this, "Can't open that", Toast.LENGTH_SHORT).show(); false
+        Toast.makeText(this, tr("Can't open that", "Açılamadı"), Toast.LENGTH_SHORT).show(); false
     } catch (_: SecurityException) {
-        Toast.makeText(this, "Can't open that", Toast.LENGTH_SHORT).show(); false
+        Toast.makeText(this, tr("Can't open that", "Açılamadı"), Toast.LENGTH_SHORT).show(); false
     }
 
     private fun appMenu(anchor: View, e: AppEntry) {
         PopupMenu(menuContext(), anchor).apply {
-            menu.add(0, 1, 0, "App info")
-            val move = menu.addSubMenu(0, 3, 1, "Move to")
+            menu.add(0, 1, 0, tr("App info", "Uygulama bilgisi"))
+            val move = menu.addSubMenu(0, 3, 1, tr("Move to", "Taşı"))
             val current = Layout.sectionOf(e, overrides(), phoneDefaults)
             Layout.TARGETS.forEachIndexed { i, name ->
-                if (name != current) move.add(1, 100 + i, i, name)
+                if (name != current) move.add(1, 100 + i, i, sectionName(name))
             }
-            menu.add(0, 2, 2, "Hide")
+            menu.add(0, 2, 2, tr("Hide", "Gizle"))
             setOnMenuItemClickListener {
                 if (it.itemId >= 100) {
                     sectionPrefs.edit().putString(e.key, Layout.TARGETS[it.itemId - 100]).apply()
@@ -345,7 +369,7 @@ class HomeActivity : Activity() {
                     2 -> {
                         prefs.edit().putStringSet("hidden", hidden() + e.key).apply()
                         refreshGrid()
-                        Toast.makeText(this@HomeActivity, "Hidden. Long-press the clock to bring it back.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@HomeActivity, tr("Hidden. Long-press the clock to bring it back.", "Gizlendi. Geri getirmek için saate uzun basın."), Toast.LENGTH_LONG).show()
                     }
                 }
                 true
@@ -356,7 +380,8 @@ class HomeActivity : Activity() {
 
     /**
      * Long-press on the clock: show hidden apps (yours and stock), or hide stock apps again.
-     * Every variant also has the "Check for updates" button (handled by Plain Setup).
+     * Every variant also has the "Check for updates" button (handled by Plain Setup) and the
+     * language row (a dropdown; a change closes the dialog and rebuilds the home screen).
      */
     private fun offerUnhide() {
         val h = hidden()
@@ -364,35 +389,58 @@ class HomeActivity : Activity() {
         val stockHidden = all.filter { it.pkg != packageName && Layout.isAutoHidden(it, ov, showStock(), phoneDefaults) }
         if (h.isEmpty() && stockHidden.isEmpty()) {
             if (!showStock()) {
-                AlertDialog.Builder(menuContext())
+                withLanguageRow(AlertDialog.Builder(menuContext())
                     .setTitle("Plain Home")
-                    .setMessage("Nothing is hidden. Long-press an app to move or hide it.")
+                    .setMessage(tr("Nothing is hidden. Long-press an app to move or hide it.",
+                        "Gizli uygulama yok. Taşımak ya da gizlemek için uygulamaya uzun basın."))
                     .setPositiveButton(PlainUpdate.label(this)) { _, _ -> PlainUpdate.check(this) }
-                    .setNegativeButton("Close", null)
-                    .show()
+                    .setNegativeButton(tr("Close", "Kapat"), null))
                 return
             }
-            AlertDialog.Builder(menuContext())
-                .setMessage("Hide stock apps that aren't in a section again?")
-                .setPositiveButton("Hide") { _, _ -> prefs.edit().putBoolean("showStock", false).apply(); refreshGrid() }
-                .setNeutralButton("Updates") { _, _ -> PlainUpdate.check(this) }
-                .setNegativeButton("Cancel", null)
-                .show()
+            withLanguageRow(AlertDialog.Builder(menuContext())
+                .setMessage(tr("Hide stock apps that aren't in a section again?",
+                    "Bir bölümde olmayan hazır uygulamalar yeniden gizlensin mi?"))
+                .setPositiveButton(tr("Hide", "Gizle")) { _, _ -> prefs.edit().putBoolean("showStock", false).apply(); refreshGrid() }
+                .setNeutralButton(tr("Updates", "Güncellemeler")) { _, _ -> PlainUpdate.check(this) }
+                .setNegativeButton(tr("Cancel", "İptal"), null))
             return
         }
         val names = (h.map { k -> all.firstOrNull { it.key == k }?.label ?: k.substringBefore('/') } +
             stockHidden.map { it.label }).distinct().sorted()
-        AlertDialog.Builder(menuContext())
-            .setTitle("Hidden apps")
+        withLanguageRow(AlertDialog.Builder(menuContext())
+            .setTitle(tr("Hidden apps", "Gizli uygulamalar"))
             .setMessage(names.joinToString("\n"))
-            .setPositiveButton("Show all") { _, _ ->
+            .setPositiveButton(tr("Show all", "Tümünü göster")) { _, _ ->
                 prefs.edit().remove("hidden").putBoolean("showStock", true).apply()
                 refreshGrid()
             }
-            .setNeutralButton("Updates") { _, _ -> PlainUpdate.check(this) }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNeutralButton(tr("Updates", "Güncellemeler")) { _, _ -> PlainUpdate.check(this) }
+            .setNegativeButton(tr("Cancel", "İptal"), null))
     }
+
+    /**
+     * Shows [b] with a "Language: …" row under its message. Tapping the row opens the language
+     * dropdown under it; a change closes the dialog and recreates the home screen in the new language.
+     */
+    private fun withLanguageRow(b: AlertDialog.Builder) {
+        val ctx = menuContext()
+        val attrs = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary, android.R.attr.selectableItemBackground))
+        val row = TextView(ctx).apply {
+            text = PlainLang.label()
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            attrs.getColorStateList(0)?.let { setTextColor(it) }
+            background = attrs.getDrawable(1)
+            setPadding(dp(24f), dp(14f), dp(24f), dp(14f))
+            isClickable = true
+        }
+        attrs.recycle()
+        val d = b.setView(row).create()
+        row.setOnClickListener { PlainLang.choose(this, row) { d.dismiss(); recreate() } }
+        d.show()
+    }
+
+    /** Section names are the user's own (and stored as keys); only the fallback "Other" is translated. */
+    private fun sectionName(name: String): String = if (name == Layout.OTHER) tr("Other", "Diğer") else name
 
     private companion object { const val COLUMNS = 4 }
 }

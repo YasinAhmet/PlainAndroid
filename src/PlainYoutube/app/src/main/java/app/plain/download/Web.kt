@@ -15,6 +15,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import app.plain.lang.tr
 
 class NotFound(msg: String) : IOException(msg)
 
@@ -64,9 +65,9 @@ object WebApi {
 
     fun resolve(ctx: Context, calls: Calls, g: Int, url: String): Target {
         val o = try { post(ctx, calls, g, Clients.RESOLVE_URL, mapOf("url" to url)) } catch (e: NotFound) {
-            throw NotFound("Channel or playlist not found")
+            throw NotFound(tr("Channel or playlist not found", "Kanal ya da çalma listesi bulunamadı"))
         }
-        return Browse.resolved(o) ?: throw NotFound("Not a channel or playlist link")
+        return Browse.resolved(o) ?: throw NotFound(tr("Not a channel or playlist link", "Kanal ya da çalma listesi bağlantısı değil"))
     }
 
     fun rss(ctx: Context, calls: Calls, g: Int, channelId: String): List<Item> {
@@ -173,7 +174,7 @@ object WebApi {
         val v = visitor
         val body = Clients.webBody(fields, v, gl)
         val bytes = request(ctx, calls, g, url, body, Clients.webHeaders(v), 12 shl 20)
-        val o = try { JSONObject(String(bytes, Charsets.UTF_8)) } catch (e: Exception) { throw IOException("YouTube sent an unreadable answer") }
+        val o = try { JSONObject(String(bytes, Charsets.UTF_8)) } catch (e: Exception) { throw IOException(tr("YouTube sent an unreadable answer", "YouTube okunamayan bir yanıt gönderdi")) }
         if (visitor == null) visitor = Browse.visitorData(o)
         return o
     }
@@ -199,8 +200,8 @@ object WebApi {
                     con.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 }
                 val code = con.responseCode
-                if (code == 404) throw NotFound("Not found")
-                if (code in 400..499) throw YtError("YouTube answered HTTP $code", false)
+                if (code == 404) throw NotFound(tr("Not found", "Bulunamadı"))
+                if (code in 400..499) throw YtError(tr("YouTube answered HTTP $code", "YouTube yanıtı: HTTP $code"), false)
                 if (code !in 200..299) throw IOException("HTTP $code")
                 val bytes = con.inputStream.use { Net.readAll(it, limit) }
                 ok = true
@@ -215,7 +216,7 @@ object WebApi {
                 if (!ok) try { con.disconnect() } catch (_: Exception) {}
             }
         }
-        throw last ?: IOException("Network error")
+        throw last ?: IOException(tr("Network error", "Ağ hatası"))
     }
 }
 

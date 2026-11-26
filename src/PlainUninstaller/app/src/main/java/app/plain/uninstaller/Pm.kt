@@ -1,12 +1,14 @@
 package app.plain.uninstaller
 
+import app.plain.lang.tr
+
 /** Result of one shell command run through Shizuku. */
 data class ShellResult(val exit: Int, val out: String, val err: String) {
     /** One-line reason for a failure, e.g. "Failure [DELETE_FAILED_INTERNAL_ERROR]". */
     fun message(): String {
         val text = (out.trim() + "\n" + err.trim()).trim()
         val line = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
-        return line ?: "exit code $exit"
+        return line ?: tr("exit code $exit", "çıkış kodu $exit")
     }
 }
 

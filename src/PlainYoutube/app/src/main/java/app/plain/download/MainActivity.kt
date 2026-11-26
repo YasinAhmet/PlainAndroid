@@ -20,8 +20,10 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plain.lang.PlainLang
 import app.plain.update.PlainUpdate
 import java.util.concurrent.Executors
+import app.plain.lang.tr
 
 class MainActivity : Activity() {
     val main = Handler(Looper.getMainLooper())
@@ -84,8 +86,10 @@ class MainActivity : Activity() {
     private var lastBackAt = -10_000L
     private var lastBackHandled = -1_000_000L
     private var leftPip = false // PiP just ended: expanded (onResume follows) or closed (onStop follows)
+    private var moreBtn: View? = null // the ⋮ button: the language dropdown hangs under it
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         Store.init(this)
         kind = Store.kind; audioFmt = Store.audioFmt; audioQ = Store.audioQ
@@ -197,7 +201,7 @@ class MainActivity : Activity() {
             BackRule.Action.MINIMIZE_PLAYER -> player.minimize()
             BackRule.Action.POP -> popNav()
             BackRule.Action.EXIT -> moveTaskToBack(true)
-            BackRule.Action.EXIT_HINT -> { lastBackAt = now; toast("Press back again to exit") }
+            BackRule.Action.EXIT_HINT -> { lastBackAt = now; toast(tr("Press back again to exit", "Çıkmak için tekrar geri basın")) }
         }
     }
 
@@ -225,7 +229,7 @@ class MainActivity : Activity() {
         when (val target = Links.classify(t)) {
             is Target.Video -> { selectTab(0); cameFromSearch = false; input.setText(Yt.watchUrl(target.id)); fetch() }
             is Target.Playlist, is Target.Channel, is Target.ChannelUrl -> { if (tab != 1) nav.push(NavStep.Tab(tab)); search.open(target); selectTab(1, record = false) }
-            else -> { selectTab(0); showStatus("No YouTube link in what was shared", true) }
+            else -> { selectTab(0); showStatus(tr("No YouTube link in what was shared", "Paylaşılan içerikte YouTube bağlantısı yok"), true) }
         }
     }
 
@@ -275,7 +279,7 @@ class MainActivity : Activity() {
     fun wifiOk(): Boolean {
         if (!Store.wifiOnly) return true
         return try { Net.network(this, true); true } catch (e: Exception) {
-            message("Not on Wi-Fi", "Wi-Fi only is on, so nothing is downloaded over mobile data. Connect to Wi-Fi, or turn Wi-Fi only off in ⋮.")
+            message(tr("Not on Wi-Fi", "Wi-Fi bağlı değil"), tr("Wi-Fi only is on, so nothing is downloaded over mobile data. Connect to Wi-Fi, or turn Wi-Fi only off in ⋮.", "Yalnızca Wi-Fi açık, bu yüzden mobil veriyle hiçbir şey indirilmez. Wi-Fi'a bağlanın ya da ⋮ menüsünden Yalnızca Wi-Fi'ı kapatın."))
             false
         }
     }
@@ -287,7 +291,7 @@ class MainActivity : Activity() {
         try {
             @Suppress("DEPRECATION")
             startActivityForResult(i, REQ_IMPORT)
-        } catch (e: Exception) { toast("No file picker available") }
+        } catch (e: Exception) { toast(tr("No file picker available", "Dosya seçici yok")) }
     }
 
     @Deprecated("Deprecated in Java")
@@ -313,7 +317,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(6), dp(4), dp(2))
         }
-        for ((i, label) in listOf("Download", "Search").withIndex()) {
+        for ((i, label) in listOf(tr("Download", "İndir"), tr("Search", "Ara")).withIndex()) {
             val tv = text(label, 17f, C.LABEL, bold = true).apply {
                 setPadding(dp(12), dp(10), dp(12), dp(10))
                 setOnClickListener { selectTab(i) }
@@ -322,7 +326,7 @@ class MainActivity : Activity() {
             bar.addView(tv)
         }
         bar.addView(View(this), lpL(0, 1, 1f))
-        bar.addView(icon(R.drawable.ic_more, desc = "Menu") { mainMenu() })
+        bar.addView(icon(R.drawable.ic_more, desc = tr("Menu", "Menü")) { mainMenu() }.also { moreBtn = it })
         root.addView(bar, lpL(MATCH, WRAP))
         root.addView(View(this).apply { setBackgroundColor(C.LINE) }, lpL(MATCH, dp(1)))
 
@@ -334,7 +338,7 @@ class MainActivity : Activity() {
         }
         undoText = text("", 14f, C.TEXT, lines = 2)
         undoBar.addView(undoText, lpL(0, WRAP, 1f))
-        undoBar.addView(pill("Undo", C.ACCENT, C.ACCENT) { undoAction?.invoke(); hideUndo() })
+        undoBar.addView(pill(tr("Undo", "Geri al"), C.ACCENT, C.ACCENT) { undoAction?.invoke(); hideUndo() })
         root.addView(undoBar, lpL(MATCH, WRAP))
         scroll = ScrollView(this).apply { isFillViewport = true; setOnScrollChangeListener { _, _, _, _, _ -> loadVisibleThumbs() } }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(24)) }
@@ -344,7 +348,7 @@ class MainActivity : Activity() {
         pages.addView(search.view, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
         input = EditText(this).apply {
-            hint = "Paste a YouTube link (video, channel or playlist)"
+            hint = tr("Paste a YouTube link (video, channel or playlist)", "YouTube bağlantısı yapıştırın (video, kanal veya çalma listesi)")
             setSingleLine()
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_GO
@@ -356,9 +360,9 @@ class MainActivity : Activity() {
         col.addView(input, lpL(MATCH, WRAP))
 
         val btns = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(10), 0, 0) }
-        btns.addView(pill("Paste") { paste() })
+        btns.addView(pill(tr("Paste", "Yapıştır")) { paste() })
         btns.addView(View(this), lpL(dp(10), 1))
-        btns.addView(pill("Get info", C.ACCENT, C.ACCENT) { fetch() })
+        btns.addView(pill(tr("Get info", "Bilgi al"), C.ACCENT, C.ACCENT) { fetch() })
         col.addView(btns, lpL(MATCH, WRAP))
 
         status = text("", 13f, C.DIM, lines = 4).apply { visibility = View.GONE; setPadding(dp(2), dp(10), dp(2), 0) }
@@ -385,44 +389,44 @@ class MainActivity : Activity() {
 
         val kindRow = FlowLayout(this)
         for (k in Kind.values()) {
-            val c = Chip(this, if (k == Kind.AUDIO) "Audio" else "Video (MP4)") { setKind(k) }
+            val c = Chip(this, if (k == Kind.AUDIO) tr("Audio", "Ses") else "Video (MP4)") { setKind(k) }
             kindChips[k] = c
             kindRow.addView(c)
         }
         card.addView(kindRow, lpL(MATCH, WRAP))
 
         audioBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(12), 0, 0) }
-        audioBox.addView(label("Format"))
+        audioBox.addView(label(tr("Format", "Biçim")))
         fmtRow = FlowLayout(this); audioBox.addView(fmtRow, lpL(MATCH, WRAP))
-        audioBox.addView(label("Quality").apply { setPadding(0, dp(12), 0, dp(6)) })
+        audioBox.addView(label(tr("Quality", "Kalite")).apply { setPadding(0, dp(12), 0, dp(6)) })
         qRow = FlowLayout(this); audioBox.addView(qRow, lpL(MATCH, WRAP))
         card.addView(audioBox, lpL(MATCH, WRAP))
 
         videoBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(12), 0, 0) }
-        videoBox.addView(label("Quality"))
+        videoBox.addView(label(tr("Quality", "Kalite")))
         heightRow = FlowLayout(this); videoBox.addView(heightRow, lpL(MATCH, WRAP))
         card.addView(videoBox, lpL(MATCH, WRAP))
 
         noteV = text("", 12f, C.LABEL, lines = 4).apply { setPadding(0, dp(12), 0, 0) }
         card.addView(noteV, lpL(MATCH, WRAP))
-        goBtn = pill("Download", C.ACCENT, C.ACCENT) { download() }
+        goBtn = pill(tr("Download", "İndir"), C.ACCENT, C.ACCENT) { download() }
         card.addView(goBtn, lpL(MATCH, WRAP).apply { topMargin = dp(12) })
         col.addView(card, lpL(MATCH, WRAP))
 
         selBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(0, dp(20), 0, dp(4)) }
         selText = text("", 15f, C.TEXT, bold = true)
-        selBar.addView(icon(R.drawable.ic_close, desc = "Stop selecting") { endSelection() })
+        selBar.addView(icon(R.drawable.ic_close, desc = tr("Stop selecting", "Seçimi bitir")) { endSelection() })
         selBar.addView(selText, lpL(0, WRAP, 1f))
-        selBar.addView(pill("All") { selectAllJobs() })
+        selBar.addView(pill(tr("All", "Tümü")) { selectAllJobs() })
         selBar.addView(View(this), lpL(dp(8), 1))
-        selBar.addView(pill("Erase", C.ACCENT, C.ACCENT) { eraseJobs(Store.snapshot().filter { it.id in selected }); endSelection() })
-        selBar.addView(icon(R.drawable.ic_more, desc = "More for the selection") { selectionMenu() })
+        selBar.addView(pill(tr("Erase", "Sil"), C.ACCENT, C.ACCENT) { eraseJobs(Store.snapshot().filter { it.id in selected }); endSelection() })
+        selBar.addView(icon(R.drawable.ic_more, desc = tr("More for the selection", "Seçim için diğer")) { selectionMenu() })
         col.addView(selBar, lpL(MATCH, WRAP))
         listHeader = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(24), 0, dp(4))
-            addView(text("Downloads", 15f, C.DIM, bold = true), lpL(0, WRAP, 1f))
-            addView(text("Clear finished", 13f, C.LABEL).apply {
+            addView(text(tr("Downloads", "İndirilenler"), 15f, C.DIM, bold = true), lpL(0, WRAP, 1f))
+            addView(text(tr("Clear finished", "Bitenleri temizle"), 13f, C.LABEL).apply {
                 setPadding(dp(8), dp(6), dp(4), dp(6))
                 setOnClickListener { Store.clearFinished() }
             })
@@ -437,7 +441,7 @@ class MainActivity : Activity() {
         }
         col.addView(moreRow, lpL(MATCH, WRAP))
 
-        cachedHeader = text("Cached", 15f, C.DIM, bold = true, lines = 2).apply {
+        cachedHeader = text(tr("Cached", "Önbellek"), 15f, C.DIM, bold = true, lines = 2).apply {
             setPadding(0, dp(24), 0, dp(4))
             setOnClickListener { cachedOpen = !cachedOpen; if (cachedOpen) nav.push(NavStep.CachedOpen) else nav.dropCached(); refreshCached() }
         }
@@ -457,51 +461,64 @@ class MainActivity : Activity() {
 
     private fun mainMenu() {
         menu(null, listOf(
-            (if (Store.wifiOnly) "✓ Wi-Fi only" else "   Wi-Fi only (off: mobile data allowed)") to {
+            (if (Store.wifiOnly) tr("✓ Wi-Fi only", "✓ Yalnızca Wi-Fi") else tr("   Wi-Fi only (off: mobile data allowed)", "   Yalnızca Wi-Fi (kapalı: mobil veri serbest)")) to {
                 Store.wifiOnly = !Store.wifiOnly
-                toast(if (Store.wifiOnly) "Downloads use Wi-Fi only" else "Mobile data allowed")
+                toast(if (Store.wifiOnly) tr("Downloads use Wi-Fi only", "İndirmeler yalnızca Wi-Fi kullanır") else tr("Mobile data allowed", "Mobil veri serbest"))
             },
-            "Play queue (${Store.queue().items.size})" to { if (Store.queue().items.isEmpty()) toast("The play queue is empty") else PlayerActivity.queue(this) },
-            "Account: " + (if (!Account.hasAccount) "not signed in" else if (Account.expired) "expired" else "signed in") + "…" to { account.show() },
-            "Import YouTube subscriptions…" to { selectTab(1); search.importDialog() },
-            (if (Store.originalAudio) "✓ Audio: original format (no conversion)" else "   Audio: convert to clean M4A") to {
+            tr("Play queue (${Store.queue().items.size})", "Çalma sırası (${Store.queue().items.size})") to { if (Store.queue().items.isEmpty()) toast(tr("The play queue is empty", "Çalma sırası boş")) else PlayerActivity.queue(this) },
+            tr("Account: ", "Hesap: ") + (if (!Account.hasAccount) tr("not signed in", "oturum açılmadı") else if (Account.expired) tr("expired", "süresi doldu") else tr("signed in", "oturum açık")) + "…" to { account.show() },
+            tr("Import YouTube subscriptions…", "YouTube aboneliklerini içe aktar…") to { selectTab(1); search.importDialog() },
+            (if (Store.originalAudio) tr("✓ Audio: original format (no conversion)", "✓ Ses: orijinal biçim (dönüştürme yok)") else tr("   Audio: convert to clean M4A", "   Ses: temiz M4A'ya dönüştür")) to {
                 Store.originalAudio = !Store.originalAudio
-                toast(if (Store.originalAudio) "Audio is saved as YouTube's original .m4a (no conversion)" else "Audio is converted to a clean .m4a")
+                toast(if (Store.originalAudio) tr("Audio is saved as YouTube's original .m4a (no conversion)", "Ses, YouTube'un orijinal .m4a dosyası olarak kaydedilir (dönüştürme yok)") else tr("Audio is converted to a clean .m4a", "Ses temiz bir .m4a dosyasına dönüştürülür"))
                 refreshNote()
             },
-            "Parallel audio downloads: ${Store.parallelAudio}…" to {
-                menu("Parallel audio downloads (bulk music)", (1..4).map { n -> (if (n == Store.parallelAudio) "✓ $n" else "   $n") to { Store.parallelAudio = n } })
+            tr("Parallel audio downloads: ${Store.parallelAudio}…", "Paralel ses indirme: ${Store.parallelAudio}…") to {
+                menu(tr("Parallel audio downloads (bulk music)", "Paralel ses indirme (toplu müzik)"), (1..4).map { n -> (if (n == Store.parallelAudio) "✓ $n" else "   $n") to { Store.parallelAudio = n } })
             },
-            "Cover art: ${Store.artQuality.label}…" to { artMenu() },
-            (if (Store.pipAuto) "✓ Picture-in-picture when leaving with Home" else "   Picture-in-picture when leaving with Home (off)") to {
+            tr("Cover art: ${Store.artQuality.label}…", "Kapak resmi: ${Store.artQuality.label}…") to { artMenu() },
+            (if (Store.pipAuto) tr("✓ Picture-in-picture when leaving with Home", "✓ Ana ekrana dönünce pencere içinde pencere") else tr("   Picture-in-picture when leaving with Home (off)", "   Ana ekrana dönünce pencere içinde pencere (kapalı)")) to {
                 Store.pipAuto = !Store.pipAuto
                 player.updatePip(force = true)
-                toast(if (Store.pipAuto) "A playing video goes picture-in-picture when you press Home" else "Home pauses the video")
+                toast(if (Store.pipAuto) tr("A playing video goes picture-in-picture when you press Home", "Ana ekran tuşuna basınca oynayan video küçük pencereye geçer") else tr("Home pauses the video", "Ana ekran tuşu videoyu duraklatır"))
             },
-            "Add missing cover art…" to { offerArt(force = true) },
-            "Trash (${trashCount}${if (trashBytes > 0) " · " + Text.size(trashBytes) else ""})…" to { trashView() },
-            "Retry all failed" to {
+            tr("Add missing cover art…", "Eksik kapak resimlerini ekle…") to { offerArt(force = true) },
+            tr("Trash", "Çöp kutusu") + " (${trashCount}${if (trashBytes > 0) " · " + Text.size(trashBytes) else ""})…" to { trashView() },
+            tr("Retry all failed", "Başarısızların tümünü yeniden dene") to {
                 if (wifiOk()) {
                     val n = Store.retryAllFailed()
                     if (n > 0) DownloadService.start(this)
-                    toast(if (n > 0) "Retrying $n" else "Nothing failed")
+                    toast(if (n > 0) tr("Retrying $n", "$n yeniden deneniyor") else tr("Nothing failed", "Başarısız olan yok"))
                 }
             },
-            "Cancel all queued" to { Store.cancelQueued() },
-            "Cache limits (video ${Store.videoCapGb} GB, music ${Store.musicCapGb} GB)…" to { cacheLimits() },
-            "Region for blocked videos (${Store.altRegion.ifEmpty { "off" }})…" to { regionMenu() },
-            "Clear cached videos and music" to { io.execute { Store.cache.clear(CacheKind.VIDEO); Store.cache.clear(CacheKind.MUSIC); main.post { refreshCached() } } },
-            "Clear finished" to { Store.clearFinished() },
-            "About & legal" to { about() },
+            tr("Cancel all queued", "Sıradakilerin tümünü iptal et") to { Store.cancelQueued() },
+            tr("Cache limits (video ${Store.videoCapGb} GB, music ${Store.musicCapGb} GB)…", "Önbellek sınırları (video ${Store.videoCapGb} GB, müzik ${Store.musicCapGb} GB)…") to { cacheLimits() },
+            tr("Region for blocked videos", "Engelli videolar için bölge") + " (${Store.altRegion.ifEmpty { tr("off", "kapalı") }})…" to { regionMenu() },
+            tr("Clear cached videos and music", "Önbellekteki video ve müzikleri temizle") to { io.execute { Store.cache.clear(CacheKind.VIDEO); Store.cache.clear(CacheKind.MUSIC); main.post { refreshCached() } } },
+            tr("Clear finished", "Bitenleri temizle") to { Store.clearFinished() },
+            tr("About & legal", "Hakkında ve yasal") to { about() },
+            PlainLang.label() to { PlainLang.choose(this, moreBtn) { languageChanged() } },
             PlainUpdate.label(this) to { PlainUpdate.check(this) },
         ))
+    }
+
+    /**
+     * A new language: the activity is recreated so every string is rebuilt. The player outlives the activity (it is
+     * the process's); it is kept even when paused (a normal destroy would close a paused player) and its own fixed
+     * labels are rewritten, since its views are not rebuilt.
+     */
+    private fun languageChanged() {
+        if (player.state != PState.CLOSED) player.keepOnNextDetach()
+        player.relabel()
+        PlayService.channel(this); DownloadService.channel(this) // notification channel names follow too
+        recreate()
     }
 
     private val account by lazy { AccountUi(this) }
 
     private fun about() = message(
         "Plain Youtube",
-        "Downloads YouTube audio (M4A/AAC or Opus) and MP4 video for personal offline use.\n\n" +
+        tr("Downloads YouTube audio (M4A/AAC or Opus) and MP4 video for personal offline use.\n\n" +
             "Audio → Music/PlainDownload/<Channel>/\nVideo → Movies/PlainDownload/<Channel>/\n\n" +
             "Streams are found with YouTube's own InnerTube API (clients: " + Clients.ORDER.joinToString { it.key } +
             "). YouTube changes break this from time to time.\n\n" +
@@ -509,7 +526,16 @@ class MainActivity : Activity() {
             "Use this only for content you have the right to keep; you are responsible for how you use it.\n\n" +
             "No analytics. No account unless you add one in ⋮ → Account, and then it's used only for members-only videos and " +
             "the subscriptions sync; everything else stays anonymous. Network is used only when you fetch a link, search, open a channel, " +
-            "playlist or the Feed, or download. Search follows are kept on this phone only."
+            "playlist or the Feed, or download. Search follows are kept on this phone only.",
+            "YouTube seslerini (M4A/AAC veya Opus) ve MP4 videolarını kişisel çevrimdışı kullanım için indirir.\n\n" +
+            "Ses → Music/PlainDownload/<Kanal>/\nVideo → Movies/PlainDownload/<Kanal>/\n\n" +
+            "Akışlar YouTube'un kendi InnerTube API'siyle bulunur (istemciler: " + Clients.ORDER.joinToString { it.key } +
+            "). YouTube'daki değişiklikler bunu zaman zaman bozar.\n\n" +
+            "YouTube Hizmet Şartları, YouTube'un indirme seçeneği sunduğu durumlar dışında indirmeyi yasaklar. " +
+            "Bunu yalnızca saklama hakkınız olan içerikler için kullanın; nasıl kullandığınızdan siz sorumlusunuz.\n\n" +
+            "Analiz yok. ⋮ → Hesap'tan eklemediğiniz sürece hesap da yok; eklerseniz yalnızca üyelere özel videolar ve " +
+            "abonelik eşitlemesi için kullanılır, geri kalan her şey anonim kalır. Ağ yalnızca bir bağlantı getirdiğinizde, arama yaptığınızda, " +
+            "bir kanal, çalma listesi ya da Akış'ı açtığınızda veya indirdiğinizde kullanılır. Arama takipleri yalnızca bu telefonda tutulur.")
     )
 
     // ---------------------------------------------------------------------------------------------------------
@@ -518,7 +544,7 @@ class MainActivity : Activity() {
     private fun paste() {
         val cm = getSystemService(ClipboardManager::class.java)
         val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
-        if (t.isNullOrBlank()) { toast("Clipboard is empty"); return }
+        if (t.isNullOrBlank()) { toast(tr("Clipboard is empty", "Pano boş")); return }
         input.setText(t.trim())
         fetch()
     }
@@ -536,14 +562,14 @@ class MainActivity : Activity() {
         }
         val id = (target as? Target.Video)?.id
         if (id == null) {
-            showStatus("That isn't a YouTube link (video, shorts, music.youtube.com, a channel or a playlist)", true)
+            showStatus(tr("That isn't a YouTube link (video, shorts, music.youtube.com, a channel or a playlist)", "Bu bir YouTube bağlantısı değil (video, shorts, music.youtube.com, kanal veya çalma listesi)"), true)
             return
         }
         (getSystemService(InputMethodManager::class.java)).hideSoftInputFromWindow(input.windowToken, 0)
         val seq = ++fetchSeq
         info = null
         card.visibility = View.GONE
-        showStatus("Getting info…")
+        showStatus(tr("Getting info…", "Bilgi alınıyor…"))
         val wifiOnly = Store.wifiOnly
         io.execute {
             val result: Result<VideoInfo> = try {
@@ -555,8 +581,8 @@ class MainActivity : Activity() {
                 result.fold({ show(it) }, { e ->
                     showStatus(when (e) {
                         is YtError, is NoWifi -> e.message
-                        is java.net.UnknownHostException -> "No internet connection"
-                        else -> "Couldn't get info: ${e.message ?: e.javaClass.simpleName}"
+                        is java.net.UnknownHostException -> tr("No internet connection", "İnternet bağlantısı yok")
+                        else -> tr("Couldn't get info: ${e.message ?: e.javaClass.simpleName}", "Bilgi alınamadı: ${e.message ?: e.javaClass.simpleName}")
                     }, true)
                 })
             }
@@ -568,7 +594,7 @@ class MainActivity : Activity() {
         showStatus(null)
         card.visibility = View.VISIBLE
         titleV.text = v.title
-        metaV.text = listOf(if (v.members) "MEMBERS" else "", Naming.channel(v.author), Text.duration(v.durationSec)).filter { it.isNotEmpty() }.joinToString(" · ")
+        metaV.text = listOf(if (v.members) tr("MEMBERS", "ÜYELER") else "", Naming.channel(v.author), Text.duration(v.durationSec)).filter { it.isNotEmpty() }.joinToString(" · ")
         metaV.setTextColor(if (v.members) C.BLUE else C.DIM)
         thumb.setImageDrawable(null)
         loadThumb(v)
@@ -584,7 +610,7 @@ class MainActivity : Activity() {
             chip.select(c == choice)
             heightRow.addView(chip)
         }
-        if (choices.isEmpty()) heightRow.addView(text("No MP4-compatible video stream for this video", 13f, C.LABEL))
+        if (choices.isEmpty()) heightRow.addView(text(tr("No MP4-compatible video stream for this video", "Bu video için MP4 uyumlu video akışı yok"), 13f, C.LABEL))
         setKind(kind)
     }
 
@@ -623,7 +649,7 @@ class MainActivity : Activity() {
         val lo = Pick.audio(v.formats, audioFmt, AudioQ.LOW)
         for (q in AudioQ.values()) {
             if (q == AudioQ.LOW && (lo == null || lo.itag == hi?.itag)) continue
-            val lbl = (if (q == AudioQ.HIGH) "Best " else "Small ") + (Pick.audioLabel(v.formats, audioFmt, q) ?: "")
+            val lbl = (if (q == AudioQ.HIGH) tr("Best ", "En iyi ") else tr("Small ", "Küçük ")) + (Pick.audioLabel(v.formats, audioFmt, q) ?: "")
             qRow.addView(Chip(this, lbl.trim()) { audioQ = q; Store.audioQ = q; buildAudioChips(); refreshNote() }
                 .apply { select(q == audioQ || q == AudioQ.HIGH && (lo == null || lo.itag == hi?.itag)) })
         }
@@ -636,18 +662,18 @@ class MainActivity : Activity() {
             Kind.AUDIO -> {
                 val f = Pick.audio(v.formats, audioFmt, audioQ) ?: Pick.audio(v.formats, audioFmt, AudioQ.HIGH)
                 goBtn.isEnabled = f != null
-                goBtn.text = "Download audio" + (f?.estBytes?.takeIf { it > 0 }?.let { " · " + Text.size(it) } ?: "")
-                noteV.text = (if (audioFmt == AudioFmt.M4A) (if (Store.originalAudio) "Saved as YouTube's original .m4a (AAC, no conversion; change in ⋮) in "
-                    else "Converted to a clean .m4a (AAC, no re-encoding) in ")
-                    else "Opus is converted to .ogg (no re-encoding: Android has no audio WebM file type) in ") +
+                goBtn.text = tr("Download audio", "Sesi indir") + (f?.estBytes?.takeIf { it > 0 }?.let { " · " + Text.size(it) } ?: "")
+                noteV.text = (if (audioFmt == AudioFmt.M4A) (if (Store.originalAudio) tr("Saved as YouTube's original .m4a (AAC, no conversion; change in ⋮) in ", "YouTube'un orijinal .m4a dosyası olarak kaydedilir (AAC, dönüştürme yok; ⋮ menüsünden değiştirin). Konum: ")
+                    else tr("Converted to a clean .m4a (AAC, no re-encoding) in ", "Temiz bir .m4a'ya dönüştürülür (AAC, yeniden kodlama yok). Konum: "))
+                    else tr("Opus is converted to .ogg (no re-encoding: Android has no audio WebM file type) in ", "Opus, .ogg'a dönüştürülür (yeniden kodlama yok: Android'de ses WebM dosya türü yok). Konum: ")) +
                     "Music/PlainDownload/$ch/"
             }
             Kind.VIDEO -> {
                 val c = choice
                 goBtn.isEnabled = c != null
-                goBtn.text = "Download video" + (c?.let { " " + it.label } ?: "") + (c?.estBytes?.takeIf { it > 0 }?.let { " · " + Text.size(it) } ?: "")
-                noteV.text = "Saved as .mp4 (H.264 + AAC" + (if (c?.codec == VCodec.AV1) "; AV1 video: needs an AV1 decoder" else "") +
-                    ") in Movies/PlainDownload/$ch/"
+                goBtn.text = tr("Download video", "Videoyu indir") + (c?.let { " " + it.label } ?: "") + (c?.estBytes?.takeIf { it > 0 }?.let { " · " + Text.size(it) } ?: "")
+                noteV.text = tr("Saved as .mp4 (H.264 + AAC", ".mp4 olarak kaydedilir (H.264 + AAC") + (if (c?.codec == VCodec.AV1) tr("; AV1 video: needs an AV1 decoder", "; AV1 video: AV1 kod çözücü gerekir") else "") +
+                    tr(") in ", "). Konum: ") + "Movies/PlainDownload/$ch/"
             }
         }
         goBtn.alpha = if (goBtn.isEnabled) 1f else 0.4f
@@ -670,7 +696,7 @@ class MainActivity : Activity() {
         )
         Store.add(j)
         DownloadService.start(this)
-        toast("Queued")
+        toast(tr("Queued", "Sıraya alındı"))
     }
 
     fun askNotificationsOnce() {
@@ -751,17 +777,17 @@ class MainActivity : Activity() {
                 actions.removeAllViews()
                 fun add(v: View) { if (actions.childCount > 0) actions.addView(View(this@MainActivity), lpL(dp(8), 1)); actions.addView(v) }
                 when (j.state) {
-                    State.QUEUED, State.RUNNING -> add(pill("Cancel") { Store.cancel(id) })
+                    State.QUEUED, State.RUNNING -> add(pill(tr("Cancel", "İptal")) { Store.cancel(id) })
                     State.FAILED, State.CANCELED -> {
-                        add(pill("Remove") { Store.remove(id) })
-                        add(pill("Retry", C.ACCENT, C.ACCENT) { retry(id) })
+                        add(pill(tr("Remove", "Kaldır")) { Store.remove(id) })
+                        add(pill(tr("Retry", "Yeniden dene"), C.ACCENT, C.ACCENT) { retry(id) })
                     }
                     State.DONE -> when (j.media) {
-                        Media.TRASHED -> add(pill("Restore", C.ACCENT, C.ACCENT) { Store.get(id)?.copy()?.let { restoreJobs(listOf(it)) } })
-                        Media.GONE -> add(pill("Remove") { Store.remove(id) })
+                        Media.TRASHED -> add(pill(tr("Restore", "Geri yükle"), C.ACCENT, C.ACCENT) { Store.get(id)?.copy()?.let { restoreJobs(listOf(it)) } })
+                        Media.GONE -> add(pill(tr("Remove", "Kaldır")) { Store.remove(id) })
                         Media.OK -> {
-                            if (j.kind == Kind.AUDIO && hasLocalMusic()) add(pill("Show in Music") { showInMusic() })
-                            add(pill("Open", C.ACCENT, C.ACCENT) { Store.get(id)?.copy()?.let { open(it) } })
+                            if (j.kind == Kind.AUDIO && hasLocalMusic()) add(pill(tr("Show in Music", "Müzik'te göster")) { showInMusic() })
+                            add(pill(tr("Open", "Aç"), C.ACCENT, C.ACCENT) { Store.get(id)?.copy()?.let { open(it) } })
                         }
                     }
                 }
@@ -792,7 +818,7 @@ class MainActivity : Activity() {
         }
         val shown = if (showAll) keys else keys.take(LIST_LIMIT)
         val queued = all.count { it.state == State.QUEUED }
-        moreRow.text = "Show all ${keys.size} (${keys.size - shown.size} more)" + if (queued > 0) " · $queued queued" else ""
+        moreRow.text = tr("Show all ${keys.size} (${keys.size - shown.size} more)", "Tümünü göster: ${keys.size} (${keys.size - shown.size} tane daha)") + if (queued > 0) tr(" · $queued queued", " · $queued sırada") else ""
         moreRow.visibility = if (shown.size < keys.size) View.VISIBLE else View.GONE
         listHeader.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
         val jobById = all.associateBy { it.id }
@@ -845,11 +871,11 @@ class MainActivity : Activity() {
             }
             view.setOnLongClickListener {
                 menu(title.text.toString(), listOf(
-                    "Erase all files of this batch (to trash)" to { eraseJobs(Store.snapshot().filter { it.batch == batch }) },
-                    "Cancel all" to { Store.cancelBatch(batch) },
-                    "Retry failed" to { retryBatch() },
-                    "Select" to { startSelection(); toggleBatchSel(batch) },
-                    "Remove from history (keeps the files)" to { Store.removeBatch(batch) },
+                    tr("Erase all files of this batch (to trash)", "Bu toplu işin tüm dosyalarını sil (çöpe)") to { eraseJobs(Store.snapshot().filter { it.batch == batch }) },
+                    tr("Cancel all", "Tümünü iptal et") to { Store.cancelBatch(batch) },
+                    tr("Retry failed", "Başarısızları yeniden dene") to { retryBatch() },
+                    tr("Select", "Seç") to { startSelection(); toggleBatchSel(batch) },
+                    tr("Remove from history (keeps the files)", "Geçmişten kaldır (dosyalar kalır)") to { Store.removeBatch(batch) },
                 ))
                 true
             }
@@ -859,12 +885,12 @@ class MainActivity : Activity() {
             if (!wifiOk()) return
             val n = Store.retryBatch(batch)
             if (n > 0) DownloadService.start(this@MainActivity)
-            toast(if (n > 0) "Retrying $n" else "Nothing failed")
+            toast(if (n > 0) tr("Retrying $n", "$n yeniden deneniyor") else tr("Nothing failed", "Başarısız olan yok"))
         }
 
         fun bind(jobs: List<Job>) {
             val st = BatchStats.of(jobs)
-            title.text = (if (batch in openBatches) "▾ " else "▸ ") + (jobs.firstOrNull()?.batchTitle?.ifEmpty { null } ?: "Bulk download")
+            title.text = (if (batch in openBatches) "▾ " else "▸ ") + (jobs.firstOrNull()?.batchTitle?.ifEmpty { null } ?: tr("Bulk download", "Toplu indirme"))
             if (st == last) return
             stats.text = st.text
             stats.setTextColor(if (st.active > 0) C.ACCENT else if (st.failed > 0) C.RED else C.LABEL)
@@ -873,9 +899,9 @@ class MainActivity : Activity() {
             if (last == null || (last!!.active > 0) != (st.active > 0) || (last!!.failed > 0) != (st.failed > 0)) {
                 actions.removeAllViews()
                 fun add(v: View) { if (actions.childCount > 0) actions.addView(View(this@MainActivity), lpL(dp(8), 1)); actions.addView(v) }
-                if (st.active > 0) add(pill("Cancel all") { Store.cancelBatch(batch) })
-                if (st.failed + st.canceled > 0) add(pill("Retry failed", C.ACCENT, C.ACCENT) { retryBatch() })
-                if (st.active == 0) add(pill("Remove") { Store.removeBatch(batch) })
+                if (st.active > 0) add(pill(tr("Cancel all", "Tümünü iptal et")) { Store.cancelBatch(batch) })
+                if (st.failed + st.canceled > 0) add(pill(tr("Retry failed", "Başarısızları yeniden dene"), C.ACCENT, C.ACCENT) { retryBatch() })
+                if (st.active == 0) add(pill(tr("Remove", "Kaldır")) { Store.removeBatch(batch) })
             }
             last = st
         }
@@ -903,17 +929,17 @@ class MainActivity : Activity() {
         if (!::selBar.isInitialized) return
         selBar.visibility = if (selecting) View.VISIBLE else View.GONE
         listHeader.visibility = if (selecting) View.GONE else listHeader.visibility
-        selText.text = "${selected.size} selected"
+        selText.text = tr("${selected.size} selected", "${selected.size} seçili")
     }
 
     private fun selectionMenu() {
         val js = Store.snapshot().filter { it.id in selected }
-        menu("${js.size} selected", listOf(
-            "Erase files (to trash)" to { eraseJobs(js); endSelection() },
-            "Restore from trash" to { restoreJobs(js.filter { it.media == Media.TRASHED }); endSelection() },
-            "Retry failed" to { js.filter { it.state == State.FAILED || it.state == State.CANCELED }.forEach { Store.retry(it.id) }; DownloadService.start(this); endSelection() },
-            "Cancel" to { js.filter { it.active }.forEach { Store.cancel(it.id) }; endSelection() },
-            "Remove from history (keeps the files)" to { js.filter { !it.active }.forEach { Store.remove(it.id) }; endSelection() },
+        menu(tr("${js.size} selected", "${js.size} seçili"), listOf(
+            tr("Erase files (to trash)", "Dosyaları sil (çöpe)") to { eraseJobs(js); endSelection() },
+            tr("Restore from trash", "Çöpten geri yükle") to { restoreJobs(js.filter { it.media == Media.TRASHED }); endSelection() },
+            tr("Retry failed", "Başarısızları yeniden dene") to { js.filter { it.state == State.FAILED || it.state == State.CANCELED }.forEach { Store.retry(it.id) }; DownloadService.start(this); endSelection() },
+            tr("Cancel", "İptal") to { js.filter { it.active }.forEach { Store.cancel(it.id) }; endSelection() },
+            tr("Remove from history (keeps the files)", "Geçmişten kaldır (dosyalar kalır)") to { js.filter { !it.active }.forEach { Store.remove(it.id) }; endSelection() },
         ))
     }
 
@@ -936,14 +962,14 @@ class MainActivity : Activity() {
     /** Erase saved files: trashed straight away (we own them, no dialog); refused ones go through one system dialog. */
     fun eraseJobs(all: List<Job>) {
         val js = all.filter { it.state == State.DONE && it.uri != null && it.media == Media.OK && !it.art }
-        if (js.isEmpty()) { toast("Nothing to erase"); return }
+        if (js.isEmpty()) { toast(tr("Nothing to erase", "Silinecek bir şey yok")); return }
         io.execute {
             val refused = MediaTrash.setTrashed(contentResolver, js.map { Uri.parse(it.uri) }, true).map { it.toString() }.toSet()
             val ok = js.filter { it.uri !in refused }
             Store.applyFixes(ok.map { Reconcile.Fix(it.id, Media.TRASHED, it.relPath, it.fileName) })
             main.post {
                 if (isDestroyed) return@post
-                if (ok.isNotEmpty()) showUndo("Erased ${ok.size} file${if (ok.size == 1) "" else "s"} (in trash for 30 days)") { restoreJobs(ok) }
+                if (ok.isNotEmpty()) showUndo(tr("Erased ${ok.size} file${if (ok.size == 1) "" else "s"} (in trash for 30 days)", "${ok.size} dosya silindi (30 gün çöpte kalır)")) { restoreJobs(ok) }
                 if (refused.isNotEmpty()) systemRequest(refused.map { Uri.parse(it) }, REQ_TRASH)
                 refreshTrashSummary()
             }
@@ -959,14 +985,14 @@ class MainActivity : Activity() {
     }
 
     private fun deleteNowJobs(js: List<Job>) {
-        android.app.AlertDialog.Builder(this).setTitle("Delete now?")
-            .setMessage("${js.size} file(s) will be deleted for good. This can't be undone.")
-            .setPositiveButton("Delete") { _, _ ->
+        android.app.AlertDialog.Builder(this).setTitle(tr("Delete now?", "Hemen silinsin mi?"))
+            .setMessage(tr("${js.size} file(s) will be deleted for good. This can't be undone.", "${js.size} dosya kalıcı olarak silinecek. Bu geri alınamaz."))
+            .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
                 io.execute {
                     val refused = MediaTrash.delete(contentResolver, js.mapNotNull { it.uri?.let(Uri::parse) })
                     main.post { if (!isDestroyed) { if (refused.isNotEmpty()) systemRequest(refused, REQ_DELETE); sync() } }
                 }
-            }.setNegativeButton("Cancel", null).show()
+            }.setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     /** Files Android won't let us change directly (not ours after a reinstall): one system dialog for all. */
@@ -980,7 +1006,7 @@ class MainActivity : Activity() {
             }
             @Suppress("DEPRECATION")
             startIntentSenderForResult(pi.intentSender, req, null, 0, 0, 0)
-        } catch (e: Exception) { toast("Android refused: ${e.message}") }
+        } catch (e: Exception) { toast(tr("Android refused: ${e.message}", "Android reddetti: ${e.message}")) }
     }
 
     private fun eraseCached(m: CacheMeta) {
@@ -992,8 +1018,8 @@ class MainActivity : Activity() {
                 main.post {
                     if (isDestroyed) return@post
                     if (refused.isNotEmpty()) systemRequest(refused, REQ_TRASH)
-                    else showUndo("Erased \"${m.title}\" (in trash for 30 days)") {
-                        io.execute { MediaTrash.setTrashed(contentResolver, listOf(u), false); main.post { toast("Restored to ${m.relPath ?: "Cached"}") } }
+                    else showUndo(tr("Erased \"${m.title}\" (in trash for 30 days)", "\"${m.title}\" silindi (30 gün çöpte kalır)")) {
+                        io.execute { MediaTrash.setTrashed(contentResolver, listOf(u), false); main.post { toast(tr("Restored to ${m.relPath ?: "Cached"}", "Geri yüklendi: ${m.relPath ?: "Cached"}")) } }
                     }
                     refreshCached(); refreshTrashSummary()
                 }
@@ -1046,7 +1072,7 @@ class MainActivity : Activity() {
             main.post {
                 if (isDestroyed) return@post
                 trashCount = t.size; trashBytes = t.sumOf { it.size }
-                if (freed > 0) toast("Freed ${Text.size(freed)} from trash")
+                if (freed > 0) toast(tr("Freed ${Text.size(freed)} from trash", "Çöpten ${Text.size(freed)} boşaltıldı"))
                 refreshCached()
                 if (!Store.artOffered && Store.artQuality != ArtQuality.NONE) offerArt(force = false) // once, on the first start of 1.9
             }
@@ -1058,7 +1084,7 @@ class MainActivity : Activity() {
 
     private fun artMenu() {
         val before = Store.artQuality
-        menu("Cover art in audio files", ArtQuality.values().map { q ->
+        menu(tr("Cover art in audio files", "Ses dosyalarında kapak resmi"), ArtQuality.values().map { q ->
             (if (q == before) "✓ " else "   ") + q.label to {
                 Store.artQuality = q
                 if (before == ArtQuality.NONE && q != ArtQuality.NONE) offerArt(force = true)
@@ -1069,21 +1095,24 @@ class MainActivity : Activity() {
     /** Check our audio files for missing art (reads each header), then offer the backfill batch. */
     private fun offerArt(force: Boolean) {
         if (!force) Store.artOffered = true
-        if (force) toast("Checking your files…")
+        if (force) toast(tr("Checking your files…", "Dosyalarınız denetleniyor…"))
         io.execute {
             val (missing, unreadable) = try { Art.scanMissing(this) } catch (_: Exception) { emptyList<Art.Missing>() to 0 }
             main.post {
                 if (isDestroyed) return@post
                 if (missing.isEmpty()) {
-                    if (force) message("Cover art", "Every saved song has cover art." + if (unreadable > 0) " ($unreadable file(s) couldn't be read: not Plain Youtube's.)" else "")
+                    if (force) message(tr("Cover art", "Kapak resmi"), tr("Every saved song has cover art.", "Kaydedilen her şarkının kapak resmi var.") + if (unreadable > 0) tr(" ($unreadable file(s) couldn't be read: not Plain Youtube's.)", " ($unreadable dosya okunamadı: Plain Youtube'a ait değil.)") else "")
                     return@post
                 }
-                android.app.AlertDialog.Builder(this).setTitle("Cover art")
-                    .setMessage("${missing.size} song(s) have no cover art. Add it now? It downloads a small picture per song " +
-                        "(${Store.artQuality.takeIf { it != ArtQuality.NONE }?.label ?: "Low"}) and writes it into the files, as a batch in the downloads list (Wi-Fi only applies)." +
-                        if (unreadable > 0) "\n\n$unreadable file(s) can't be changed (not Plain Youtube's) and are skipped." else "")
-                    .setPositiveButton("Add now") { _, _ -> enqueueArt(missing) }
-                    .setNegativeButton("Not now", null).show()
+                val q = Store.artQuality.takeIf { it != ArtQuality.NONE }?.label ?: tr("Low", "Düşük")
+                android.app.AlertDialog.Builder(this).setTitle(tr("Cover art", "Kapak resmi"))
+                    .setMessage(tr("${missing.size} song(s) have no cover art. Add it now? It downloads a small picture per song " +
+                        "($q) and writes it into the files, as a batch in the downloads list (Wi-Fi only applies).",
+                        "${missing.size} şarkının kapak resmi yok. Şimdi eklensin mi? Her şarkı için küçük bir resim indirilip " +
+                        "($q) dosyalara yazılır; indirilenler listesinde toplu iş olarak görünür (Yalnızca Wi-Fi geçerlidir).") +
+                        if (unreadable > 0) tr("\n\n$unreadable file(s) can't be changed (not Plain Youtube's) and are skipped.", "\n\n$unreadable dosya değiştirilemiyor (Plain Youtube'a ait değil) ve atlanacak.") else "")
+                    .setPositiveButton(tr("Add now", "Şimdi ekle")) { _, _ -> enqueueArt(missing) }
+                    .setNegativeButton(tr("Not now", "Şimdi değil"), null).show()
             }
         }
     }
@@ -1094,10 +1123,10 @@ class MainActivity : Activity() {
         Store.addAll(missing.mapIndexed { i, m ->
             Job(id = base + i, videoId = m.videoId, title = m.title, channel = m.channel, durationSec = 0, kind = Kind.AUDIO,
                 audioFmt = AudioFmt.M4A, audioQ = AudioQ.HIGH, height = 0, codec = VCodec.AVC, uri = m.uri, fileName = m.fileName,
-                album = m.album, art = true, batch = if (missing.size > 1) base else 0L, batchTitle = "Add cover art")
+                album = m.album, art = true, batch = if (missing.size > 1) base else 0L, batchTitle = tr("Add cover art", "Kapak resmi ekle"))
         })
         DownloadService.start(this)
-        toast("Adding cover art to ${missing.size} song(s)")
+        toast(tr("Adding cover art to ${missing.size} song(s)", "${missing.size} şarkıya kapak resmi ekleniyor"))
     }
 
     private fun refreshTrashSummary() {
@@ -1119,33 +1148,33 @@ class MainActivity : Activity() {
         trashCount = t.size; trashBytes = t.sumOf { it.size }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(12), dp(8)) }
         val scroll = ScrollView(this).apply { addView(col) }
-        val dlg = android.app.AlertDialog.Builder(this).setTitle("Trash (${t.size} · ${Text.size(trashBytes)})").setView(scroll)
-            .setNegativeButton("Close", null)
+        val dlg = android.app.AlertDialog.Builder(this).setTitle(tr("Trash (${t.size} · ${Text.size(trashBytes)})", "Çöp kutusu (${t.size} · ${Text.size(trashBytes)})")).setView(scroll)
+            .setNegativeButton(tr("Close", "Kapat"), null)
             .apply {
-                if (t.isNotEmpty()) setPositiveButton("Empty trash") { _, _ ->
-                    android.app.AlertDialog.Builder(this@MainActivity).setTitle("Empty trash?")
-                        .setMessage("${t.size} file(s), ${Text.size(trashBytes)}, will be deleted for good.")
-                        .setPositiveButton("Delete all") { _, _ ->
+                if (t.isNotEmpty()) setPositiveButton(tr("Empty trash", "Çöpü boşalt")) { _, _ ->
+                    android.app.AlertDialog.Builder(this@MainActivity).setTitle(tr("Empty trash?", "Çöp boşaltılsın mı?"))
+                        .setMessage(tr("${t.size} file(s), ${Text.size(trashBytes)}, will be deleted for good.", "${t.size} dosya (${Text.size(trashBytes)}) kalıcı olarak silinecek."))
+                        .setPositiveButton(tr("Delete all", "Tümünü sil")) { _, _ ->
                             io.execute {
                                 val refused = MediaTrash.delete(contentResolver, t.map { MediaTrash.uriOf(it) })
                                 main.post { if (refused.isNotEmpty()) systemRequest(refused, REQ_DELETE); sync() }
                             }
-                        }.setNegativeButton("Cancel", null).show()
+                        }.setNegativeButton(tr("Cancel", "İptal"), null).show()
                 }
             }.create()
-        col.addView(text(if (t.isEmpty()) "The trash is empty." else "Erased files stay here until Android deletes them (about 30 days after erasing), or until space runs low (below 3 GB free, oldest first).",
+        col.addView(text(if (t.isEmpty()) tr("The trash is empty.", "Çöp kutusu boş.") else tr("Erased files stay here until Android deletes them (about 30 days after erasing), or until space runs low (below 3 GB free, oldest first).", "Silinen dosyalar, Android onları silene kadar (silindikten yaklaşık 30 gün sonra) ya da yer azalana kadar (3 GB'tan az boş alan, en eskiden başlayarak) burada kalır."),
             12f, C.LABEL, lines = 4).apply { setPadding(0, 0, 0, dp(8)) })
         val now = System.currentTimeMillis()
         for (r in t) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, dp(6)) }
             row.addView(text(r.name, 14f, C.TEXT, bold = true, lines = 2))
-            row.addView(text("${r.relPath} · ${Text.size(r.size)} · ${Purge.daysLeft(r.expires, now)} days left", 12f, C.LABEL, lines = 2))
+            row.addView(text(tr("${r.relPath} · ${Text.size(r.size)} · ${Purge.daysLeft(r.expires, now)} days left", "${r.relPath} · ${Text.size(r.size)} · ${Purge.daysLeft(r.expires, now)} gün kaldı"), 12f, C.LABEL, lines = 2))
             val acts = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(4), 0, 0) }
-            acts.addView(pill("Delete now") {
+            acts.addView(pill(tr("Delete now", "Hemen sil")) {
                 io.execute { val refused = MediaTrash.delete(contentResolver, listOf(MediaTrash.uriOf(r))); main.post { if (refused.isNotEmpty()) systemRequest(refused, REQ_DELETE); dlg.dismiss(); sync() } }
             })
             acts.addView(View(this), lpL(dp(8), 1))
-            acts.addView(pill("Restore", C.ACCENT, C.ACCENT) {
+            acts.addView(pill(tr("Restore", "Geri yükle"), C.ACCENT, C.ACCENT) {
                 io.execute { val refused = MediaTrash.setTrashed(contentResolver, listOf(MediaTrash.uriOf(r)), false); main.post { if (refused.isNotEmpty()) systemRequest(refused, REQ_UNTRASH); dlg.dismiss(); sync() } }
             })
             row.addView(acts, lpL(MATCH, WRAP))
@@ -1199,21 +1228,23 @@ class MainActivity : Activity() {
     private fun renderCached(video: List<CacheMeta>, music: List<CacheMeta>) {
         val n = video.size + music.size
         cachedHeader.visibility = if (n == 0) View.GONE else View.VISIBLE
-        cachedHeader.text = (if (cachedOpen) "▾ " else "▸ ") + "Cached · videos ${video.size} (${Text.size(video.sumOf { it.size })}) · " +
-            "music ${music.size} (${Text.size(music.sumOf { it.size })})"
+        cachedHeader.text = (if (cachedOpen) "▾ " else "▸ ") + tr("Cached · videos ${video.size} (${Text.size(video.sumOf { it.size })}) · ", "Önbellek · videolar ${video.size} (${Text.size(video.sumOf { it.size })}) · ") +
+            tr("music ${music.size} (${Text.size(music.sumOf { it.size })})", "müzik ${music.size} (${Text.size(music.sumOf { it.size })})")
         cachedBox.removeAllViews()
         cacheRows.clear()
         cachedBox.visibility = if (cachedOpen && n > 0) View.VISIBLE else View.GONE
         if (!cachedOpen || n == 0) return
-        cachedBox.addView(text("Temporary — cleared when space runs low (keeps 3 GB free) or past the limits in ⋮. Complete ones are in " +
-            "Music|Movies/PlainDownload/Cached/, so the music player shows them.", 12f, C.LABEL, lines = 3)
+        cachedBox.addView(text(tr("Temporary — cleared when space runs low (keeps 3 GB free) or past the limits in ⋮. Complete ones are in " +
+            "Music|Movies/PlainDownload/Cached/, so the music player shows them.",
+            "Geçici: yer azalınca (3 GB boş tutulur) ya da ⋮ menüsündeki sınırlar aşılınca temizlenir. Tamamlananlar " +
+            "Music|Movies/PlainDownload/Cached/ içindedir, böylece müzik çalar onları gösterir."), 12f, C.LABEL, lines = 3)
             .apply { setPadding(0, 0, 0, dp(4)) })
         for ((kind, list) in listOf(CacheKind.VIDEO to video, CacheKind.MUSIC to music)) {
             if (list.isEmpty()) continue
             val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(2)) }
-            head.addView(text((if (kind == CacheKind.VIDEO) "Videos" else "Music") + " (${list.size} · ${Text.size(list.sumOf { it.size })})",
+            head.addView(text((if (kind == CacheKind.VIDEO) tr("Videos", "Videolar") else tr("Music", "Müzik")) + " (${list.size} · ${Text.size(list.sumOf { it.size })})",
                 13f, C.DIM, bold = true), lpL(0, WRAP, 1f))
-            head.addView(text("Clear", 13f, C.LABEL).apply {
+            head.addView(text(tr("Clear", "Temizle"), 13f, C.LABEL).apply {
                 setPadding(dp(8), dp(6), dp(4), dp(6))
                 setOnClickListener { io.execute { Store.cache.clear(kind); main.post { refreshCached() } } }
             })
@@ -1242,15 +1273,15 @@ class MainActivity : Activity() {
         texts.addView(text(m.title.ifEmpty { m.videoId }, 14f, C.TEXT, bold = true, lines = 2))
         texts.addView(text(listOf(m.channel, if (m.kind == CacheKind.VIDEO) "${m.quality}p" else if (m.ext == "webm") "Opus" else "M4A",
             Text.duration(m.durationSec)).filter { it.isNotEmpty() }.joinToString(" · "), 12f, C.DIM))
-        texts.addView(text(if (m.published) "Complete · ${Text.size(m.size)} · ${m.relPath ?: ""}" else if (m.complete) "Complete · ${Text.size(m.size)} · plays offline"
-            else "${(m.fraction * 100).toInt()}% cached · ${Text.size(m.size)}",
+        texts.addView(text(if (m.published) tr("Complete", "Tamamlandı") + " · ${Text.size(m.size)} · ${m.relPath ?: ""}" else if (m.complete) tr("Complete · ${Text.size(m.size)} · plays offline", "Tamamlandı · ${Text.size(m.size)} · çevrimdışı oynar")
+            else tr("${(m.fraction * 100).toInt()}% cached · ${Text.size(m.size)}", "%${(m.fraction * 100).toInt()} önbellekte · ${Text.size(m.size)}"),
             12f, if (m.complete) C.GREEN else C.LABEL))
         top.addView(texts, lpL(0, WRAP, 1f))
         row.addView(top, lpL(MATCH, WRAP))
         val actions = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, dp(8), 0, 0) }
-        actions.addView(pill(if (m.published) "Erase" else "Remove") { eraseCached(m) })
+        actions.addView(pill(if (m.published) tr("Erase", "Sil") else tr("Remove", "Kaldır")) { eraseCached(m) })
         actions.addView(View(this), lpL(dp(8), 1))
-        actions.addView(pill(if (m.complete) "Save" else "Save (download)", C.ACCENT, C.ACCENT) { saveCached(m) })
+        actions.addView(pill(if (m.complete) tr("Save", "Kaydet") else tr("Save (download)", "Kaydet (indir)"), C.ACCENT, C.ACCENT) { saveCached(m) })
         row.addView(actions, lpL(MATCH, WRAP))
         return row
     }
@@ -1260,10 +1291,10 @@ class MainActivity : Activity() {
 
     private fun saveCached(m: CacheMeta) {
         if (!m.complete && !wifiOk()) return
-        toast("Saving…")
+        toast(tr("Saving…", "Kaydediliyor…"))
         io.execute {
-            val r = try { CachePublisher.save(this, m) } catch (e: Exception) { CachePublisher.Result(false, "Couldn't save: ${e.message}") }
-            main.post { if (!isDestroyed) { message("Save", r.message); refreshCached() } }
+            val r = try { CachePublisher.save(this, m) } catch (e: Exception) { CachePublisher.Result(false, tr("Couldn't save: ${e.message}", "Kaydedilemedi: ${e.message}")) }
+            main.post { if (!isDestroyed) { message(tr("Save", "Kaydet"), r.message); refreshCached() } }
         }
     }
 
@@ -1279,16 +1310,16 @@ class MainActivity : Activity() {
     }
 
     private fun regionMenu() {
-        val regions = listOf("US", "DE", "GB", "NL", "FR", "JP", "CA")
-        menu("Region for blocked videos", listOf("Off (show the block)" to { Store.altRegion = "" }) +
+        val regions = listOf("US", "DE", "GB", "NL", "FR", "JP", "CA") // gl codes, not translated
+        menu(tr("Region for blocked videos", "Engelli videolar için bölge"), listOf(tr("Off (show the block)", "Kapalı (engeli göster)") to { Store.altRegion = "" }) +
             regions.map { r -> (if (Store.altRegion == r) "✓ $r" else r) to { Store.altRegion = r } })
     }
 
     private fun cacheLimits() {
         val gbs = listOf(2, 5, 10, 20, 50, 100)
-        menu("Cache limits", listOf(
-            "Video cache: ${Store.videoCapGb} GB…" to { menu("Video cache limit", gbs.map { g -> "$g GB" to { Store.videoCapGb = g; trimCaches() } }) },
-            "Music cache: ${Store.musicCapGb} GB…" to { menu("Music cache limit", gbs.map { g -> "$g GB" to { Store.musicCapGb = g; trimCaches() } }) },
+        menu(tr("Cache limits", "Önbellek sınırları"), listOf(
+            tr("Video cache: ${Store.videoCapGb} GB…", "Video önbelleği: ${Store.videoCapGb} GB…") to { menu(tr("Video cache limit", "Video önbellek sınırı"), gbs.map { g -> "$g GB" to { Store.videoCapGb = g; trimCaches() } }) },
+            tr("Music cache: ${Store.musicCapGb} GB…", "Müzik önbelleği: ${Store.musicCapGb} GB…") to { menu(tr("Music cache limit", "Müzik önbellek sınırı"), gbs.map { g -> "$g GB" to { Store.musicCapGb = g; trimCaches() } }) },
         ))
     }
 
@@ -1301,7 +1332,7 @@ class MainActivity : Activity() {
 
     private fun retry(id: Long) {
         if (Store.wifiOnly) {
-            try { Net.network(this, true) } catch (e: Exception) { toast("Not on Wi-Fi (Wi-Fi only is on)"); return }
+            try { Net.network(this, true) } catch (e: Exception) { toast(tr("Not on Wi-Fi (Wi-Fi only is on)", "Wi-Fi bağlı değil (Yalnızca Wi-Fi açık)")); return }
         }
         Store.retry(id)
         DownloadService.start(this)
@@ -1315,27 +1346,27 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         val item = Item(IKind.VIDEO, j.videoId, j.title, j.channel, null, j.durationSec, thumbId = j.videoId)
         val saved = j.state == State.DONE && j.uri != null && j.media == Media.OK
-        items += "Visit channel" to { Hold.visitChannel(this, j.videoId, null, j.channel) }
-        if (saved) items += (if (j.kind == Kind.AUDIO) "Listen (saved file)" else "Watch (saved file)") to { PlayerActivity.local(this, j) }
-        items += "Watch" to { PlayerActivity.stream(this, j.videoId, j.title, j.channel, PlayMode.WATCH, album = j.album) }
-        items += "Listen" to { PlayerActivity.stream(this, j.videoId, j.title, j.channel, PlayMode.LISTEN, album = j.album) }
-        items += "Download…" to { openVideo(j.videoId) }
-        items += "Add to play queue" to {
+        items += tr("Visit channel", "Kanala git") to { Hold.visitChannel(this, j.videoId, null, j.channel) }
+        if (saved) items += (if (j.kind == Kind.AUDIO) tr("Listen (saved file)", "Dinle (kayıtlı dosya)") else tr("Watch (saved file)", "İzle (kayıtlı dosya)")) to { PlayerActivity.local(this, j) }
+        items += tr("Watch", "İzle") to { PlayerActivity.stream(this, j.videoId, j.title, j.channel, PlayMode.WATCH, album = j.album) }
+        items += tr("Listen", "Dinle") to { PlayerActivity.stream(this, j.videoId, j.title, j.channel, PlayMode.LISTEN, album = j.album) }
+        items += tr("Download…", "İndir…") to { openVideo(j.videoId) }
+        items += tr("Add to play queue", "Çalma sırasına ekle") to {
             Hold.enqueue(this, listOf(if (saved) QEntry(j.videoId, j.title, j.channel, localUri = j.uri, localAudio = j.kind == Kind.AUDIO)
                 else PlayQueue.of(item, if (j.kind == Kind.AUDIO) PlayMode.LISTEN else null, j.album)))
         }
-        items += "Add to list…" to { Hold.addToList(this, listOf(item)) }
-        if (saved && j.media == Media.OK) items += "Erase (to trash)" to { eraseJobs(listOf(j)) }
+        items += tr("Add to list…", "Listeye ekle…") to { Hold.addToList(this, listOf(item)) }
+        if (saved && j.media == Media.OK) items += tr("Erase (to trash)", "Sil (çöpe)") to { eraseJobs(listOf(j)) }
         if (j.media == Media.TRASHED) {
-            items += "Restore from trash" to { restoreJobs(listOf(j)) }
-            items += "Delete now (can't be undone)" to { deleteNowJobs(listOf(j)) }
+            items += tr("Restore from trash", "Çöpten geri yükle") to { restoreJobs(listOf(j)) }
+            items += tr("Delete now (can't be undone)", "Hemen sil (geri alınamaz)") to { deleteNowJobs(listOf(j)) }
         }
-        items += "Select" to { startSelection(); toggleSel(j.id) }
-        if (saved) items += "Open in another app" to { open(j) }
-        if (saved && j.kind == Kind.AUDIO && hasLocalMusic()) items += "Open in Music" to { showInMusic() }
-        if (j.active) items += "Cancel" to { Store.cancel(j.id) }
-        if (j.state == State.FAILED || j.state == State.CANCELED) items += "Retry" to { retry(j.id) }
-        if (!j.active) items += "Remove from history (keeps the file)" to { Store.remove(j.id) }
+        items += tr("Select", "Seç") to { startSelection(); toggleSel(j.id) }
+        if (saved) items += tr("Open in another app", "Başka uygulamada aç") to { open(j) }
+        if (saved && j.kind == Kind.AUDIO && hasLocalMusic()) items += tr("Open in Music", "Müzik'te aç") to { showInMusic() }
+        if (j.active) items += tr("Cancel", "İptal") to { Store.cancel(j.id) }
+        if (j.state == State.FAILED || j.state == State.CANCELED) items += tr("Retry", "Yeniden dene") to { retry(j.id) }
+        if (!j.active) items += tr("Remove from history (keeps the file)", "Geçmişten kaldır (dosya kalır)") to { Store.remove(j.id) }
         menu(j.title, items)
     }
 
@@ -1344,15 +1375,15 @@ class MainActivity : Activity() {
         val item = Item(IKind.VIDEO, m.videoId, m.title, m.channel, null, m.durationSec, thumbId = m.videoId)
         val mode = if (m.kind == CacheKind.MUSIC) PlayMode.LISTEN else PlayMode.WATCH
         menu(m.title, listOf(
-            "Visit channel" to { Hold.visitChannel(this, m.videoId, null, m.channel) },
-            "Play (cached)" to { play(m) },
-            "Watch" to { PlayerActivity.stream(this, m.videoId, m.title, m.channel, PlayMode.WATCH, album = m.album) },
-            "Listen" to { PlayerActivity.stream(this, m.videoId, m.title, m.channel, PlayMode.LISTEN, album = m.album) },
-            "Download…" to { openVideo(m.videoId) },
-            "Add to play queue" to { Hold.enqueue(this, listOf(PlayQueue.of(item, mode, m.album))) },
-            "Add to list…" to { Hold.addToList(this, listOf(item)) },
-            (if (m.complete) "Save" else "Save (download)") to { saveCached(m) },
-            (if (m.published) "Erase (to trash)" else "Remove") to { eraseCached(m) },
+            tr("Visit channel", "Kanala git") to { Hold.visitChannel(this, m.videoId, null, m.channel) },
+            tr("Play (cached)", "Oynat (önbellek)") to { play(m) },
+            tr("Watch", "İzle") to { PlayerActivity.stream(this, m.videoId, m.title, m.channel, PlayMode.WATCH, album = m.album) },
+            tr("Listen", "Dinle") to { PlayerActivity.stream(this, m.videoId, m.title, m.channel, PlayMode.LISTEN, album = m.album) },
+            tr("Download…", "İndir…") to { openVideo(m.videoId) },
+            tr("Add to play queue", "Çalma sırasına ekle") to { Hold.enqueue(this, listOf(PlayQueue.of(item, mode, m.album))) },
+            tr("Add to list…", "Listeye ekle…") to { Hold.addToList(this, listOf(item)) },
+            (if (m.complete) tr("Save", "Kaydet") else tr("Save (download)", "Kaydet (indir)")) to { saveCached(m) },
+            (if (m.published) tr("Erase (to trash)", "Sil (çöpe)") else tr("Remove", "Kaldır")) to { eraseCached(m) },
         ))
     }
 
@@ -1362,7 +1393,7 @@ class MainActivity : Activity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri), mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         } catch (e: Exception) {
-            toast("No app can open this file (it may have been moved or deleted)")
+            toast(tr("No app can open this file (it may have been moved or deleted)", "Bu dosyayı açabilecek uygulama yok (taşınmış ya da silinmiş olabilir)"))
         }
     }
 
@@ -1370,6 +1401,6 @@ class MainActivity : Activity() {
 
     private fun showInMusic() {
         val i = packageManager.getLaunchIntentForPackage("app.localmusic")
-        if (i == null) toast("LocalMusic isn't installed") else startActivity(i)
+        if (i == null) toast(tr("LocalMusic isn't installed", "LocalMusic yüklü değil")) else startActivity(i)
     }
 }

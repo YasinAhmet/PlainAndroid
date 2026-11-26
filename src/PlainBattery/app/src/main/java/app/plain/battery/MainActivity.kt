@@ -20,6 +20,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -51,6 +53,7 @@ class MainActivity : Activity() {
     private val dp by lazy { resources.displayMetrics.density }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         tracker = Tracker(this)
         ui = getSharedPreferences("ui", MODE_PRIVATE)
@@ -65,7 +68,7 @@ class MainActivity : Activity() {
             setPadding(px(16), px(10), px(12), px(6))
         }
         bar.addView(text("Plain Battery", 20f, WHITE, bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        refresh = pill("Refresh", false) { update(force = true) }
+        refresh = pill(tr("Refresh", "Yenile"), false) { update(force = true) }
         bar.addView(refresh, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)))
         root.addView(bar)
 
@@ -117,7 +120,7 @@ class MainActivity : Activity() {
             } catch (_: Exception) {}
             runOnUiThread {
                 busy = false
-                if (!isDestroyed) { refresh.isEnabled = true; refresh.text = "Refresh"; render() }
+                if (!isDestroyed) { refresh.isEnabled = true; refresh.text = tr("Refresh", "Yenile"); render() }
             }
         }
     }
@@ -138,7 +141,7 @@ class MainActivity : Activity() {
     private fun nowTab() {
         val samples = tracker.samples()
         val now = samples.lastOrNull() ?: run {
-            card().addView(text("No reading yet.", 14f, LIGHT)); return
+            card().addView(text(tr("No reading yet.", "Henüz ölçüm yok."), 14f, LIGHT)); return
         }
         val screen = tracker.screenEvents()
         val c = card()
@@ -147,10 +150,10 @@ class MainActivity : Activity() {
         val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(16), 0, 0, 0) }
         val unplug = Drain.lastUnplugIndex(samples)
         val state = when {
-            now.charging -> "Charging · ${now.plugged.uppercase(Locale.US)}"
-            now.status == "full" -> "Full"
-            unplug > 0 -> "On battery · " + Drain.formatDuration(now.time - samples[unplug].time)
-            else -> "On battery"
+            now.charging -> tr("Charging", "Şarjda") + " · " + pluggedName(now.plugged)
+            now.status == "full" -> tr("Full", "Dolu")
+            unplug > 0 -> tr("On battery · ", "Pilde · ") + Drain.formatDuration(now.time - samples[unplug].time)
+            else -> tr("On battery", "Pilde")
         }
         right.addView(text(state, 17f, if (now.charging) GREEN else WHITE, bold = true))
         right.addView(text("%s · %.1f °C · %.2f V".format(Locale.US, Csv.time(now.time).substring(11, 16),
@@ -163,19 +166,21 @@ class MainActivity : Activity() {
             val recent = Rates.recentMa(samples, now.time)
             val left = recent?.let { Rates.hoursLeft(remaining, it.first) }
             if (recent != null && left != null) {
-                c.addView(text("≈ ${Rates.formatHours(left)} left", 22f, WHITE, bold = true).apply { setPadding(0, px(10), 0, 0) })
-                c.addView(text("at the pace of the last ${Rates.formatHours(recent.second)}", 12f, GREY))
+                c.addView(text(tr("≈ ${Rates.formatHours(left)} left", "≈ ${Rates.formatHours(left)} kaldı"), 22f, WHITE, bold = true).apply { setPadding(0, px(10), 0, 0) })
+                c.addView(text(tr("at the pace of the last ${Rates.formatHours(recent.second)}",
+                    "son ${Rates.formatHours(recent.second)} içindeki hıza göre"), 12f, GREY))
             } else {
-                c.addView(text("Time left: after ~20 min on battery", 12f, GREY).apply { setPadding(0, px(10), 0, 0) })
+                c.addView(text(tr("Time left: after ~20 min on battery", "Kalan süre: pilde ~20 dk sonra"), 12f, GREY).apply { setPadding(0, px(10), 0, 0) })
             }
             Rates.standbyMa(samples, screen)?.let { Rates.hoursLeft(remaining, it) }?.let {
-                c.addView(text("idle with the screen off: ≈ ${Rates.formatHours(it)}", 12f, GREY))
+                c.addView(text(tr("idle with the screen off: ≈ ${Rates.formatHours(it)}",
+                    "ekran kapalı beklemede: ≈ ${Rates.formatHours(it)}"), 12f, GREY))
             }
         }
 
         val end = System.currentTimeMillis()
         val firstT = samples.firstOrNull { it.time >= end - 36 * 3_600_000L }?.time
-        section(if (firstT == null) "Level" else "Level · last " + Drain.formatDuration(end - firstT))
+        section(if (firstT == null) tr("Level", "Seviye") else tr("Level · last ", "Seviye · son ") + Drain.formatDuration(end - firstT))
         card().apply {
             addView(ChartView(this@MainActivity).apply { this.samples = samples; this.screen = screen })
             addView(legend())
@@ -189,7 +194,8 @@ class MainActivity : Activity() {
         val samples = tracker.samples()
         if (latest == null) { noAppData(samples); return }
         if (tracker.accessError != null) {
-            body.addView(text("Last snapshot failed, showing an older one. See Settings.", 12f, ACCENT).apply {
+            body.addView(text(tr("Last snapshot failed, showing an older one. See Settings.",
+                "Son ölçüm alınamadı, eskisi gösteriliyor. Ayarlar'a bakın."), 12f, ACCENT).apply {
                 setPadding(px(4), px(8), 0, 0)
             })
         }
@@ -202,13 +208,13 @@ class MainActivity : Activity() {
         // Stats are frozen on power: while charging, "since unplug" would be empty, so show the last run.
         val (sinceBase, sinceLabel) = when {
             charging && prev != null && !Checkin.isReset(prev, latest) && Checkin.delta(prev, latest).dischargeMah > 0 ->
-                prev to "Last run"
-            baseline == null || Checkin.isReset(baseline, latest) -> null to "Since full charge"
-            else -> baseline to "Since unplug"
+                prev to tr("Last run", "Son kullanım")
+            baseline == null || Checkin.isReset(baseline, latest) -> null to tr("Since full charge", "Tam şarjdan beri")
+            else -> baseline to tr("Since unplug", "Şarjdan çıkalı")
         }
 
         val seg = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(10), 0, px(10)) }
-        val labels = listOf(recent?.let { "Last " + Rates.formatHours(it.batteryHours) } ?: "Last 3 h", sinceLabel)
+        val labels = listOf(recent?.let { tr("Last ", "Son ") + Rates.formatHours(it.batteryHours) } ?: tr("Last 3 h", "Son 3 sa"), sinceLabel)
         labels.forEachIndexed { i, l ->
             seg.addView(pill(l, i == period) {
                 if (period != i) { period = i; ui.edit().putInt("period", i).apply(); expanded.clear(); render() }
@@ -218,20 +224,22 @@ class MainActivity : Activity() {
 
         val d = if (period == PERIOD_RECENT) recent?.delta else Checkin.delta(sinceBase, latest)
         if (d == null) {
-            card().addView(text("Needs two snapshots on battery at least 10 min apart. One is taken about every " +
-                "hour, and when you open this tab.", 13f, LIGHT))
+            card().addView(text(tr("Needs two snapshots on battery at least 10 min apart. One is taken about every " +
+                "hour, and when you open this tab.",
+                "Pildeyken en az 10 dk arayla iki ölçüm gerekir. Yaklaşık saatte bir ve bu sekme " +
+                "açıldığında bir ölçüm alınır."), 13f, LIGHT))
             return
         }
 
         val sum = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(px(4), 0, px(4), px(8)) }
-        sum.addView(text("Phone used ", 14f, LIGHT))
+        sum.addView(text(tr("Phone used ", "Telefon tüketimi "), 14f, LIGHT))
         sum.addView(text(Usage.format(d.dischargeMah, cap), 14f, WHITE, bold = true))
-        sum.addView(text(" · apps ${Usage.format(d.appsTotal, cap)} (estimate)", 14f, LIGHT))
+        sum.addView(text(tr(" · apps ${Usage.format(d.appsTotal, cap)} (estimate)", " · uygulamalar ${Usage.format(d.appsTotal, cap)} (tahmini)"), 14f, LIGHT))
         body.addView(sum)
 
         val list = Usage.visibleApps(d, cap)
         if (list.isEmpty()) {
-            card().addView(text("Nothing used yet in this period.", 13f, LIGHT))
+            card().addView(text(tr("Nothing used yet in this period.", "Bu dönemde henüz tüketim yok."), 13f, LIGHT))
         } else {
             val c = card()
             val top = list.first().mah
@@ -241,10 +249,11 @@ class MainActivity : Activity() {
                 val pkgs = latest.names[p.uid] ?: packageManager.getPackagesForUid(p.uid)?.toList().orEmpty()
                 val details = if (p.uid !in expanded) null else buildString {
                     val bg = (p.mah - p.screenMah).coerceAtLeast(0.0)
-                    if (p.screenMah >= 0.05) append("screen ${Usage.format(p.screenMah, cap)} · background ${Usage.format(bg, cap)}\n")
+                    if (p.screenMah >= 0.05) append(tr("screen ${Usage.format(p.screenMah, cap)} · background ${Usage.format(bg, cap)}\n",
+                        "ekran ${Usage.format(p.screenMah, cap)} · arka plan ${Usage.format(bg, cap)}\n"))
                     append("uid ${p.uid}")
                     for (k in pkgs.take(6)) append("\n").append(k)
-                    if (pkgs.size > 6) append("\n+${pkgs.size - 6} more")
+                    if (pkgs.size > 6) append(tr("\n+${pkgs.size - 6} more", "\n+${pkgs.size - 6} daha"))
                 }
                 appRow(c, icon(pkgs.firstOrNull { tracker.appLabel(it) != null }), tracker.label(p.uid, latest),
                     Usage.format(p.mah, cap), if (cap != null) Usage.formatMah(p.mah) else null,
@@ -254,21 +263,21 @@ class MainActivity : Activity() {
                 }
             }
             if (list.size > 15) {
-                body.addView(button(if (showAllApps) "Show top 15" else "Show all ${list.size}") { showAllApps = !showAllApps; render() })
+                body.addView(button(if (showAllApps) tr("Show top 15", "İlk 15'i göster") else tr("Show all ${list.size}", "Tümünü göster (${list.size})")) { showAllApps = !showAllApps; render() })
             }
         }
 
         val hw = d.hardware.filter { it.value >= 0.05 }.entries.sortedByDescending { it.value }
         if (hw.isNotEmpty()) {
-            body.addView(button(if (showComponents) "Hide components" else "By component (screen, radio…)") {
+            body.addView(button(if (showComponents) tr("Hide components", "Bileşenleri gizle") else tr("By component (screen, radio…)", "Bileşene göre (ekran, radyo…)")) {
                 showComponents = !showComponents; render()
             })
             if (showComponents) {
                 val c = card()
-                c.addView(text("Whole-phone totals; they overlap the apps.", 11f, GREY).apply { setPadding(0, 0, 0, px(4)) })
+                c.addView(text(tr("Whole-phone totals; they overlap the apps.", "Tüm telefonun toplamları; uygulamalarla örtüşür."), 11f, GREY).apply { setPadding(0, 0, 0, px(4)) })
                 for ((k, v) in hw) {
                     val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(4), 0, px(4)) }
-                    r.addView(text(HW_NAMES[k] ?: k, 14f, WHITE), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                    r.addView(text(hwNames()[k] ?: k, 14f, WHITE), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                     r.addView(text(Usage.format(v, cap), 14f, LIGHT))
                     c.addView(r)
                 }
@@ -278,18 +287,19 @@ class MainActivity : Activity() {
 
     /** No per-app snapshot at all: point to Settings, show screen time from UsageStats instead. */
     private fun noAppData(samples: List<Sample>) {
-        body.addView(text("Per-app battery data needs a one-time setup, see Settings.", 13f, ACCENT).apply {
+        body.addView(text(tr("Per-app battery data needs a one-time setup, see Settings.",
+            "Uygulama başına pil verisi tek seferlik kurulum ister, Ayarlar'a bakın."), 13f, ACCENT).apply {
             setPadding(px(4), px(12), 0, 0)
         })
         val i = Drain.lastUnplugIndex(samples)
         val since = if (i in samples.indices) samples[i].time else System.currentTimeMillis() - 86_400_000L
         val fg = tracker.foregroundMinutes(since)
         if (fg.isEmpty()) return
-        section("Screen time since ${Csv.time(since).substring(11, 16)}")
+        section(tr("Screen time since ", "Ekran süresi · başlangıç ") + Csv.time(since).substring(11, 16))
         val c = card()
         val top = fg.first().second
         for ((pkg, min) in fg.take(20)) {
-            appRow(c, icon(pkg), tracker.appLabel(pkg) ?: pkg, "%.0f min".format(Locale.US, min), null,
+            appRow(c, icon(pkg), tracker.appLabel(pkg) ?: pkg, tr("%.0f min", "%.0f dk").format(Locale.US, min), null,
                 min / top, false, null) {}
         }
     }
@@ -298,7 +308,7 @@ class MainActivity : Activity() {
 
     private fun historyTab() {
         val samples = tracker.samples()
-        if (samples.isEmpty()) { card().addView(text("No samples yet.", 13f, LIGHT)); return }
+        if (samples.isEmpty()) { card().addView(text(tr("No samples yet.", "Henüz ölçüm yok."), 13f, LIGHT)); return }
         val days = History.days(samples)
         val today = Csv.time(System.currentTimeMillis()).substring(0, 10)
         val yesterday = Csv.time(System.currentTimeMillis() - 86_400_000L).substring(0, 10)
@@ -310,7 +320,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 setOnClickListener { if (!toggledDays.remove(day.date)) toggledDays += day.date; render() }
             }
-            val name = when (day.date) { today -> "Today"; yesterday -> "Yesterday"; else -> dayName(day.date) }
+            val name = when (day.date) { today -> tr("Today", "Bugün"); yesterday -> tr("Yesterday", "Dün"); else -> dayName(day.date) }
             head.addView(text(name, 15f, WHITE, bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             if (day.usedPct > 0) head.addView(text("−${day.usedPct} %", 14f, LIGHT).apply { setPadding(px(10), 0, 0, 0) })
             if (day.chargedPct > 0) head.addView(text("+${day.chargedPct} %", 14f, GREEN).apply { setPadding(px(10), 0, 0, 0) })
@@ -321,8 +331,9 @@ class MainActivity : Activity() {
                 for (s in day.samples.asReversed()) c.addView(historyRow(s))
             }
         }
-        if (days.size > daysShown) body.addView(button("Older days") { daysShown += 7; render() })
-        body.addView(text("Level lost (−) and gained (+) per day. Tap a day for its readings.", 11f, GREY).apply {
+        if (days.size > daysShown) body.addView(button(tr("Older days", "Önceki günler")) { daysShown += 7; render() })
+        body.addView(text(tr("Level lost (−) and gained (+) per day. Tap a day for its readings.",
+            "Günlük kaybedilen (−) ve kazanılan (+) seviye. Ölçümler için bir güne dokunun."), 11f, GREY).apply {
             setPadding(px(4), px(4), 0, 0)
         })
     }
@@ -333,8 +344,8 @@ class MainActivity : Activity() {
         addView(text(Csv.time(s.time).substring(11, 16), 13f, LIGHT, mono = true), LinearLayout.LayoutParams(px(60), WRAP_CONTENT))
         addView(text("${s.level}%", 13f, levelColor(s.level), bold = true), LinearLayout.LayoutParams(px(52), WRAP_CONTENT))
         val (state, color) = when {
-            s.charging -> "charging · ${s.plugged.uppercase(Locale.US)}" to GREEN
-            s.screenOn -> "screen on" to GREY
+            s.charging -> tr("charging", "şarjda") + " · " + pluggedName(s.plugged) to GREEN
+            s.screenOn -> tr("screen on", "ekran açık") to GREY
             else -> "" to GREY
         }
         addView(text(state, 13f, color), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
@@ -342,35 +353,44 @@ class MainActivity : Activity() {
 
     private fun dayName(date: String): String = try {
         val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)!!
-        SimpleDateFormat("EEE d MMM", Locale.US).format(d)
+        SimpleDateFormat("EEE d MMM", PlainLang.locale).format(d)
     } catch (_: Exception) { date }
+
+    /** How the phone is plugged in, for the UI (the logs keep the raw "ac" / "usb" / ...). */
+    private fun pluggedName(p: String): String = PlainLang.upper(when (p) {
+        "wireless" -> tr("wireless", "kablosuz")
+        "dock" -> tr("dock", "yuva")
+        else -> p
+    })
 
     // ---- Settings: tracking switch, setup status, capacity, logs ----
 
     private fun settingsTab() {
-        section("Tracking")
+        section(tr("Tracking", "İzleme"))
         val on = Tracker.isTracking(this)
         val t = card()
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, px(12), 0) }
-        col.addView(text("Background tracking", 16f, WHITE, bold = true))
-        col.addView(text(if (on) "A reading every ~15 min and an app snapshot about hourly (~10 s CPU a day)."
-            else "Off: nothing runs in the background. Readings are taken only while the app is open.", 12f, GREY))
+        col.addView(text(tr("Background tracking", "Arka planda izleme"), 16f, WHITE, bold = true))
+        col.addView(text(if (on) tr("A reading every ~15 min and an app snapshot about hourly (~10 s CPU a day).",
+                "~15 dk'da bir ölçüm, yaklaşık saatte bir uygulama ölçümü (günde ~10 sn CPU).")
+            else tr("Off: nothing runs in the background. Readings are taken only while the app is open.",
+                "Kapalı: arka planda hiçbir şey çalışmaz. Ölçüm yalnızca uygulama açıkken alınır."), 12f, GREY))
         row.addView(col, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        row.addView(pill(if (on) "On" else "Off", on) {
+        row.addView(pill(if (on) tr("On", "Açık") else tr("Off", "Kapalı"), on) {
             Tracker.setTracking(this, !on); render()
         }, LinearLayout.LayoutParams(px(64), px(34)))
         t.addView(row)
 
-        section("Per-app data")
+        section(tr("Per-app data", "Uygulama başına veri"))
         val c = card()
         val err = tracker.accessError
         val latest = tracker.latest()
         val okay = err == null && latest != null
         c.addView(text(when {
-            okay -> "Working"
-            err != null -> "Not working: $err"
-            else -> "No snapshot yet"
+            okay -> tr("Working", "Çalışıyor")
+            err != null -> tr("Not working: ", "Çalışmıyor: ") + err
+            else -> tr("No snapshot yet", "Henüz ölçüm yok")
         }, 14f, if (okay) GREEN else ACCENT, bold = okay))
         tracker.lastStatus()?.let { c.addView(text(it, 12f, GREY).apply { setPadding(0, px(4), 0, 0) }) }
 
@@ -391,27 +411,38 @@ class MainActivity : Activity() {
         c.addView(checkList)
         val missing = checks.filter { !it.second }
         if (missing.isNotEmpty() || !okay) {
-            c.addView(text("Per-app use needs a one-time grant from a PC with adb (USB or wireless debugging). " +
-                "Without it, battery level and charging are still logged.", 12f, GREY).apply { setPadding(0, px(10), 0, 0) })
-            c.addView(text("Grant once from a PC:", 13f, LIGHT).apply { setPadding(0, px(10), 0, px(4)) })
+            c.addView(text(tr("Per-app use needs a one-time grant from a PC with adb (USB or wireless debugging). " +
+                "Without it, battery level and charging are still logged.",
+                "Uygulama başına kullanım için adb'li bir bilgisayardan tek seferlik izin gerekir (USB veya " +
+                "kablosuz hata ayıklama). İzin olmadan da pil seviyesi ve şarj kaydedilir."), 12f, GREY).apply { setPadding(0, px(10), 0, 0) })
+            c.addView(text(tr("Grant once from a PC:", "Bilgisayardan bir kez izin verin:"), 13f, LIGHT).apply { setPadding(0, px(10), 0, px(4)) })
             c.addView(text(missing.ifEmpty { checks }.joinToString("\n") { it.third }, 11f, LIGHT, mono = true))
         }
 
         val cap = Usage.capacity(latest?.capacityMah, tracker.samples(maxBytes = 4096).lastOrNull())
         c.addView(text(when (cap?.source) {
-            Usage.Source.BATTERYSTATS -> "Battery capacity %.0f mAh (power profile). App use is shown as %% of it."
+            Usage.Source.BATTERYSTATS -> tr("Battery capacity %.0f mAh (power profile). App use is shown as %% of it.",
+                "Pil kapasitesi %.0f mAh (güç profili). Uygulama kullanımı bunun yüzdesi olarak gösterilir.")
                 .format(Locale.US, cap.mah)
-            Usage.Source.CHARGE_COUNTER -> "Battery capacity ≈ %.0f mAh (charge counter ÷ level). App use is shown as %% of it."
+            Usage.Source.CHARGE_COUNTER -> tr("Battery capacity ≈ %.0f mAh (charge counter ÷ level). App use is shown as %% of it.",
+                "Pil kapasitesi ≈ %.0f mAh (şarj sayacı ÷ seviye). Uygulama kullanımı bunun yüzdesi olarak gösterilir.")
                 .format(Locale.US, cap.mah)
-            null -> "Battery capacity unknown; app use is shown in mAh."
+            null -> tr("Battery capacity unknown; app use is shown in mAh.",
+                "Pil kapasitesi bilinmiyor; uygulama kullanımı mAh olarak gösterilir.")
         }, 12f, GREY).apply { setPadding(0, px(10), 0, 0) })
 
-        section("Logs")
+        section(tr("Logs", "Kayıtlar"))
         card().addView(text("${tracker.logDir}\nbattery.csv · screen.csv · apps.csv · status.txt\n" +
-            "Pull with adb pull. Each log rotates to *.1.csv at 4 MB.", 12f, LIGHT))
+            tr("Pull with adb pull. Each log rotates to *.1.csv at 4 MB.",
+                "adb pull ile alın. Her kayıt 4 MB olunca *.1.csv olarak yenilenir."), 12f, LIGHT))
 
-        section("About")
-        card().addView(pill(PlainUpdate.label(this), false) { PlainUpdate.check(this) }, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)))
+        section(tr("About", "Hakkında"))
+        val about = card()
+        about.addView(pill(PlainUpdate.label(this), false) { PlainUpdate.check(this) }, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)))
+        // Language dropdown under the pill; a change recreates the activity, which reopens on this tab.
+        var lang: TextView? = null
+        lang = pill(PlainLang.label(), false) { PlainLang.choose(this, lang) }
+        about.addView(lang, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)).apply { topMargin = px(8) })
     }
 
     private fun granted(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
@@ -451,7 +482,7 @@ class MainActivity : Activity() {
     }
 
     private fun section(title: String) {
-        body.addView(text(title.uppercase(Locale.US), 12f, GREY, bold = true).apply {
+        body.addView(text(PlainLang.upper(title), 12f, GREY, bold = true).apply {
             letterSpacing = 0.08f; setPadding(px(4), px(18), 0, px(6))
         })
     }
@@ -499,7 +530,7 @@ class MainActivity : Activity() {
         row.addView(iconView(icon, name), LinearLayout.LayoutParams(px(32), px(32)))
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, 0, 0) }
         val line1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        line1.addView(text(if (mine) "$name (this app)" else name, 15f, if (mine) GREEN else WHITE).apply {
+        line1.addView(text(if (mine) tr("$name (this app)", "$name (bu uygulama)") else name, 15f, if (mine) GREEN else WHITE).apply {
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         line1.addView(text(value, 15f, WHITE, bold = true).apply { setPadding(px(8), 0, 0, 0) })
@@ -533,7 +564,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(px(10), px(10)).apply { gravity = Gravity.CENTER_VERTICAL; marginEnd = px(5) })
             addView(text(label, 11f, GREY).apply { setPadding(0, 0, px(14), 0) })
         }
-        item(WHITE, "level"); item(GREEN, "on power"); item(ACCENT, "screen on")
+        item(WHITE, tr("level", "seviye")); item(GREEN, tr("on power", "şarjda")); item(ACCENT, tr("screen on", "ekran açık"))
     }
 
     private fun levelColor(level: Int) = when { level <= 15 -> RED; level <= 30 -> ACCENT; else -> WHITE }
@@ -543,7 +574,8 @@ class MainActivity : Activity() {
         const val TAB_APPS = 1
         const val TAB_HISTORY = 2
         const val TAB_SETTINGS = 3
-        val TAB_NAMES = listOf("Now", "Apps", "History", "Settings")
+        /** A getter, so the names follow the language chosen after the class was loaded. */
+        val TAB_NAMES get() = listOf(tr("Now", "Şimdi"), tr("Apps", "Uygulama"), tr("History", "Geçmiş"), tr("Settings", "Ayarlar"))
         const val PERIOD_RECENT = 0
 
         // OLED palette: black everywhere, 1dp outlines, three text greys, one amber accent.
@@ -555,11 +587,14 @@ class MainActivity : Activity() {
         const val RED = 0xFFE65C5C.toInt()
         const val ACCENT = 0xFFE6B422.toInt()
         const val EDGE = 0xFF333333.toInt()
-        val HW_NAMES = mapOf(
-            "cell" to "Mobile radio", "scrn" to "Screen", "idle" to "Idle / sleep", "blue" to "Bluetooth",
-            "ambi" to "Always-on display", "gnss" to "GPS", "cpu" to "CPU", "wifi" to "Wi-Fi",
-            "audio" to "Audio", "video" to "Video", "camera" to "Camera", "sensors" to "Sensors",
-            "other" to "Other", "flashlight" to "Flashlight", "memory" to "Memory", "phone" to "Calls",
+        /** Display names of the batterystats hardware keys (the keys stay as logged). */
+        fun hwNames() = mapOf(
+            "cell" to tr("Mobile radio", "Mobil radyo"), "scrn" to tr("Screen", "Ekran"),
+            "idle" to tr("Idle / sleep", "Boşta / uyku"), "blue" to "Bluetooth",
+            "ambi" to tr("Always-on display", "Her zaman açık ekran"), "gnss" to "GPS", "cpu" to tr("CPU", "İşlemci"),
+            "wifi" to "Wi-Fi", "audio" to tr("Audio", "Ses"), "video" to "Video", "camera" to tr("Camera", "Kamera"),
+            "sensors" to tr("Sensors", "Sensörler"), "other" to tr("Other", "Diğer"),
+            "flashlight" to tr("Flashlight", "Fener"), "memory" to tr("Memory", "Bellek"), "phone" to tr("Calls", "Aramalar"),
         )
     }
 }

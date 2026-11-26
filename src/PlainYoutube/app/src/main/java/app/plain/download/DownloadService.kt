@@ -18,20 +18,19 @@ import android.os.PowerManager
 import java.io.File
 import java.io.IOException
 import java.util.ArrayDeque
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 
 class App : Application() {
     override fun onCreate() {
+        PlainLang.init(this)
         super.onCreate()
         Store.init(this)
         Account.init(this)
         PlayService.channel(this)
         // once per start, off the main thread: complete private caches become public Cached/ files (migration too)
         Thread({ try { CachePublisher.publishAll(this) } catch (_: Exception) {} }, "cache-publish").start()
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(DownloadService.CHANNEL, "Downloads", NotificationManager.IMPORTANCE_LOW).apply {
-                setShowBadge(false)
-            }
-        )
+        DownloadService.channel(this)
     }
 }
 
@@ -57,6 +56,15 @@ class DownloadService : Service() {
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_RUN))
         }
+
+        /** Creates the channel, or renames it after a language change. */
+        fun channel(c: Context) {
+            c.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL, tr("Downloads", "İndirmeler"), NotificationManager.IMPORTANCE_LOW).apply {
+                    setShowBadge(false)
+                }
+            )
+        }
     }
 
     /** Everything the saver needs from a finished download. */
@@ -74,6 +82,11 @@ class DownloadService : Service() {
     @Volatile private var lastDoneTitle = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        PlainLang.init(this)
+        super.onCreate()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Store.init(this)
@@ -105,7 +118,7 @@ class DownloadService : Service() {
                 if (!Sched.canStart(running, next, Store.parallelAudio)) break
                 if (!spaceForNext(next, running, all)) {
                     if (downloads.isEmpty() && saver == null) {
-                        Store.update(next.id) { it.state = State.FAILED; it.error = "Not enough free storage" }
+                        Store.update(next.id) { it.state = State.FAILED; it.error = tr("Not enough free storage", "Yeterli boş alan yok") }
                         continue
                     }
                     break
@@ -168,7 +181,7 @@ class DownloadService : Service() {
 
     /** Android 15+: dataSync services get ~6 h per day. Pause everything; the user can tap Retry later. */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        for (j in Store.snapshot()) if (j.active) Store.update(j.id) { it.state = State.FAILED; it.error = "Stopped by Android (time limit). Tap Retry." }
+        for (j in Store.snapshot()) if (j.active) Store.update(j.id) { it.state = State.FAILED; it.error = tr("Stopped by Android (time limit). Tap Retry.", "Android durdurdu (süre sınırı). Yeniden dene'ye dokunun.") }
         stopNow()
     }
 
@@ -176,7 +189,7 @@ class DownloadService : Service() {
         running = false
         // Process stays alive only if the workers still run; make them notice.
         val ids = synchronized(lock) { downloads.toList() } + listOf(savingId)
-        for (id in ids) if (id >= 0) Store.update(id) { if (it.state == State.RUNNING) { it.state = State.FAILED; it.error = "Interrupted" } }
+        for (id in ids) if (id >= 0) Store.update(id) { if (it.state == State.RUNNING) { it.state = State.FAILED; it.error = tr("Interrupted", "Yarıda kesildi") } }
         super.onDestroy()
     }
 
@@ -215,8 +228,8 @@ class DownloadService : Service() {
                 } catch (e: Expired) {
                     // 403 from googlevideo: this client's URLs are refused (or expired). Ask another client.
                     skip += info.client
-                    if (info.members && ++membersTries > 1) throw IOException("YouTube refused the members-only streams (HTTP 403)")
-                    if (skip.size >= Clients.ORDER.size) throw IOException("YouTube refused the streams (HTTP 403) for every client")
+                    if (info.members && ++membersTries > 1) throw IOException(tr("YouTube refused the members-only streams (HTTP 403)", "YouTube üyelere özel akışları reddetti (HTTP 403)"))
+                    if (skip.size >= Clients.ORDER.size) throw IOException(tr("YouTube refused the streams (HTTP 403) for every client", "YouTube akışları her istemci için reddetti (HTTP 403)"))
                 }
             }
         } catch (e: Exception) {
@@ -232,13 +245,13 @@ class DownloadService : Service() {
         finishedBad++
         val msg = when (e) {
             is YtError, is NoWifi -> e.message
-            is java.net.UnknownHostException -> "No internet connection"
-            is java.net.SocketTimeoutException -> "Network timed out"
+            is java.net.UnknownHostException -> tr("No internet connection", "İnternet bağlantısı yok")
+            is java.net.SocketTimeoutException -> tr("Network timed out", "Ağ zaman aşımına uğradı")
             else -> e.message ?: e.javaClass.simpleName
         }
         Store.update(id) { it.state = State.FAILED; it.error = msg; it.phase = Phase.DOWNLOAD }
         // Wi-Fi gone: don't walk a long (bulk) queue failing one job after another; pause it all at once.
-        if (e is NoWifi) Store.failQueued(e.message ?: "Not on Wi-Fi")
+        if (e is NoWifi) Store.failQueued(e.message ?: tr("Not on Wi-Fi", "Wi-Fi bağlı değil"))
     }
 
     /** Download the streams into parts; returns the work for the saver. */
@@ -248,13 +261,13 @@ class DownloadService : Service() {
         var outFmt = job.audioFmt
         val plan: Plan = when (job.kind) {
             Kind.AUDIO -> {
-                val (p, f) = Pick.planAudio(info.formats, job.audioFmt, job.audioQ) ?: throw YtError("No audio stream offered", true)
+                val (p, f) = Pick.planAudio(info.formats, job.audioFmt, job.audioQ) ?: throw YtError(tr("No audio stream offered", "Ses akışı sunulmuyor"), true)
                 outFmt = f
                 p
             }
             Kind.VIDEO -> Pick.planVideo(info.formats, job.height, job.codec)
                 ?: Pick.closest(Pick.videoChoices(info.formats, Build.VERSION.SDK_INT), job.height)?.let { Pick.planVideo(info.formats, it.p, it.codec) }
-                ?: throw YtError("No MP4-compatible video stream offered", true)
+                ?: throw YtError(tr("No MP4-compatible video stream offered", "MP4 uyumlu video akışı sunulmuyor"), true)
         }
         if (outFmt != job.audioFmt) Store.update(id) { it.audioFmt = outFmt }
 
@@ -339,7 +352,7 @@ class DownloadService : Service() {
             lastDoneTitle = shown
         } catch (e: Exception) {
             uri?.let { Saver.discard(cr, it) }
-            failed(id, if (e is Cancelled) e else IOException("Saving failed: ${e.message ?: e.javaClass.simpleName}", e))
+            failed(id, if (e is Cancelled) e else IOException(tr("Saving failed: ", "Kaydetme başarısız: ") + (e.message ?: e.javaClass.simpleName), e))
         } finally {
             tmp.delete()
             savingId = -1
@@ -382,11 +395,11 @@ class DownloadService : Service() {
         } finally { src.close() }
         if (Store.isCancelled(id)) throw Cancelled()
         val m = src.meta
-        if (!m.complete) throw IOException("Caching stopped at ${(m.fraction * 100).toInt()}%")
+        if (!m.complete) throw IOException(tr("Caching stopped at ${(m.fraction * 100).toInt()}%", "Önbelleğe alma %${(m.fraction * 100).toInt()} noktasında durdu"))
         val started = System.currentTimeMillis()
         Store.update(id) { it.done = it.total; it.error = null; it.phase = Phase.COPY }
         notifyProgress(id, force = true)
-        if (!CachePublisher.publish(this, m)) throw IOException("Couldn't write the cached file")
+        if (!CachePublisher.publish(this, m)) throw IOException(tr("Couldn't write the cached file", "Önbellek dosyası yazılamadı"))
         Store.update(id) {
             it.state = State.DONE; it.uri = m.publicUri; it.fileName = m.fileName; it.relPath = m.relPath; it.finished = System.currentTimeMillis()
             it.saveMs = System.currentTimeMillis() - started; it.savedConverted = !(m.kind == CacheKind.MUSIC && m.ext == "m4a" && Store.originalAudio)
@@ -399,16 +412,16 @@ class DownloadService : Service() {
      * copy in app storage → back through the "rwt" descriptor). Files that aren't ours fail as "skipped".
      */
     private fun runArtJob(id: Long, job: Job) {
-        val uri = android.net.Uri.parse(job.uri ?: throw IOException("No file"))
+        val uri = android.net.Uri.parse(job.uri ?: throw IOException(tr("No file", "Dosya yok")))
         val started = System.currentTimeMillis()
         val jpeg = Art.fetch(this, job.videoId, null, Store.artQuality.takeIf { it != ArtQuality.NONE } ?: ArtQuality.LOW, 20_000)
-            ?: throw IOException("Couldn't get the cover art")
+            ?: throw IOException(tr("Couldn't get the cover art", "Kapak resmi alınamadı"))
         Store.update(id, persist = false) { it.phase = Phase.COPY; it.savePct = 50 }
         notifyProgress(id, force = true)
         try {
             Art.backfill(this, uri, job.fileName, TagSet(job.title, Naming.channel(job.channel), job.album, jpeg), Store.partsDir) { Store.isCancelled(id) }
         } catch (e: SecurityException) {
-            throw IOException("Skipped: the file isn't Plain Youtube's (e.g. after a reinstall)")
+            throw IOException(tr("Skipped: the file isn't Plain Youtube's (e.g. after a reinstall)", "Atlandı: dosya Plain Youtube'a ait değil (ör. yeniden yüklemeden sonra)"))
         }
         Store.update(id) { it.state = State.DONE; it.finished = System.currentTimeMillis(); it.saveMs = it.finished - started; it.savedConverted = false; it.phase = Phase.DOWNLOAD }
     }
@@ -458,11 +471,11 @@ class DownloadService : Service() {
             .setShowWhen(false)
             .setContentIntent(openApp())
             .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-        if (j == null) return b.setContentTitle("Starting download…").setProgress(0, 0, true).build()
+        if (j == null) return b.setContentTitle(tr("Starting download…", "İndirme başlatılıyor…")).setProgress(0, 0, true).build()
         if (j.batch != 0L) {
             // bulk action: the batch's progress ("37/120 · 3 downloading · 1 converting") with the current track
             val st = BatchStats.of(all.filter { it.batch == j.batch })
-            b.setContentTitle(j.batchTitle.ifBlank { "Bulk download" })
+            b.setContentTitle(j.batchTitle.ifBlank { tr("Bulk download", "Toplu indirme") })
             b.setContentText(st.text + " · " + j.title)
             b.setProgress(st.total.coerceAtLeast(1), st.done, false)
             if (summary.isNotEmpty()) b.setSubText(summary)
@@ -470,10 +483,10 @@ class DownloadService : Service() {
                 this, (j.batch % Int.MAX_VALUE).toInt(), Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra("batch", j.batch),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-            b.addAction(Notification.Action.Builder(null, "Cancel all", cancelAll).build())
+            b.addAction(Notification.Action.Builder(null, tr("Cancel all", "Tümünü iptal et"), cancelAll).build())
             return b.build()
         }
-        b.setContentTitle(j.title.ifBlank { "Downloading" })
+        b.setContentTitle(j.title.ifBlank { tr("Downloading", "İndiriliyor") })
         b.setContentText(Pipeline.status(j))
         if (summary.isNotEmpty()) b.setSubText(summary)
         val pct = when {
@@ -486,16 +499,16 @@ class DownloadService : Service() {
             this, j.id.toInt(), Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra("id", j.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        b.addAction(Notification.Action.Builder(null, "Cancel", cancel).build())
+        b.addAction(Notification.Action.Builder(null, tr("Cancel", "İptal"), cancel).build())
         return b.build()
     }
 
     private fun summaryNotif() {
         val title = when {
-            finishedBad == 0 && finishedOk == 1 -> "Downloaded: $lastDoneTitle"
-            finishedBad == 0 -> "$finishedOk downloads finished"
-            finishedOk == 0 -> if (finishedBad == 1) "Download failed" else "$finishedBad downloads failed"
-            else -> "$finishedOk finished, $finishedBad failed"
+            finishedBad == 0 && finishedOk == 1 -> tr("Downloaded: $lastDoneTitle", "İndirildi: $lastDoneTitle")
+            finishedBad == 0 -> tr("$finishedOk downloads finished", "$finishedOk indirme tamamlandı")
+            finishedOk == 0 -> if (finishedBad == 1) tr("Download failed", "İndirme başarısız") else tr("$finishedBad downloads failed", "$finishedBad indirme başarısız")
+            else -> tr("$finishedOk finished, $finishedBad failed", "$finishedOk tamamlandı, $finishedBad başarısız")
         }
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notif)

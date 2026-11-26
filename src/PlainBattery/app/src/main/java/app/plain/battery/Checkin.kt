@@ -1,5 +1,7 @@
 package app.plain.battery
 
+import app.plain.lang.tr
+
 /**
  * Parsing of `dumpsys batterystats --checkin` (checkin format version 9, Android 12+).
  *
@@ -160,40 +162,45 @@ object Checkin {
 
 /** Human names for system / virtual uids that have no app label. */
 object UidNames {
+    /** English to Turkish; the English name is what apps.csv logs. */
     private val fixed = mapOf(
-        -5 to "Tethering / hotspot traffic",
-        -4 to "Removed apps",
-        0 to "Kernel / root processes",
-        1000 to "Android system",
-        1001 to "Phone / radio",
-        1002 to "Bluetooth",
-        1010 to "Wi-Fi",
-        1013 to "Media server",
-        1019 to "DRM server",
-        1021 to "GPS",
-        1027 to "NFC",
-        1036 to "Log daemon",
-        1041 to "Audio server",
-        1046 to "Media codecs",
-        1047 to "Camera server",
-        1066 to "statsd",
-        1073 to "Network stack",
-        2000 to "ADB shell",
-        9999 to "nobody",
+        -5 to ("Tethering / hotspot traffic" to "Paylaşım / hotspot trafiği"),
+        -4 to ("Removed apps" to "Kaldırılan uygulamalar"),
+        0 to ("Kernel / root processes" to "Çekirdek / root işlemleri"),
+        1000 to ("Android system" to "Android sistemi"),
+        1001 to ("Phone / radio" to "Telefon / radyo"),
+        1002 to ("Bluetooth" to "Bluetooth"),
+        1010 to ("Wi-Fi" to "Wi-Fi"),
+        1013 to ("Media server" to "Medya sunucusu"),
+        1019 to ("DRM server" to "DRM sunucusu"),
+        1021 to ("GPS" to "GPS"),
+        1027 to ("NFC" to "NFC"),
+        1036 to ("Log daemon" to "Kayıt hizmeti"),
+        1041 to ("Audio server" to "Ses sunucusu"),
+        1046 to ("Media codecs" to "Medya kodekleri"),
+        1047 to ("Camera server" to "Kamera sunucusu"),
+        1066 to ("statsd" to "statsd"),
+        1073 to ("Network stack" to "Ağ yığını"),
+        2000 to ("ADB shell" to "ADB kabuğu"),
+        9999 to ("nobody" to "nobody"),
     )
+
+    /** For logs: always the English text. */
+    val english: (String, String) -> String = { en, _ -> en }
 
     /**
      * @param packages packages that share this uid (from the checkin table)
      * @param appLabel looks up a user-visible label for a package, or null when not installed
+     * @param t picks the English or Turkish text: [tr] (the UI language) by default, [english] for logs
      */
-    fun label(uid: Int, packages: List<String>, appLabel: (String) -> String?): String {
-        fixed[uid]?.let { return it }
-        if (uid < 10000) return if (packages.isEmpty()) "System uid $uid" else
-            "System: " + packages.first() + if (packages.size > 1) " +${packages.size - 1}" else ""
-        if (packages.isEmpty()) return "Uninstalled app (uid $uid)"
+    fun label(uid: Int, packages: List<String>, appLabel: (String) -> String?, t: (String, String) -> String = ::tr): String {
+        fixed[uid]?.let { return t(it.first, it.second) }
+        if (uid < 10000) return if (packages.isEmpty()) t("System uid $uid", "Sistem uid $uid") else
+            t("System: ", "Sistem: ") + packages.first() + if (packages.size > 1) " +${packages.size - 1}" else ""
+        if (packages.isEmpty()) return t("Uninstalled app (uid $uid)", "Kaldırılmış uygulama (uid $uid)")
         for (p in packages) appLabel(p)?.let { l ->
             return if (packages.size > 1) "$l +${packages.size - 1}" else l
         }
-        return packages.first() + " (uninstalled)"
+        return packages.first() + t(" (uninstalled)", " (kaldırıldı)")
     }
 }

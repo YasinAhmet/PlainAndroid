@@ -6,6 +6,7 @@ import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import app.plain.lang.tr
 
 /*
  * 2.0 account support: pure logic only (no Android). Nothing here logs, prints or puts a cookie value in an
@@ -399,7 +400,7 @@ object Unsub {
             }
         }
         walk(o, 0)
-        return if (subscribed == true) "YouTube still shows the subscription" else null
+        return if (subscribed == true) tr("YouTube still shows the subscription", "YouTube aboneliği hâlâ gösteriyor") else null
     }
 }
 
@@ -413,7 +414,7 @@ class SyncPlan(val add: List<AccountParse.Sub>, val already: Int, val gone: List
         }
     }
 
-    fun summary() = "Added ${add.size}, already followed $already"
+    fun summary() = tr("Added ${add.size}, already followed $already", "Eklendi: ${add.size}, zaten takip edilen: $already")
 }
 
 /**
@@ -528,7 +529,7 @@ object TvPlayer {
     /** Solver output -> (sig map, n map). Throws on an error answer. */
     fun solverOutput(json: String, c: Challenges): Pair<Map<String, String>, Map<String, String>> {
         val o = JSONObject(json)
-        if (o.optString("type") != "result") throw YtError("Signature solver failed: " + o.optString("error").take(200), false)
+        if (o.optString("type") != "result") throw YtError(tr("Signature solver failed: ", "İmza çözücü başarısız: ") + o.optString("error").take(200), false)
         val rs = o.getJSONArray("responses")
         val types = ArrayList<String>()
         if (c.sig.isNotEmpty()) types += "sig"

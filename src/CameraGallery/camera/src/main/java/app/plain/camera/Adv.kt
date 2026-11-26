@@ -1,5 +1,6 @@
 package app.plain.camera
 
+import app.plain.lang.tr
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ln
@@ -117,7 +118,7 @@ data class Adv(
             SHUTTER.filter { it in lo..hi && (!video || it <= FRAME_30) }
 
         fun shutterLabel(ns: Long): String = when {
-            ns <= 0 -> "Auto"
+            ns <= 0 -> tr("Auto", "Otomatik")
             ns >= 1_000_000_000L -> "${(ns / 1e9).roundToInt()}\""
             else -> "1/${(1e9 / ns).roundToInt()}"
         }
@@ -147,11 +148,12 @@ data class Adv(
 
         // ------------------------------------------------------------ white balance
         /** (label, CONTROL_AWB_MODE) in menu order. */
-        val WB = listOf(
-            "Auto" to 1, "Daylight" to 5, "Cloudy" to 6, "Shade" to 8, "Tungsten" to 2,
-            "Fluorescent" to 3, "Warm fluor." to 4, "Twilight" to 7,
+        val WB get() = listOf(
+            tr("Auto", "Otomatik") to 1, tr("Daylight", "Gün ışığı") to 5, tr("Cloudy", "Bulutlu") to 6, tr("Shade", "Gölge") to 8,
+            tr("Tungsten", "Tungsten") to 2, tr("Fluorescent", "Floresan") to 3, tr("Warm fluor.", "Sıcak flor.") to 4,
+            tr("Twilight", "Alacakaranlık") to 7,
         )
-        fun wbLabel(a: Adv) = if (a.wb == WB_KELVIN) "${a.kelvin}K" else WB.firstOrNull { it.second == a.wb }?.first ?: "Auto"
+        fun wbLabel(a: Adv) = if (a.wb == WB_KELVIN) "${a.kelvin}K" else WB.firstOrNull { it.second == a.wb }?.first ?: tr("Auto", "Otomatik")
 
         /** Approximate colour of a black body at [k] kelvin, 0…255 per channel (Tanner Helland's fit). */
         fun blackBody(k: Int): DoubleArray {
@@ -184,7 +186,7 @@ data class Adv(
 
         // ------------------------------------------------------------ focus
         fun focusLabel(f: Float, minFocusDiopters: Float): String {
-            if (f < 0) return "Auto"
+            if (f < 0) return tr("Auto", "Otomatik")
             val dio = f * minFocusDiopters
             if (dio < 0.05f) return "∞"
             val m = 1f / dio
@@ -223,9 +225,13 @@ data class Adv(
 
         // ------------------------------------------------------------ choices
         /** (label, CONTROL_SCENE_MODE). */
-        val SCENES = listOf("Auto" to 0, "Night" to 5, "Sunset" to 10, "Landscape" to 4, "HDR" to 18, "Sports" to 13, "Portrait" to 3)
-        val LEVELS = listOf("Auto", "Off", "Low", "High")
-        val GRIDS = listOf("Off", "Thirds", "Golden", "Centre", "Diagonals")
+        // labels are getters, so they follow the app language (PlainLang)
+        val SCENES get() = listOf(
+            tr("Auto", "Otomatik") to 0, tr("Night", "Gece") to 5, tr("Sunset", "Gün batımı") to 10, tr("Landscape", "Manzara") to 4,
+            "HDR" to 18, tr("Sports", "Spor") to 13, tr("Portrait", "Portre") to 3,
+        )
+        val LEVELS get() = listOf(tr("Auto", "Otomatik"), tr("Off", "Kapalı"), tr("Low", "Düşük"), tr("High", "Yüksek"))
+        val GRIDS get() = listOf(tr("Off", "Kapalı"), tr("Thirds", "Üçte bir"), tr("Golden", "Altın oran"), tr("Centre", "Merkez"), tr("Diagonals", "Çaprazlar"))
         val JPEG = listOf(85, 90, 95, 100)
     }
 }
@@ -278,14 +284,14 @@ data class Look(val sat: Int = 0, val warmth: Int = 0, val tint: Int = 0, val vi
     private fun clamp(v: Float): Int = if (v <= 0f) 0 else if (v >= 255f) 255 else (v + 0.5f).toInt()
 
     companion object {
-        val PRESETS = listOf(
-            "Natural" to Look(),
-            "Vivid" to Look(sat = 25, vibrance = 30),
-            "Muted" to Look(sat = -35),
-            "B&W" to Look(sat = -100),
-            "Warm" to Look(sat = 10, warmth = 40),
+        val PRESETS get() = listOf(
+            tr("Natural", "Doğal") to Look(),
+            tr("Vivid", "Canlı") to Look(sat = 25, vibrance = 30),
+            tr("Muted", "Soluk") to Look(sat = -35),
+            tr("B&W", "S&B") to Look(sat = -100),
+            tr("Warm", "Sıcak") to Look(sat = 10, warmth = 40),
         )
-        fun name(l: Look) = PRESETS.firstOrNull { it.second == l }?.first ?: "Custom"
+        fun name(l: Look) = PRESETS.firstOrNull { it.second == l }?.first ?: tr("Custom", "Özel")
     }
 }
 

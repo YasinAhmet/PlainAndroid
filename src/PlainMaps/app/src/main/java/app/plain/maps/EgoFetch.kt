@@ -1,5 +1,6 @@
 package app.plain.maps
 
+import app.plain.lang.tr
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.Executors
@@ -10,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object EgoFetch {
     fun lineCodes(net: Net.Net0): List<String> {
         val codes = Ego.lineCodes(Net.text(net.n, Ego.PAGE)).map { it.first }
-        if (codes.isEmpty()) throw IOException("EGO's timetable page lists no lines")
+        if (codes.isEmpty()) throw IOException(tr("EGO's timetable page lists no lines", "EGO saat sayfasında hat yok"))
         return codes
     }
 
@@ -43,7 +44,8 @@ object EgoFetch {
             }
             val out = fs.mapNotNull { it.get() }
             if (cancel.get()) throw InterruptedException()
-            if (failed.get() > codes.size / 2) throw IOException("ego.gov.tr did not answer for most lines (${failed.get()} of ${codes.size}). Try again later.")
+            if (failed.get() > codes.size / 2) throw IOException(tr("ego.gov.tr did not answer for most lines (${failed.get()} of ${codes.size}). Try again later.",
+                "ego.gov.tr hatların çoğu için yanıt vermedi (${failed.get()} / ${codes.size}). Daha sonra yeniden deneyin."))
             return out
         } finally {
             pool.shutdownNow()

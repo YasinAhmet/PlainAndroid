@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 enum class IKind { VIDEO, SHORT, PLAYLIST, CHANNEL }
 
@@ -382,7 +383,7 @@ object Browse {
                 is JSONArray -> for (i in 0 until v.length()) walk(v.opt(i), depth + 1)
                 is JSONObject -> {
                     v.optJSONObject("channelOwnerEmptyStateRenderer")?.let { r ->
-                        msg = text(r.opt("description")).ifEmpty { "This channel has no content" }; return
+                        msg = text(r.opt("description")).ifEmpty { tr("This channel has no content", "Bu kanalda içerik yok") }; return
                     }
                     val keys = v.keys()
                     while (keys.hasNext()) walk(v.opt(keys.next()), depth + 1)
@@ -422,7 +423,7 @@ object Browse {
         for (i in 0 until a.length()) {
             val al = a.optJSONObject(i) ?: continue
             val r = al.optJSONObject("alertRenderer") ?: al.optJSONObject("alertWithButtonRenderer") ?: continue
-            if (r.optString("type") == "ERROR") return text(r.opt("text")).ifEmpty { "Unavailable" }
+            if (r.optString("type") == "ERROR") return text(r.opt("text")).ifEmpty { tr("Unavailable", "Kullanılamıyor") }
         }
         return null
     }

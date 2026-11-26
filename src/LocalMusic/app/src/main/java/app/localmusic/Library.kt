@@ -28,6 +28,9 @@ object Library {
     val VIDEO_PERMISSION: String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_EXTERNAL_STORAGE
 
+    /** Rebuild the index from the same songs (no MediaStore query): labels it bakes in follow a language change. */
+    fun relabel() { index = LibraryIndex(index.songs) }
+
     fun hasPermission(ctx: Context) = ctx.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED
     fun hasVideoPermission(ctx: Context) = ctx.checkSelfPermission(VIDEO_PERMISSION) == PackageManager.PERMISSION_GRANTED
 

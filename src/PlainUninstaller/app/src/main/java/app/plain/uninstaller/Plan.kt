@@ -1,5 +1,7 @@
 package app.plain.uninstaller
 
+import app.plain.lang.tr
+
 /** One selected app, as the uninstall plan sees it. */
 data class Target(val pkg: String, val label: String, val system: Boolean, val risky: Boolean)
 
@@ -19,7 +21,7 @@ object Plan {
 
     /** Text for the confirm dialog: one line per app, flagged when it's a system app or risky. */
     fun describe(targets: List<Target>): String = targets.joinToString("\n") { t ->
-        val tags = listOfNotNull(if (t.system) "system" else null, if (t.risky) "RISKY" else null)
+        val tags = listOfNotNull(if (t.system) tr("system", "sistem") else null, if (t.risky) tr("RISKY", "RİSKLİ") else null)
         "• ${t.label}" + (if (tags.isEmpty()) "" else "  [${tags.joinToString(", ")}]") + "\n   ${t.pkg}"
     }
 }

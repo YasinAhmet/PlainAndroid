@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 /*
  * 2.2 Search and Feed filters. Pure (unit-tested).
@@ -14,9 +15,19 @@ import org.json.JSONObject
  * Client side: Newest, Hide Shorts, Hide live, Members-only only, Music only ("- Topic" channels), Hide downloaded.
  */
 
-enum class SDate(val label: String, val v: Int) { ANY("Any time", 0), TODAY("Today", 2), WEEK("This week", 3), MONTH("This month", 4), YEAR("This year", 5) }
-enum class SDur(val label: String, val v: Int) { ANY("Any length", 0), SHORT("Under 4 min", 1), MEDIUM("4–20 min", 3), LONG("Over 20 min", 2) }
-enum class SSort(val label: String, val v: Int) { RELEVANCE("Relevance", 0), NEWEST("Upload date", 0), POPULAR("View count", 3) }
+// labels are getters (tr at display time), so a language change needs no restart
+enum class SDate(private val en: String, private val trk: String, val v: Int) {
+    ANY("Any time", "Her zaman", 0), TODAY("Today", "Bugün", 2), WEEK("This week", "Bu hafta", 3), MONTH("This month", "Bu ay", 4), YEAR("This year", "Bu yıl", 5);
+    val label: String get() = tr(en, trk)
+}
+enum class SDur(private val en: String, private val trk: String, val v: Int) {
+    ANY("Any length", "Her süre", 0), SHORT("Under 4 min", "4 dk'dan kısa", 1), MEDIUM("4–20 min", "4–20 dk", 3), LONG("Over 20 min", "20 dk'dan uzun", 2);
+    val label: String get() = tr(en, trk)
+}
+enum class SSort(private val en: String, private val trk: String, val v: Int) {
+    RELEVANCE("Relevance", "Alaka düzeyi", 0), NEWEST("Upload date", "Yükleme tarihi", 0), POPULAR("View count", "İzlenme sayısı", 3);
+    val label: String get() = tr(en, trk)
+}
 
 /** [type]: 0 videos, 1 channels, 2 playlists (the Search tab's type chips). */
 data class SearchFilters(
@@ -114,8 +125,14 @@ object AgoParse {
     }
 }
 
-enum class FAge(val label: String, val ms: Long) { ALL("Any age", 0), DAY("24 hours", 86_400_000L), WEEK("Week", 7 * 86_400_000L), MONTH("Month", 30 * 86_400_000L) }
-enum class FSort(val label: String) { NEWEST("Newest"), CHANNEL("By channel") }
+enum class FAge(private val en: String, private val trk: String, val ms: Long) {
+    ALL("Any age", "Tüm zamanlar", 0), DAY("24 hours", "24 saat", 86_400_000L), WEEK("Week", "Hafta", 7 * 86_400_000L), MONTH("Month", "Ay", 30 * 86_400_000L);
+    val label: String get() = tr(en, trk)
+}
+enum class FSort(private val en: String, private val trk: String) {
+    NEWEST("Newest", "En yeni"), CHANNEL("By channel", "Kanala göre");
+    val label: String get() = tr(en, trk)
+}
 
 /** Feed filters, all local over the merged feed. [channels] empty = all followed channels. */
 data class FeedFilters(

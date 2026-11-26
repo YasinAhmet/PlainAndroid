@@ -7,6 +7,7 @@ import android.text.InputType
 import android.util.AtomicFile
 import android.widget.EditText
 import android.widget.FrameLayout
+import app.plain.lang.tr
 import java.io.File
 
 /** The categories, kept in the app's own private storage (a small text file). Main thread only. */
@@ -35,12 +36,12 @@ object Categories {
             isSingleLine = true
             setText(initial)
             setSelection(text.length)
-            hint = "Name"
+            hint = tr("Name", "Ad")
         }
         val box = FrameLayout(a).apply { setPadding(a.dp(22), a.dp(8), a.dp(22), 0); addView(e) }
         AlertDialog.Builder(a).setTitle(title).setView(box)
-            .setPositiveButton("OK") { _, _ -> Tags.clean(e.text.toString()).takeIf { it.isNotEmpty() }?.let(done) }
-            .setNegativeButton("Cancel", null)
+            .setPositiveButton(tr("OK", "Tamam")) { _, _ -> Tags.clean(e.text.toString()).takeIf { it.isNotEmpty() }?.let(done) }
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 
@@ -51,24 +52,24 @@ object Categories {
     fun choose(a: Activity, ids: Collection<Long>, done: () -> Unit, preChecked: String? = null) {
         val t = get(a)
         if (t.names.isEmpty()) {
-            askName(a, "New category", "") { n -> t.add(n, ids); save(a); done() }
+            askName(a, tr("New category", "Yeni kategori"), "") { n -> t.add(n, ids); save(a); done() }
             return
         }
         val names = t.names
         val states = names.map { t.state(it, ids) }
         val checked = BooleanArray(names.size) { states[it] == Tags.ALL || names[it] == preChecked }
         val touched = BooleanArray(names.size) { names[it] == preChecked }
-        val labels = names.mapIndexed { i, n -> if (states[i] == Tags.SOME) "$n  (some)" else n }.toTypedArray()
+        val labels = names.mapIndexed { i, n -> if (states[i] == Tags.SOME) n + tr("  (some)", "  (bazıları)") else n }.toTypedArray()
         val apply = { names.forEachIndexed { i, n -> t.applyChoice(n, ids, checked[i], touched[i]) }; save(a) }
         AlertDialog.Builder(a)
-            .setTitle(if (ids.size == 1) "Categories" else "Categories for ${Paging.count(ids.size)} items")
+            .setTitle(if (ids.size == 1) tr("Categories", "Kategoriler") else tr("Categories for ${Paging.count(ids.size)} items", "${Paging.count(ids.size)} öğe için kategoriler"))
             .setMultiChoiceItems(labels, checked) { _, w, on -> checked[w] = on; touched[w] = true }
-            .setPositiveButton("OK") { _, _ -> apply(); done() }
-            .setNeutralButton("New…") { _, _ ->
+            .setPositiveButton(tr("OK", "Tamam")) { _, _ -> apply(); done() }
+            .setNeutralButton(tr("New…", "Yeni…")) { _, _ ->
                 apply()
-                askName(a, "New category", "") { n -> val c = t.create(n) ?: return@askName; save(a); choose(a, ids, done, c) }
+                askName(a, tr("New category", "Yeni kategori"), "") { n -> val c = t.create(n) ?: return@askName; save(a); choose(a, ids, done, c) }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }
 }

@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 /** A local named list of videos ("Add to list…"). Its name doubles as the album folder for audio saved from it. */
 data class VList(val id: String, val name: String, val items: List<Item>)
@@ -9,7 +10,7 @@ data class VList(val id: String, val name: String, val items: List<Item>)
 /** Pure operations on the local lists (stored in files/lists.json by [Store]). */
 object VideoLists {
     fun create(all: List<VList>, name: String, now: Long): Pair<List<VList>, VList> {
-        val n = name.trim().ifEmpty { "List" }
+        val n = name.trim().ifEmpty { tr("List", "Liste") }
         val l = VList("l$now", n, emptyList())
         return (all + l) to l
     }
@@ -47,7 +48,7 @@ object VideoLists {
         (0 until a.length()).mapNotNull { i ->
             val o = a.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("id").ifEmpty { return@mapNotNull null }
-            VList(id, o.optString("name").ifEmpty { "List" }, ItemCodec.decode(o.optJSONArray("items") ?: JSONArray()))
+            VList(id, o.optString("name").ifEmpty { tr("List", "Liste") }, ItemCodec.decode(o.optJSONArray("items") ?: JSONArray()))
         }
     } catch (_: Exception) { emptyList() }
 }

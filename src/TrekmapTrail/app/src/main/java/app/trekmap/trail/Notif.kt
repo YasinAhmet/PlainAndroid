@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import app.plain.lang.tr
 
 object Notif {
     const val TRAIL = "trail"
@@ -13,12 +14,12 @@ object Notif {
     fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(TRAIL, "Trail recording", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }
+            NotificationChannel(TRAIL, tr("Trail recording", "Rota kaydı"), NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }
         )
         nm.createNotificationChannel(
-            NotificationChannel(DL, "Map downloads", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }
+            NotificationChannel(DL, tr("Map downloads", "Harita indirmeleri"), NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }
         )
-        nm.createNotificationChannel(NotificationChannel(WARN, "Trail warnings", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(WARN, tr("Trail warnings", "Rota uyarıları"), NotificationManager.IMPORTANCE_HIGH))
     }
 
     const val WARN = "warn"

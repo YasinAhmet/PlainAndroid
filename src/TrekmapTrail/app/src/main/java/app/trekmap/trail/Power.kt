@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import app.plain.lang.tr
 import kotlin.math.abs
 
 /** Battery-related helpers: airplane mode, battery-saver GPS limits, 60 Hz display. */
@@ -20,9 +21,9 @@ object Power {
         val pm = ctx.getSystemService(PowerManager::class.java)
         if (!pm.isPowerSaveMode) return null
         return when (pm.locationPowerSaveMode) {
-            1 -> "turns GPS off whenever the screen is off"          // LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF
-            2 -> "turns location off whenever the screen is off"     // LOCATION_MODE_ALL_DISABLED_WHEN_SCREEN_OFF
-            4 -> "throttles location while the screen is off"        // LOCATION_MODE_THROTTLE_REQUESTS_WHEN_SCREEN_OFF
+            1 -> tr("turns GPS off whenever the screen is off", "ekran kapanınca GPS'i kapatıyor")              // LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF
+            2 -> tr("turns location off whenever the screen is off", "ekran kapanınca konumu kapatıyor")         // LOCATION_MODE_ALL_DISABLED_WHEN_SCREEN_OFF
+            4 -> tr("throttles location while the screen is off", "ekran kapalıyken konumu kısıtlıyor")          // LOCATION_MODE_THROTTLE_REQUESTS_WHEN_SCREEN_OFF
             else -> null
         }
     }

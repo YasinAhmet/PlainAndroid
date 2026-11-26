@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileDescriptor
 import java.io.IOException
 import java.nio.ByteBuffer
+import app.plain.lang.tr
 
 /**
  * Lossless remux with the platform's MediaExtractor -> MediaMuxer (no re-encoding, no libraries):
@@ -69,7 +70,7 @@ object Mux {
             muxer = m
             for ((i, s) in srcs.withIndex()) {
                 s.muxTrack = try { m.addTrack(formats[i]) } catch (e: Exception) {
-                    throw IOException("This phone can't write ${formats[i].getString(MediaFormat.KEY_MIME)} into this container", e)
+                    throw IOException(tr("This phone can't write ${formats[i].getString(MediaFormat.KEY_MIME)} into this container", "Bu telefon ${formats[i].getString(MediaFormat.KEY_MIME)} biçimini bu kapsayıcıya yazamıyor"), e)
                 }
             }
             if (rotation != 0) m.setOrientationHint(rotation)
@@ -106,7 +107,7 @@ object Mux {
             try {
                 if (started) muxer?.stop()
             } catch (e: Exception) {
-                if (ok) throw IOException("Muxer failed: ${e.message}", e) // don't hide the first error
+                if (ok) throw IOException(tr("Muxer failed: ${e.message}", "Birleştirme başarısız: ${e.message}"), e) // don't hide the first error
             } finally {
                 try { muxer?.release() } catch (_: Exception) {}
             }

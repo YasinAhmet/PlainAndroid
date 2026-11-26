@@ -2,38 +2,50 @@ package app.trekmap.trail
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import app.plain.lang.tr
 import org.json.JSONObject
 import java.io.File
 
 /** Map layers. Same sources as the desktop Trekmap (no Google tiles: their terms forbid bulk download). */
 enum class Layer(
-    val label: String,
+    private val labelEn: String,
+    private val labelTr: String,
     private val template: String,
     private val subs: String,
     val maxZ: Int,
     val avgKb: Int,
     val threads: Int,
-    val attribution: String,
+    private val attributionEn: String,
     /** For overlay layers: the lowest zoom that has tiles. */
     val minOverlayZ: Int = 0,
 ) {
     TOPO(
-        "Topo", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "abc", 17, 40, 2,
+        "Topo", "Topo", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "abc", 17, 40, 2,
         "© OpenStreetMap contributors · © OpenTopoMap (CC-BY-SA)",
     ),
     SAT(
-        "Satellite", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?blankTile=false", "", 19, 22, 4,
+        "Satellite", "Uydu", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?blankTile=false", "", 19, 22, 4,
         "Imagery © Esri, Maxar, Earthstar Geographics",
     ),
     DEM(
-        "Elevation", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", "", 15, 90, 4,
+        "Elevation", "Yükseklik", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", "", 15, 90, 4,
         "Elevation: Mapzen terrain tiles",
     ),
     /** Private-land overlay: rendered on the phone from OSM + ESA WorldCover (see Land), never fetched as tiles. */
     LAND(
-        "Private land", "", "", 16, 0, 1,
+        "Private land", "Özel arazi", "", "", 16, 0, 1,
         "Land: © OpenStreetMap · ESA WorldCover 2021", minOverlayZ = 10,
     );
+
+    /** Name shown in the UI, in the app language. */
+    val label: String get() = tr(labelEn, labelTr)
+
+    /** Map credit line; only the "Elevation:" / "Land:" prefixes are translated. */
+    val attribution: String get() = when (this) {
+        DEM -> tr(attributionEn, "Yükseklik: Mapzen arazi karoları")
+        LAND -> tr(attributionEn, "Arazi: © OpenStreetMap · ESA WorldCover 2021")
+        else -> attributionEn
+    }
 
     fun url(z: Int, x: Int, y: Int): String {
         val s = if (subs.isEmpty()) "" else subs[(x + y) % subs.length].toString()

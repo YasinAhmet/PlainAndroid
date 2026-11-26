@@ -25,6 +25,8 @@ import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import org.json.JSONArray
 import java.net.URLEncoder
 import java.util.Locale
@@ -57,7 +59,7 @@ class PlanScreen(private val act: MainActivity) {
     private val drawBar = LinearLayout(act)
     private val drawInfo = act.text("", 14f)
     private var drawLine: MLine? = null
-    private val snapBtn: Button = act.button("Snap") { toggleSnap() }
+    private val snapBtn: Button = act.button(tr("Snap", "Oturt")) { toggleSnap() }
 
     private var preview: MapView.Overlay? = null
     private var visible = false
@@ -93,7 +95,7 @@ class PlanScreen(private val act: MainActivity) {
             setPadding(act.dp(12), act.dp(2), act.dp(3), act.dp(2))
         }
         search.apply {
-            hint = "Search a place or forest"
+            hint = tr("Search a place or forest", "Yer veya orman ara")
             setSingleLine()
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             inputType = InputType.TYPE_CLASS_TEXT
@@ -104,7 +106,7 @@ class PlanScreen(private val act: MainActivity) {
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEARCH) { doSearch(); true } else false }
         }
         bar.addView(search, lpL(0, WRAP, 1f))
-        bar.addView(act.button("Search") { doSearch() }, lpL(WRAP, act.dp(36)))
+        bar.addView(act.button(tr("Search", "Ara")) { doSearch() }, lpL(WRAP, act.dp(36)))
         topCol.addView(bar, lpL(MATCH, WRAP))
 
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -125,7 +127,7 @@ class PlanScreen(private val act: MainActivity) {
         body.visibility = View.GONE
         panel.addView(body, lpL(MATCH, (act.resources.displayMetrics.heightPixels * 0.30).toInt()))
         val segRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; setPadding(act.dp(4), act.dp(4), act.dp(4), act.dp(4)) }
-        listOf("Maps", "Plans", "Past trails").forEachIndexed { i, t ->
+        listOf(tr("Maps", "Haritalar"), tr("Plans", "Planlar"), tr("Past trails", "Geçmiş rotalar")).forEachIndexed { i, t ->
             val b = act.button(t) { showSection(if (section == i) -1 else i) }
             tabBtns.add(b)
             segRow.addView(b, lpL(0, act.dp(36), 1f).apply { marginStart = act.dp(2); marginEnd = act.dp(2) })
@@ -144,9 +146,9 @@ class PlanScreen(private val act: MainActivity) {
         drawBar.addView(drawInfo, lpL(MATCH, WRAP).apply { bottomMargin = act.dp(6) })
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(snapBtn, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
-        row.addView(act.button("Undo") { undoDraw() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
-        row.addView(act.button("Save", C.GREEN) { saveDraw() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
-        row.addView(act.button("Cancel") { endDraw() }, lpL(0, act.dp(36), 1f))
+        row.addView(act.button(tr("Undo", "Geri al")) { undoDraw() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
+        row.addView(act.button(tr("Save", "Kaydet"), C.GREEN) { saveDraw() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
+        row.addView(act.button(tr("Cancel", "İptal")) { endDraw() }, lpL(0, act.dp(36), 1f))
         drawBar.addView(row)
         drawBar.visibility = View.GONE
         view.addView(drawBar, lpF(MATCH, WRAP, Gravity.BOTTOM))
@@ -229,7 +231,7 @@ class PlanScreen(private val act: MainActivity) {
             lastWifiLogged = n != null
             Dev.event("net", "plan screen: Wi-Fi ${if (n != null) "available" else "not available"}")
         }
-        wifiLabel.text = if (n != null) "● Wi-Fi · online map" else "○ No Wi-Fi · offline maps only"
+        wifiLabel.text = if (n != null) tr("● Wi-Fi · online map", "● Wi-Fi · çevrimiçi harita") else tr("○ No Wi-Fi · offline maps only", "○ Wi-Fi yok · yalnızca çevrimdışı haritalar")
         wifiLabel.setTextColor(if (n != null) C.WIFI else C.DIM)
         provider.clearMissing()
         map.invalidate()
@@ -248,18 +250,18 @@ class PlanScreen(private val act: MainActivity) {
         val lat = Geo.lat(map.cy)
         val mpp = Geo.metersPerUnit(lat) / map.world()
         val detail = when {
-            map.drawnZ < 0 -> "no map here"
-            map.drawnZ < map.tileZ -> "z${map.drawnZ} scaled ×${1 shl (map.tileZ - map.drawnZ)} (less detail)"
-            else -> "full detail"
+            map.drawnZ < 0 -> tr("no map here", "burada harita yok")
+            map.drawnZ < map.tileZ -> tr("z${map.drawnZ} scaled ×${1 shl (map.tileZ - map.drawnZ)} (less detail)", "z${map.drawnZ} ×${1 shl (map.tileZ - map.drawnZ)} büyütülmüş (az ayrıntı)")
+            else -> tr("full detail", "tam ayrıntı")
         }
         return listOf(
-            "Map z${map.tileZ} · $detail · ${"%.1f".format(Locale.US, mpp)} m/px",
-            "Centre ${"%.5f".format(Locale.US, lat)}, ${"%.5f".format(Locale.US, Geo.lon(map.cx))}",
-            if (wifiNet != null) "Wi-Fi: online map + offline packs" else "No Wi-Fi: offline packs only",
+            tr("Map", "Harita") + " z${map.tileZ} · $detail · ${"%.1f".format(Locale.US, mpp)} m/px",
+            tr("Centre", "Merkez") + " ${"%.5f".format(Locale.US, lat)}, ${"%.5f".format(Locale.US, Geo.lon(map.cx))}",
+            if (wifiNet != null) tr("Wi-Fi: online map + offline packs", "Wi-Fi: çevrimiçi harita + çevrimdışı paketler") else tr("No Wi-Fi: offline packs only", "Wi-Fi yok: yalnızca çevrimdışı paketler"),
         )
     }
 
-    private fun layerLabel() = if (layer == Layer.TOPO) "Satellite" else "Topo"
+    private fun layerLabel() = if (layer == Layer.TOPO) tr("Satellite", "Uydu") else "Topo"
 
     private fun toggleLayer() {
         layer = if (layer == Layer.TOPO) Layer.SAT else Layer.TOPO
@@ -292,14 +294,14 @@ class PlanScreen(private val act: MainActivity) {
         val q = search.text.toString().trim()
         if (q.isEmpty()) return
         val n = wifiNet
-        if (n == null) { act.toast("Search works on Wi-Fi only (mobile data is never used)."); return }
+        if (n == null) { act.toast(tr("Search works on Wi-Fi only (mobile data is never used).", "Arama yalnızca Wi-Fi'da çalışır (mobil veri hiç kullanılmaz).")); return }
         act.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(search.windowToken, 0)
         view.requestFocus() // otherwise focus (and the keyboard) bounces back to the search box
         thread {
             val t0 = System.currentTimeMillis()
             try {
                 val url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&q=" + URLEncoder.encode(q, "UTF-8")
-                val arr = JSONArray(String(Net.get(n, url, mapOf("Accept-Language" to Locale.getDefault().toLanguageTag())), Charsets.UTF_8))
+                val arr = JSONArray(String(Net.get(n, url, mapOf("Accept-Language" to PlainLang.locale.toLanguageTag())), Charsets.UTF_8))
                 val results = ArrayList<Pair<String, BBox>>()
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
@@ -310,8 +312,8 @@ class PlanScreen(private val act: MainActivity) {
                 Dev.event("search", "“$q” → ${results.size} results in ${System.currentTimeMillis() - t0} ms")
                 act.runOnUiThread {
                     if (gone()) return@runOnUiThread
-                    if (results.isEmpty()) act.toast("Nothing found for “$q”.")
-                    else act.choose("Results", results.map { (name, box) ->
+                    if (results.isEmpty()) act.toast(tr("Nothing found for “$q”.", "Sonuç yok: “$q”"))
+                    else act.choose(tr("Results", "Sonuçlar"), results.map { (name, box) ->
                         name to {
                             map.fit(box)
                         }
@@ -319,7 +321,7 @@ class PlanScreen(private val act: MainActivity) {
                 }
             } catch (e: Exception) {
                 Dev.event("search", "“$q” failed after ${System.currentTimeMillis() - t0} ms: $e")
-                act.runOnUiThread { act.toast("Search failed: ${e.message}") }
+                act.runOnUiThread { act.toast(tr("Search failed: ${e.message}", "Arama başarısız: ${e.message}")) }
             }
         }
     }
@@ -382,13 +384,14 @@ class PlanScreen(private val act: MainActivity) {
     // Maps --------------------------------------------------------------
     private fun buildMaps() {
         val box = column()
-        box.addView(act.button("⬇  Download map for a trail", C.GREEN) { pickTrailForDownload() }, lpL(MATCH, act.dp(36)))
+        box.addView(act.button(tr("⬇  Download map for a trail", "⬇  Rota için harita indir"), C.GREEN) { pickTrailForDownload() }, lpL(MATCH, act.dp(36)))
         val packs = Packs.all()
         if (packs.isEmpty()) {
-            hint(box, "No offline maps yet. Pick a planned or past trail and the map along it is downloaded (Wi-Fi only).")
+            hint(box, tr("No offline maps yet. Pick a planned or past trail and the map along it is downloaded (Wi-Fi only).",
+                "Henüz çevrimdışı harita yok. Planlanan ya da geçmiş bir rota seçin; boyunca uzanan harita indirilir (yalnızca Wi-Fi)."))
             return
         }
-        hint(box, "Tap to show · hold for options")
+        hint(box, tr("Tap to show · hold for options", "Göstermek için dokunun · seçenekler için basılı tutun"))
         addList(box, packs, { it.name }, { packLine(it) }, { map.fit(it.bbox) }, { packMenu(it) })
     }
 
@@ -397,42 +400,43 @@ class PlanScreen(private val act: MainActivity) {
         val running = Downloads.isActive(p.id)
         val st = when {
             running && p.state == "downloading" && pr != null ->
-                if (pr.waitingWifi) "Waiting for Wi-Fi" else "Downloading ${if (pr.total > 0) pr.done * 100 / pr.total else 0}%"
-            running -> "Queued (Wi-Fi only)"
-            p.state == "done" -> "Ready offline"
-            p.state == "incomplete" -> "Incomplete — hold › Resume"
-            else -> "Paused — hold › Resume"
+                if (pr.waitingWifi) tr("Waiting for Wi-Fi", "Wi-Fi bekleniyor") else (if (pr.total > 0) pr.done * 100 / pr.total else 0).let { pct -> tr("Downloading $pct%", "İndiriliyor %$pct") }
+            running -> tr("Queued (Wi-Fi only)", "Sırada (yalnızca Wi-Fi)")
+            p.state == "done" -> tr("Ready offline", "Çevrimdışı hazır")
+            p.state == "incomplete" -> tr("Incomplete — hold › Resume", "Eksik — basılı tutun › Sürdür")
+            else -> tr("Paused — hold › Resume", "Duraklatıldı — basılı tutun › Sürdür")
         }
         return "$st · ${Fmt.mb(Packs.sizeBytes(p))} · z${p.minZ}–${p.maxZ} · ${p.layers.joinToString(" + ") { it.label }}" +
-            (if (p.corridorM > 0) " · ±${Fmt.dist(p.corridorM)} of trail" else "") +
-            (if (Layer.SAT in p.layers && p.satMs > 0) " · imagery ${Season.month(p.satMs)}" else "") +
-            when (p.land) { 2 -> " · private land ✓"; 1 -> " · private land pending"; else -> "" }
+            (if (p.corridorM > 0) tr(" · ±${Fmt.dist(p.corridorM)} of trail", " · rotanın ±${Fmt.dist(p.corridorM)} çevresi") else "") +
+            (if (Layer.SAT in p.layers && p.satMs > 0) " · " + tr("imagery", "görüntü") + " ${Season.month(p.satMs)}" else "") +
+            when (p.land) { 2 -> tr(" · private land ✓", " · özel arazi ✓"); 1 -> tr(" · private land pending", " · özel arazi bekliyor"); else -> "" }
     }
 
     private fun packMenu(p: Pack) {
         val running = Downloads.isActive(p.id)
         val items = ArrayList<Pair<String, () -> Unit>>()
-        if (running) items += "Pause download" to { Downloads.pause(p.id); act.toast("Pausing…") }
-        else if (p.state != "done") items += "Resume download (Wi-Fi only)" to {
+        if (running) items += tr("Pause download", "İndirmeyi duraklat") to { Downloads.pause(p.id); act.toast(tr("Pausing…", "Duraklatılıyor…")) }
+        else if (p.state != "done") items += tr("Resume download (Wi-Fi only)", "İndirmeyi sürdür (yalnızca Wi-Fi)") to {
             Downloads.start(act, p.id)
-            if (wifiNet == null) act.toast("Queued — it continues when Wi-Fi is connected.")
+            if (wifiNet == null) act.toast(tr("Queued — it continues when Wi-Fi is connected.", "Sırada — Wi-Fi bağlanınca devam eder."))
         }
-        items += "Show on map" to { map.fit(p.bbox) }
-        if (!running && p.land != 2) items += (if (p.land == 1) "Build private-land layer (Wi-Fi)" else "Add private-land layer (Wi-Fi)") to {
+        items += tr("Show on map", "Haritada göster") to { map.fit(p.bbox) }
+        if (!running && p.land != 2) items += (if (p.land == 1) tr("Build private-land layer (Wi-Fi)", "Özel arazi katmanını oluştur (Wi-Fi)") else tr("Add private-land layer (Wi-Fi)", "Özel arazi katmanı ekle (Wi-Fi)")) to {
             p.land = 1
             Packs.saveMeta(p)
             Downloads.start(act, p.id)
-            act.toast(if (wifiNet == null) "Queued — it's built when Wi-Fi is connected." else "Building the private-land layer…")
+            act.toast(if (wifiNet == null) tr("Queued — it's built when Wi-Fi is connected.", "Sırada — Wi-Fi bağlanınca oluşturulur.") else tr("Building the private-land layer…", "Özel arazi katmanı oluşturuluyor…"))
         }
-        if (!running && p.land == 2) items += "Rebuild private-land layer (Wi-Fi)" to {
+        if (!running && p.land == 2) items += tr("Rebuild private-land layer (Wi-Fi)", "Özel arazi katmanını yeniden oluştur (Wi-Fi)") to {
             p.land = 1
             Packs.saveMeta(p)
             Downloads.start(act, p.id)
         }
-        items += "Rename" to { act.askText("Rename map", p.name) { Packs.rename(p, it); showSection(0) } }
-        items += "Delete" to {
-            if (Downloads.isActive(p.id)) act.toast("Pause the download first, then delete.")
-            else act.confirm("Delete “${p.name}”?", "Frees ${Fmt.mb(Packs.sizeBytes(p))}. This can't be undone.", "Delete") {
+        items += tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename map", "Haritayı yeniden adlandır"), p.name) { Packs.rename(p, it); showSection(0) } }
+        items += tr("Delete", "Sil") to {
+            if (Downloads.isActive(p.id)) act.toast(tr("Pause the download first, then delete.", "Önce indirmeyi duraklatın, sonra silin."))
+            else act.confirm(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"),
+                tr("Frees ${Fmt.mb(Packs.sizeBytes(p))}. This can't be undone.", "${Fmt.mb(Packs.sizeBytes(p))} yer açılır. Geri alınamaz."), tr("Delete", "Sil")) {
                 Packs.delete(p)
                 provider.clearAll()
                 refreshOverlays()
@@ -446,15 +450,16 @@ class PlanScreen(private val act: MainActivity) {
     private fun buildPlans() {
         val box = column()
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(act.button("Import GPX / KML") { act.pickFile() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
-        row.addView(act.button("Draw on map") { startDraw() }, lpL(0, act.dp(36), 1f))
+        row.addView(act.button(tr("Import GPX / KML", "GPX / KML içe aktar")) { act.pickFile() }, lpL(0, act.dp(36), 1f).apply { marginEnd = act.dp(6) })
+        row.addView(act.button(tr("Draw on map", "Haritada çiz")) { startDraw() }, lpL(0, act.dp(36), 1f))
         box.addView(row, lpL(MATCH, WRAP))
         val plans = Store.list(Kind.PLAN)
         if (plans.isEmpty()) {
-            hint(box, "No planned trails yet. Import a GPX/KML/KMZ (e.g. from Wikiloc or desktop Trekmap), or draw one on the map. You can also share a GPX file to this app.")
+            hint(box, tr("No planned trails yet. Import a GPX/KML/KMZ (e.g. from Wikiloc or desktop Trekmap), or draw one on the map. You can also share a GPX file to this app.",
+                "Henüz planlanan rota yok. GPX/KML/KMZ içe aktarın (ör. Wikiloc ya da masaüstü Trekmap) veya haritada çizin. Bir GPX dosyasını bu uygulamayla da paylaşabilirsiniz."))
             return
         }
-        hint(box, "Tap to show · hold for options")
+        hint(box, tr("Tap to show · hold for options", "Göstermek için dokunun · seçenekler için basılı tutun"))
         addList(box, plans, { it.name }, { e ->
             Fmt.dist(e.distM) + if (e.ascM >= 1) " · ↑ ${e.ascM.roundToInt()} m" else ""
         }, { showRoute(it, C.PLAN) }, { planMenu(it) })
@@ -462,11 +467,11 @@ class PlanScreen(private val act: MainActivity) {
 
     private fun planMenu(e: Entry) {
         act.choose(e.name, listOf(
-            "Download map along this trail" to { downloadFor(e) },
-            "Show on map" to { showRoute(e, C.PLAN) },
-            "Share GPX" to { act.share(e) },
-            "Rename" to { act.askText("Rename plan", e.name) { Store.rename(e, it); showSection(1) } },
-            "Delete" to { act.confirm("Delete “${e.name}”?", "This can't be undone.", "Delete") { Store.delete(e); clearPreview(); showSection(1) } },
+            tr("Download map along this trail", "Bu rota boyunca harita indir") to { downloadFor(e) },
+            tr("Show on map", "Haritada göster") to { showRoute(e, C.PLAN) },
+            tr("Share GPX", "GPX paylaş") to { act.share(e) },
+            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename plan", "Planı yeniden adlandır"), e.name) { Store.rename(e, it); showSection(1) } },
+            tr("Delete", "Sil") to { act.confirm(tr("Delete “${e.name}”?", "“${e.name}” silinsin mi?"), tr("This can't be undone.", "Bu işlem geri alınamaz."), tr("Delete", "Sil")) { Store.delete(e); clearPreview(); showSection(1) } },
         ))
     }
 
@@ -474,14 +479,14 @@ class PlanScreen(private val act: MainActivity) {
     private fun buildPast() {
         val box = column()
         if (Dev.ENABLED) {
-            box.addView(act.button("Share debug logs (development)") { shareDebug() }, lpL(MATCH, act.dp(34)))
+            box.addView(act.button(tr("Share debug logs (development)", "Hata ayıklama kayıtlarını paylaş (geliştirme)")) { shareDebug() }, lpL(MATCH, act.dp(34)))
         }
         val tracks = Store.list(Kind.TRACK)
         if (tracks.isEmpty()) {
-            hint(box, "Trails you record in the Trail tab are saved here as GPX files.")
+            hint(box, tr("Trails you record in the Trail tab are saved here as GPX files.", "Rota sekmesinde kaydettiğiniz rotalar burada GPX dosyası olarak saklanır."))
             return
         }
-        hint(box, "Tap to show · hold to share, save as file, rename…")
+        hint(box, tr("Tap to show · hold to share, save as file, rename…", "Göstermek için dokunun · paylaşmak, dosyaya kaydetmek, adlandırmak için basılı tutun…"))
         addList(box, tracks, { it.name }, { e ->
             "${Fmt.date(e.time)} · ${Fmt.dist(e.distM)} · ${Fmt.dur(e.durS)} · ↑ ${e.ascM.roundToInt()} m" +
                 Photos.count(e).let { n -> if (n > 0) " · 📷 $n" else "" }
@@ -490,46 +495,48 @@ class PlanScreen(private val act: MainActivity) {
 
     private fun pastMenu(e: Entry) {
         act.choose(e.name, listOf(
-            "Share GPX" to { act.share(e) },
-            "Share with photos (.zip)" to { exportShare(e, kmz = false) },
-            "Share for Google Earth (.kmz)" to { exportShare(e, kmz = true) },
-            "Save as file…" to { act.exportFile(e) },
-            "Download map along this trail" to { downloadFor(e) },
-            "Use as planned trail" to {
+            tr("Share GPX", "GPX paylaş") to { act.share(e) },
+            tr("Share with photos (.zip)", "Fotoğraflarla paylaş (.zip)") to { exportShare(e, kmz = false) },
+            tr("Share for Google Earth (.kmz)", "Google Earth için paylaş (.kmz)") to { exportShare(e, kmz = true) },
+            tr("Save as file…", "Dosya olarak kaydet…") to { act.exportFile(e) },
+            tr("Download map along this trail", "Bu rota boyunca harita indir") to { downloadFor(e) },
+            tr("Use as planned trail", "Planlanan rota olarak kullan") to {
                 thread {
                     val msg = try {
                         val r = Store.load(e)
-                        if (r == null) "Could not read this trail." else {
+                        if (r == null) tr("Could not read this trail.", "Bu rota okunamadı.") else {
                             Store.save(Kind.PLAN, r, e.name)
-                            "Added “${e.name}” to Plans."
+                            tr("Added “${e.name}” to Plans.", "“${e.name}” Planlar'a eklendi.")
                         }
                     } catch (ex: Exception) {
-                        "Could not add it: ${ex.message}"
+                        tr("Could not add it: ${ex.message}", "Eklenemedi: ${ex.message}")
                     }
                     act.runOnUiThread { act.toast(msg) }
                 }
             },
-            "Show on map" to { showRoute(e, C.PREVIEW) },
-            "Rename" to { act.askText("Rename trail", e.name) { Store.rename(e, it); showSection(2) } },
-            "Delete" to { act.confirm("Delete “${e.name}”?", "The GPX file is deleted. This can't be undone.", "Delete") { Store.delete(e); clearPreview(); showSection(2) } },
+            tr("Show on map", "Haritada göster") to { showRoute(e, C.PREVIEW) },
+            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename trail", "Rotayı yeniden adlandır"), e.name) { Store.rename(e, it); showSection(2) } },
+            tr("Delete", "Sil") to { act.confirm(tr("Delete “${e.name}”?", "“${e.name}” silinsin mi?"), tr("The GPX file is deleted. This can't be undone.", "GPX dosyası silinir. Bu işlem geri alınamaz."), tr("Delete", "Sil")) { Store.delete(e); clearPreview(); showSection(2) } },
         ))
     }
 
     private fun shareDebug() {
         act.confirm(
-            "Share debug logs?",
-            "One zip with every recording's raw GPS log (your precise positions and times), app events, " +
+            tr("Share debug logs?", "Hata ayıklama kayıtları paylaşılsın mı?"),
+            tr("One zip with every recording's raw GPS log (your precise positions and times), app events, " +
                 "crash reports and phone details. Only share it with someone working on the app.",
-            "Share",
+                "Her kaydın ham GPS günlüğünü (tam konumlarınız ve saatleriniz), uygulama olaylarını, " +
+                "çökme raporlarını ve telefon bilgilerini içeren tek bir zip. Yalnızca uygulama üzerinde çalışan biriyle paylaşın."),
+            tr("Share", "Paylaş"),
         ) {
-            act.toast("Packing logs…")
+            act.toast(tr("Packing logs…", "Kayıtlar paketleniyor…"))
             thread {
                 val msg = try {
                     val z = Dev.shareZip(act)
                     act.runOnUiThread { act.shareDebugZip(z) }
                     null
                 } catch (e: Exception) {
-                    "Could not pack logs: ${e.message}"
+                    tr("Could not pack logs: ${e.message}", "Kayıtlar paketlenemedi: ${e.message}")
                 }
                 if (msg != null) act.runOnUiThread { act.toast(msg) }
             }
@@ -537,19 +544,19 @@ class PlanScreen(private val act: MainActivity) {
     }
 
     private fun exportShare(e: Entry, kmz: Boolean) {
-        act.toast("Packing “${e.name}”…")
+        act.toast(tr("Packing “${e.name}”…", "Paketleniyor: “${e.name}”…"))
         thread {
             try {
                 val t0 = System.currentTimeMillis()
-                val f = if (kmz) Photos.exportKmz(act, e, Store.load(e) ?: throw IllegalStateException("unreadable GPX"))
+                val f = if (kmz) Photos.exportKmz(act, e, Store.load(e) ?: throw IllegalStateException(tr("unreadable GPX", "GPX okunamadı")))
                 else Photos.exportZip(act, e)
                 Dev.event("share", "${f.name} · ${Photos.count(e)} photos · ${Fmt.mb(f.length())} in ${System.currentTimeMillis() - t0} ms")
                 act.runOnUiThread {
                     act.shareExport(f, if (kmz) "application/vnd.google-earth.kmz" else "application/zip",
-                        if (kmz) "Share for Google Earth" else "Share trail with photos")
+                        if (kmz) tr("Share for Google Earth", "Google Earth için paylaş") else tr("Share trail with photos", "Rotayı fotoğraflarla paylaş"))
                 }
             } catch (ex: Exception) {
-                act.runOnUiThread { act.toast("Could not pack it: ${ex.message}") }
+                act.runOnUiThread { act.toast(tr("Could not pack it: ${ex.message}", "Paketlenemedi: ${ex.message}")) }
             }
         }
     }
@@ -561,7 +568,7 @@ class PlanScreen(private val act: MainActivity) {
             val photos = Photos.list(dir).filter { it.hasPosition }
             // the route and photo dots show at once; thumbnails (for close zoom) follow when ready
             act.runOnUiThread {
-                if (r == null) { act.toast("Could not read “${e.name}”."); return@runOnUiThread }
+                if (r == null) { act.toast(tr("Could not read “${e.name}”.", "Okunamadı: “${e.name}”")); return@runOnUiThread }
                 preview = MapView.Overlay(r.lines(), color, 4.5f, endpoints = true)
                 previewEntry = if (e.kind == Kind.TRACK) e else null
                 map.markers = photos.map { MapView.Marker(it.lat, it.lon, null, it to dir) }
@@ -614,7 +621,7 @@ class PlanScreen(private val act: MainActivity) {
     }
 
     private fun addDrawPoint(lat: Double, lon: Double) {
-        if (routing) { act.toast("Still finding the path…"); return }
+        if (routing) { act.toast(tr("Still finding the path…", "Yol hâlâ aranıyor…")); return }
         if (legs.isEmpty()) {
             legs += Leg(doubleArrayOf(lat), doubleArrayOf(lon), null, false)
             rebuildDraw()
@@ -625,7 +632,7 @@ class PlanScreen(private val act: MainActivity) {
         val aLon = last.lon[last.lon.size - 1]
         val net = wifiNet
         if (!Prefs.snap(act) || net == null) {
-            if (Prefs.snap(act)) act.toast("No Wi-Fi: straight line (path snapping needs Wi-Fi).")
+            if (Prefs.snap(act)) act.toast(tr("No Wi-Fi: straight line (path snapping needs Wi-Fi).", "Wi-Fi yok: düz çizgi (patikaya oturtma Wi-Fi gerektirir)."))
             legs += Leg(doubleArrayOf(lat), doubleArrayOf(lon), null, false)
             rebuildDraw()
             return
@@ -644,7 +651,7 @@ class PlanScreen(private val act: MainActivity) {
                 routing = false
                 if (drawLine == null) return@runOnUiThread // drawing was cancelled meanwhile
                 if (seg == null) {
-                    act.toast("No path found there — straight line used.")
+                    act.toast(tr("No path found there — straight line used.", "Orada yol bulunamadı — düz çizgi kullanıldı."))
                     legs += Leg(doubleArrayOf(lat), doubleArrayOf(lon), null, false)
                 } else {
                     // the route begins where we already are: skip its first point unless it starts off our last point
@@ -688,15 +695,16 @@ class PlanScreen(private val act: MainActivity) {
         val r = drawRoute(null)
         val asc = r.ascentM()
         drawInfo.text = when {
-            routing -> "Finding the path…"
-            legs.isEmpty() -> "Tap the map to add points" + if (Prefs.snap(act)) " — the line follows paths between taps." else "."
-            else -> "${legs.size} taps · ${Fmt.dist(r.lengthM())}" + (if (asc >= 1) " · ↑ ${asc.roundToInt()} m" else "") +
-                " — keep tapping, pinch to zoom."
+            routing -> tr("Finding the path…", "Yol aranıyor…")
+            legs.isEmpty() -> tr("Tap the map to add points", "Nokta eklemek için haritaya dokunun") +
+                if (Prefs.snap(act)) tr(" — the line follows paths between taps.", " — çizgi dokunuşlar arasında patikaları izler.") else "."
+            else -> tr("${legs.size} taps", "${legs.size} dokunuş") + " · ${Fmt.dist(r.lengthM())}" + (if (asc >= 1) " · ↑ ${asc.roundToInt()} m" else "") +
+                tr(" — keep tapping, pinch to zoom.", " — dokunmaya devam edin, yakınlaştırmak için sıkıştırın.")
         }
     }
 
     private fun updateSnapBtn() {
-        snapBtn.text = if (Prefs.snap(act)) "Snap ✓" else "Snap ✗"
+        snapBtn.text = if (Prefs.snap(act)) tr("Snap ✓", "Oturt ✓") else tr("Snap ✗", "Oturt ✗")
         snapBtn.background = ripple(roundRect(if (Prefs.snap(act)) C.GREEN else C.CARD, act.dpf(10)))
     }
 
@@ -704,7 +712,7 @@ class PlanScreen(private val act: MainActivity) {
         act.prefs.edit().putBoolean("snap", !Prefs.snap(act)).apply()
         updateSnapBtn()
         updateDrawInfo()
-        act.toast(if (Prefs.snap(act)) "Snapping to paths: new taps follow trails (Wi-Fi)." else "Snapping off: straight lines.")
+        act.toast(if (Prefs.snap(act)) tr("Snapping to paths: new taps follow trails (Wi-Fi).", "Patikaya oturtma açık: yeni dokunuşlar patikaları izler (Wi-Fi).") else tr("Snapping off: straight lines.", "Oturtma kapalı: düz çizgiler."))
     }
 
     private fun undoDraw() {
@@ -714,13 +722,13 @@ class PlanScreen(private val act: MainActivity) {
     }
 
     private fun saveDraw() {
-        if (routing) { act.toast("Still finding the path…"); return }
+        if (routing) { act.toast(tr("Still finding the path…", "Yol hâlâ aranıyor…")); return }
         val r = drawRoute(null)
-        if (r.points < 2) { act.toast("Add at least two points."); return }
-        act.askText("Name this plan", "Plan ${Fmt.date(System.currentTimeMillis())}") { name ->
+        if (r.points < 2) { act.toast(tr("Add at least two points.", "En az iki nokta ekleyin.")); return }
+        act.askText(tr("Name this plan", "Plana ad verin"), "Plan ${Fmt.date(System.currentTimeMillis())}") { name ->
             val e = Store.save(Kind.PLAN, drawRoute(name), name)
             Dev.event("plan", "drew “${e.name}” · ${legs.size} taps (${legs.count { it.snapped }} snapped) · ${Fmt.dist(e.distM)}")
-            act.toast("Saved plan “${e.name}” · ${Fmt.dist(e.distM)}")
+            act.toast(tr("Saved plan “${e.name}” · ${Fmt.dist(e.distM)}", "Plan kaydedildi: “${e.name}” · ${Fmt.dist(e.distM)}"))
             endDraw()
             showSection(1)
         }
@@ -739,18 +747,18 @@ class PlanScreen(private val act: MainActivity) {
     /** Corridor widths offered (metres each side); 0 = the trail's whole bounding box. */
     private val buffers = listOf(250.0, 500.0, 1000.0, 2000.0, 5000.0, 0.0)
 
-    private fun bufferLabel(m: Double) = if (m <= 0) "Whole box around the trail" else "${Fmt.dist(m)} each side of the trail"
+    private fun bufferLabel(m: Double) = if (m <= 0) tr("Whole box around the trail", "Rotanın çevresindeki tüm kutu") else tr("${Fmt.dist(m)} each side of the trail", "Rotanın her iki yanında ${Fmt.dist(m)}")
 
     private fun pickTrailForDownload() {
         val plans = Store.list(Kind.PLAN)
         val past = Store.list(Kind.TRACK)
         if (plans.isEmpty() && past.isEmpty()) {
-            act.toast("Add a planned trail first: Plans › Import GPX / KML, or Draw on map.")
+            act.toast(tr("Add a planned trail first: Plans › Import GPX / KML, or Draw on map.", "Önce bir rota ekleyin: Planlar › GPX / KML içe aktar veya Haritada çiz."))
             return
         }
         val items = plans.map { e -> "${e.name} · ${Fmt.dist(e.distM)}" to { downloadFor(e) } } +
-            past.map { e -> "Past: ${e.name} · ${Fmt.dist(e.distM)}" to { downloadFor(e) } }
-        act.choose("Download the map along…", items)
+            past.map { e -> tr("Past: ", "Geçmiş: ") + "${e.name} · ${Fmt.dist(e.distM)}" to { downloadFor(e) } }
+        act.choose(tr("Download the map along…", "Harita indirilecek rota…"), items)
     }
 
     private fun downloadFor(e: Entry) {
@@ -758,11 +766,11 @@ class PlanScreen(private val act: MainActivity) {
             val r = Store.load(e)
             act.runOnUiThread {
                 if (gone()) return@runOnUiThread
-                if (r == null || r.points < 2) { act.toast("Could not read “${e.name}”."); return@runOnUiThread }
+                if (r == null || r.points < 2) { act.toast(tr("Could not read “${e.name}”.", "Okunamadı: “${e.name}”")); return@runOnUiThread }
                 preview = MapView.Overlay(r.lines(), if (e.kind == Kind.PLAN) C.PLAN else C.PREVIEW, 4.5f, endpoints = true)
                 refreshOverlays()
                 r.bbox()?.let { map.fit(it) }
-                showDownloadDialog(r, "${e.name} map")
+                showDownloadDialog(r, tr("${e.name} map", "${e.name} haritası"))
             }
         }
     }
@@ -773,20 +781,21 @@ class PlanScreen(private val act: MainActivity) {
         val zs = (12..19).toList()
         val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(20), act.dp(4), act.dp(20), 0) }
         val name = EditText(act).apply { setText(defName); setSingleLine(); textSize = 15f }
-        box.addView(act.text("Name", 12f, C.DIM)); box.addView(name)
-        val topo = CheckBox(act).apply { text = "Topographic (OpenTopoMap)"; isChecked = prefs.getBoolean("dlTopo", true) }
-        val sat = CheckBox(act).apply { text = "Satellite (Esri)"; isChecked = prefs.getBoolean("dlSat", false) }
+        box.addView(act.text(tr("Name", "Ad"), 12f, C.DIM)); box.addView(name)
+        val topo = CheckBox(act).apply { text = tr("Topographic (OpenTopoMap)", "Topografik (OpenTopoMap)"); isChecked = prefs.getBoolean("dlTopo", true) }
+        val sat = CheckBox(act).apply { text = tr("Satellite (Esri)", "Uydu (Esri)"); isChecked = prefs.getBoolean("dlSat", false) }
         box.addView(topo); box.addView(sat)
-        val land = CheckBox(act).apply { text = "Private land (fields, homes, fences, military)"; isChecked = prefs.getBoolean("dlLand", true) }
+        val land = CheckBox(act).apply { text = tr("Private land (fields, homes, fences, military)", "Özel arazi (tarla, ev, çit, askeri)"); isChecked = prefs.getBoolean("dlLand", true) }
         box.addView(land)
-        box.addView(act.text("From OpenStreetMap + ESA satellite land cover: shows where you'd likely be on someone's land. Adds a few MB.", 12f, C.DIM).apply { setPadding(act.dp(32), 0, 0, 0) })
+        box.addView(act.text(tr("From OpenStreetMap + ESA satellite land cover: shows where you'd likely be on someone's land. Adds a few MB.",
+            "OpenStreetMap + ESA uydu arazi örtüsünden: muhtemelen birinin arazisinde olacağınız yerleri gösterir. Birkaç MB ekler."), 12f, C.DIM).apply { setPadding(act.dp(32), 0, 0, 0) })
         // satellite imagery date: Esri's archive, preferring leaf-off captures where paths show through the forest
-        val satLabel = act.text("Satellite imagery date", 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) }
+        val satLabel = act.text(tr("Satellite imagery date", "Uydu görüntüsü tarihi"), 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) }
         val satSpin = Spinner(act)
         val satInfo = act.text("", 12f, C.DIM)
         box.addView(satLabel); box.addView(satSpin); box.addView(satInfo)
         class SatChoice(val label: String, val url: String, val ms: Long)
-        var satChoices = listOf(SatChoice("Current Esri imagery", "", 0L))
+        var satChoices = listOf(SatChoice(tr("Current Esri imagery", "Güncel Esri görüntüsü"), "", 0L))
         fun setSatChoices(list: List<SatChoice>, select: Int) {
             satChoices = list
             satSpin.adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, list.map { it.label })
@@ -801,14 +810,14 @@ class PlanScreen(private val act: MainActivity) {
         fun startScan() {
             if (scanStarted) return
             val n = wifiNet
-            if (n == null) { satInfo.text = "Connect to Wi-Fi to look up leaf-off imagery from Esri's archive."; return }
+            if (n == null) { satInfo.text = tr("Connect to Wi-Fi to look up leaf-off imagery from Esri's archive.", "Esri arşivinde yapraksız dönem görüntüsü aramak için Wi-Fi'a bağlanın."); return }
             scanStarted = true
-            satInfo.text = "Looking for leaf-off imagery…"
+            satInfo.text = tr("Looking for leaf-off imagery…", "Yapraksız dönem görüntüsü aranıyor…")
             thread {
                 val t0 = System.currentTimeMillis()
                 val caps = try {
                     Wayback.scan(n, midLat, midLon,
-                        { i, total -> act.runOnUiThread { if (open.get()) satInfo.text = "Checking Esri's imagery archive… $i / $total" } },
+                        { i, total -> act.runOnUiThread { if (open.get()) satInfo.text = tr("Checking Esri's imagery archive… $i / $total", "Esri görüntü arşivi taranıyor… $i / $total") } },
                         { !open.get() })
                 } catch (e: Exception) {
                     Dev.event("imagery", "archive lookup failed: $e")
@@ -821,19 +830,21 @@ class PlanScreen(private val act: MainActivity) {
                 act.runOnUiThread {
                     if (!open.get()) return@runOnUiThread
                     if (caps.isNullOrEmpty()) {
-                        satInfo.text = "Couldn't read the imagery archive — the current imagery will be used."
+                        satInfo.text = tr("Couldn't read the imagery archive — the current imagery will be used.", "Görüntü arşivi okunamadı — güncel görüntü kullanılacak.")
                         return@runOnUiThread
                     }
                     val rec = Season.recommend(caps.map { it.ms }, midLat)
                     setSatChoices(caps.mapIndexed { i, c ->
                         SatChoice(
-                            (if (i == rec) "★ " else "") + c.label(midLat) + (if (i == 0) " (current)" else ""),
+                            (if (i == rec) "★ " else "") + c.label(midLat) + (if (i == 0) tr(" (current)", " (güncel)") else ""),
                             if (i == 0) "" else c.rel.tileUrl, c.ms,
                         )
                     }, rec)
                     satInfo.text = if (Season.leafOff(caps[rec].ms, midLat))
-                        "★ = newest leaf-off imagery: paths show through bare trees. Dates checked at the trail's middle."
-                    else "No leaf-off imagery here — using the newest. Dates checked at the trail's middle."
+                        tr("★ = newest leaf-off imagery: paths show through bare trees. Dates checked at the trail's middle.",
+                            "★ = en yeni yapraksız dönem görüntüsü: patikalar çıplak ağaçların arasından görünür. Tarihler rotanın ortasına göre.")
+                    else tr("No leaf-off imagery here — using the newest. Dates checked at the trail's middle.",
+                        "Burada yapraksız dönem görüntüsü yok — en yenisi kullanılıyor. Tarihler rotanın ortasına göre.")
                 }
             }
         }
@@ -842,22 +853,23 @@ class PlanScreen(private val act: MainActivity) {
             satLabel.visibility = v; satSpin.visibility = v; satInfo.visibility = v
             if (sat.isChecked) startScan()
         }
-        box.addView(act.text("Area", 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) })
+        box.addView(act.text(tr("Area", "Alan"), 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) })
         val bufSpin = Spinner(act).apply {
             adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, buffers.map { bufferLabel(it) })
             setSelection(prefs.getInt("dlBuffer", 2).coerceIn(0, buffers.size - 1))
         }
         box.addView(bufSpin)
-        box.addView(act.text("Most detail", 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) })
+        box.addView(act.text(tr("Most detail", "En fazla ayrıntı"), 12f, C.DIM).apply { setPadding(0, act.dp(6), 0, 0) })
         val labels = zs.map { z ->
-            "Zoom $z · ${String.format(Locale.getDefault(), "%.1f", Geo.metersPerPixel(trailBox.centerLat, z))} m/pixel" +
-                if (z > Layer.TOPO.maxZ) " (topo stops at 17)" else ""
+            tr("Zoom", "Yakınlık") + " $z · ${String.format(Locale.getDefault(), "%.1f", Geo.metersPerPixel(trailBox.centerLat, z))} " + tr("m/pixel", "m/piksel") +
+                if (z > Layer.TOPO.maxZ) tr(" (topo stops at 17)", " (topo 17'de biter)") else ""
         }
         val spin = Spinner(act).apply { adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, labels) }
         box.addView(spin)
         val est = act.text("", 14f).apply { setPadding(0, act.dp(6), 0, act.dp(2)) }
         box.addView(est)
-        box.addView(act.text("Trail ${Fmt.dist(route.lengthM())} · elevation data included · downloads only on Wi-Fi", 12f, C.DIM))
+        box.addView(act.text(tr("Trail ${Fmt.dist(route.lengthM())} · elevation data included · downloads only on Wi-Fi",
+            "Rota ${Fmt.dist(route.lengthM())} · yükseklik verisi dahil · yalnızca Wi-Fi'da iner"), 12f, C.DIM))
 
         fun layers() = listOfNotNull(Layer.TOPO.takeIf { topo.isChecked }, Layer.SAT.takeIf { sat.isChecked })
         fun buffer() = buffers[bufSpin.selectedItemPosition]
@@ -884,16 +896,16 @@ class PlanScreen(private val act: MainActivity) {
         val freeMb = StatFs(act.filesDir.path).availableBytes / 1048576
         fun update() {
             val ls = layers()
-            if (ls.isEmpty()) { est.text = "Choose at least one map type."; return }
+            if (ls.isEmpty()) { est.text = tr("Choose at least one map type.", "En az bir harita türü seçin."); return }
             val z = zs[spin.selectedItemPosition]
             val b = buffer()
             val (n, mb) = estimate(ls, z, b)
             val tooBig = mb > freeMb - 300
-            val boxNote = if (b > 0) " · whole box would be ~${Fmt.mb((estimate(ls, z, 0.0).second * 1048576).toLong())}" else ""
-            est.text = "≈ $n tiles · ~${Fmt.mb((mb * 1048576).toLong())}$boxNote\nFree space ${Fmt.mb(freeMb * 1048576)}" +
+            val boxNote = if (b > 0) tr(" · whole box would be ~${Fmt.mb((estimate(ls, z, 0.0).second * 1048576).toLong())}", " · tüm kutu ~${Fmt.mb((estimate(ls, z, 0.0).second * 1048576).toLong())} olurdu") else ""
+            est.text = tr("≈ $n tiles", "≈ $n karo") + " · ~${Fmt.mb((mb * 1048576).toLong())}$boxNote\n" + tr("Free space", "Boş alan") + " ${Fmt.mb(freeMb * 1048576)}" +
                 when {
-                    tooBig -> " — won't fit: choose less detail or a narrower area."
-                    mb > 2048 -> " · large download: keep the phone on Wi-Fi and charging (pause/resume anytime)."
+                    tooBig -> tr(" — won't fit: choose less detail or a narrower area.", " — sığmaz: daha az ayrıntı ya da daha dar alan seçin.")
+                    mb > 2048 -> tr(" · large download: keep the phone on Wi-Fi and charging (pause/resume anytime).", " · büyük indirme: telefonu Wi-Fi'da ve şarjda tutun (istediğiniz an duraklatıp sürdürün).")
                     else -> ""
                 }
             est.setTextColor(if (tooBig) 0xFFEF5350.toInt() else if (mb > 2048) 0xFFFFB74D.toInt() else C.TEXT)
@@ -914,15 +926,15 @@ class PlanScreen(private val act: MainActivity) {
         update()
 
         AlertDialog.Builder(act)
-            .setTitle("Download map along the trail")
+            .setTitle(tr("Download map along the trail", "Rota boyunca harita indir"))
             .setView(ScrollView(act).apply { addView(box) })
-            .setPositiveButton("Download") { _, _ ->
+            .setPositiveButton(tr("Download", "İndir")) { _, _ ->
                 val ls = layers()
-                if (ls.isEmpty()) { act.toast("Choose at least one map type."); return@setPositiveButton }
+                if (ls.isEmpty()) { act.toast(tr("Choose at least one map type.", "En az bir harita türü seçin.")); return@setPositiveButton }
                 val z = zs[spin.selectedItemPosition]
                 val b = buffer()
                 val (n, mb) = estimate(ls, z, b)
-                if (mb > freeMb - 300) { act.toast("Not enough free storage on the phone for this."); return@setPositiveButton }
+                if (mb > freeMb - 300) { act.toast(tr("Not enough free storage on the phone for this.", "Telefonda bunun için yeterli boş alan yok.")); return@setPositiveButton }
                 prefs.edit().putBoolean("dlTopo", topo.isChecked).putBoolean("dlSat", sat.isChecked).putBoolean("dlLand", land.isChecked)
                     .putInt("dlZoom", z).putInt("dlBuffer", bufSpin.selectedItemPosition).apply()
                 val sc = if (Layer.SAT in ls) satChoices[satSpin.selectedItemPosition.coerceIn(0, satChoices.size - 1)] else null
@@ -936,11 +948,11 @@ class PlanScreen(private val act: MainActivity) {
                         "trail ${Fmt.dist(route.lengthM())} · satellite ${sc?.label ?: "-"} · Wi-Fi ${wifiNet != null}",
                 )
                 Downloads.start(act, p.id)
-                if (wifiNet == null) act.toast("Queued — it downloads when Wi-Fi is connected.")
+                if (wifiNet == null) act.toast(tr("Queued — it downloads when Wi-Fi is connected.", "Sırada — Wi-Fi bağlanınca iner."))
                 refreshOverlays()
                 showSection(0)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(tr("Cancel", "İptal"), null)
             .setOnDismissListener { open.set(false) }
             .show()
     }

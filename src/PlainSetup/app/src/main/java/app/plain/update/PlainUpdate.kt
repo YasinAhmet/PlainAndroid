@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import app.plain.lang.tr
 
 /**
  * The "Check for updates" button every Plain app has. It needs no internet permission: it hands
@@ -12,7 +13,7 @@ import android.net.Uri
  * GitHub releases, checks it is signed with the Plain key, and installs it.
  *
  * Canonical copy: PlainAndroid/shared/PlainUpdate.kt. Every app keeps an identical copy at
- * app/src/main/java/app/plain/update/PlainUpdate.kt — change them together.
+ * app/src/main/java/app/plain/update/PlainUpdate.kt — change them together. Needs PlainLang.kt.
  */
 object PlainUpdate {
     const val SETUP_PKG = "app.plain.setup"
@@ -24,7 +25,8 @@ object PlainUpdate {
     /** Button text, e.g. "Check for updates (v1.4)". */
     fun label(a: Activity): String {
         val v = try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { null }
-        return if (v.isNullOrBlank()) "Check for updates" else "Check for updates (v$v)"
+        val t = tr("Check for updates", "Güncellemeleri denetle")
+        return if (v.isNullOrBlank()) t else "$t (v$v)"
     }
 
     /** Opens Plain Setup on this app. Without Setup, offers to download it in the browser. */
@@ -34,12 +36,12 @@ object PlainUpdate {
             a.startActivity(i)
         } catch (_: ActivityNotFoundException) {
             AlertDialog.Builder(a)
-                .setTitle("Plain Setup needed")
-                .setMessage("Updates are installed by the Plain Setup app. Download it, install it, then tap Check for updates again.")
-                .setPositiveButton("Download") { _, _ ->
+                .setTitle(tr("Plain Setup needed", "Plain Setup gerekli"))
+                .setMessage(tr("Updates are installed by the Plain Setup app. Download it, install it, then tap Check for updates again.", "Güncellemeleri Plain Setup uygulaması yükler. Onu indirip yükleyin, sonra Güncellemeleri denetle'ye yeniden dokunun."))
+                .setPositiveButton(tr("Download", "İndir")) { _, _ ->
                     try { a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SETUP_DOWNLOAD))) } catch (_: Exception) {}
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(tr("Cancel", "İptal"), null)
                 .show()
         } catch (_: SecurityException) {
         }

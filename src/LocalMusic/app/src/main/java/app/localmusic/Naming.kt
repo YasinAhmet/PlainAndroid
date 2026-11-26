@@ -1,5 +1,6 @@
 package app.localmusic
 
+import app.plain.lang.tr
 import java.util.Locale
 
 /** Tags as read from the file (any may be missing). */
@@ -82,8 +83,8 @@ object PlainYoutube {
      */
     fun organiserSkip(relPath: String): String? = when {
         !inMusicTree(relPath) -> null
-        isCached(relPath) -> "cached by Plain Youtube (it manages these)"
-        else -> "saved by Plain Youtube, already sorted per channel"
+        isCached(relPath) -> tr("cached by Plain Youtube (it manages these)", "Plain Youtube önbelleğinde (onları o yönetir)")
+        else -> tr("saved by Plain Youtube, already sorted per channel", "Plain Youtube kaydetti, zaten kanala göre sıralı")
     }
 }
 

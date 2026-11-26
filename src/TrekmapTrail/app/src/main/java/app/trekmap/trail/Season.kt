@@ -1,9 +1,10 @@
 package app.trekmap.trail
 
+import app.plain.lang.tr
+import app.plain.lang.PlainLang
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.TextStyle
-import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -34,15 +35,15 @@ object Season {
     }
 
     fun describe(ms: Long, lat: Double): String = when {
-        abs(lat) < TROPICS -> "tropics"
-        ideal(ms, lat) -> "leaf-off ★"
-        leafOff(ms, lat) -> "leaf-off"
-        else -> "leaves on"
+        abs(lat) < TROPICS -> tr("tropics", "tropikal")
+        ideal(ms, lat) -> tr("leaf-off ★", "yapraksız ★")
+        leafOff(ms, lat) -> tr("leaf-off", "yapraksız")
+        else -> tr("leaves on", "yapraklı")
     }
 
     fun month(ms: Long): String {
         val d = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC)
-        return "${d.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} ${d.year}"
+        return "${d.month.getDisplayName(TextStyle.SHORT, PlainLang.locale)} ${d.year}"
     }
 
     /** yyyymmdd (Esri SRC_DATE) → epoch ms, or 0. */

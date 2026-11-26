@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 /** One stream from streamingData.formats / adaptiveFormats. */
 data class Format(
@@ -20,7 +21,12 @@ data class Format(
     val approxDurationMs: Long,
     val drc: Boolean,
     val audioTrackDefault: Boolean?, // null when the video has a single audio track
+    val audioTrackId: String? = null, // audioTrack.id, e.g. "en.4" (original) / "ar.3" (dubbed); null = single track
+    val audioOriginal: Boolean = false, // the uploader's own track (displayName "… original", xtags acont=original)
 ) {
+    /** Language of the audio track ("en", "zh-Hans"), or null when the video has a single audio track. */
+    val audioLang: String? get() = audioTrackId?.substringBefore('.')?.ifEmpty { null }
+
     val hasVideo get() = mime.startsWith("video/")
     val hasAudio get() = mime.startsWith("audio/") || codecs.contains("mp4a") || codecs.contains("opus")
     val muxed get() = hasVideo && codecs.contains(",")
@@ -64,7 +70,8 @@ data class VideoInfo(
 )
 
 /** Why a video can't be downloaded. [tryOther] = another client might still work. */
-class YtError(message: String, val tryOther: Boolean, val geo: Boolean = false, val members: Boolean = false) : Exception(message)
+/** [weak]: a bot check or network error, which a later client's answer may replace (the message is translated, so not matched). */
+class YtError(message: String, val tryOther: Boolean, val geo: Boolean = false, val members: Boolean = false, val weak: Boolean = false) : Exception(message)
 
 sealed class PlayerResult {
     class Ok(val info: VideoInfo, val visitorData: String?) : PlayerResult()
@@ -102,7 +109,7 @@ object Yt {
     /** Parse a /player response. Never throws for API-level problems; returns Fail with a readable message. */
     fun parsePlayer(json: String, clientKey: String, expectId: String? = null): PlayerResult {
         val o = try { JSONObject(json) } catch (e: Exception) {
-            return PlayerResult.Fail(YtError("YouTube sent an unreadable answer", true), null)
+            return PlayerResult.Fail(YtError(tr("YouTube sent an unreadable answer", "YouTube okunamayan bir yanıt gönderdi"), true), null)
         }
         val visitor = o.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotEmpty() }
         val ps = o.optJSONObject("playabilityStatus")
@@ -113,21 +120,21 @@ object Yt {
         if (status != "OK") return PlayerResult.Fail(classify(status, reason), visitor)
         if (vd != null && expectId != null && vd.optString("videoId").let { it.isNotEmpty() && it != expectId }) {
             // YouTube sometimes answers a blocked client with a placeholder video
-            return PlayerResult.Fail(YtError("YouTube returned a different video", true), visitor)
+            return PlayerResult.Fail(YtError(tr("YouTube returned a different video", "YouTube farklı bir video döndürdü"), true), visitor)
         }
         if (vd?.optBoolean("isLive") == true || vd?.optBoolean("isUpcoming") == true) {
-            return PlayerResult.Fail(YtError("Live streams and premieres can't be downloaded", false), visitor)
+            return PlayerResult.Fail(YtError(tr("Live streams and premieres can't be downloaded", "Canlı yayınlar ve prömiyerler indirilemez"), false), visitor)
         }
         val sd = o.optJSONObject("streamingData")
-            ?: return PlayerResult.Fail(YtError("No streams in YouTube's answer", true), visitor)
+            ?: return PlayerResult.Fail(YtError(tr("No streams in YouTube's answer", "YouTube'un yanıtında akış yok"), true), visitor)
         val formats = ArrayList<Format>()
         parseFormats(sd.optJSONArray("formats"), formats)
         parseFormats(sd.optJSONArray("adaptiveFormats"), formats)
         if (formats.isEmpty()) {
             val live = sd.has("hlsManifestUrl") && vd?.optBoolean("isLiveContent") == true
             return PlayerResult.Fail(
-                if (live) YtError("Live streams can't be downloaded", false)
-                else YtError("No downloadable streams (protected or SABR only)", true), visitor
+                if (live) YtError(tr("Live streams can't be downloaded", "Canlı yayınlar indirilemez"), false)
+                else YtError(tr("No downloadable streams (protected or SABR only)", "İndirilebilir akış yok (korumalı ya da yalnızca SABR)"), true), visitor
             )
         }
         val id = vd?.optString("videoId").orEmpty().ifEmpty { expectId.orEmpty() }
@@ -157,20 +164,20 @@ object Yt {
     fun classify(status: String, reason: String): YtError {
         val r = reason.lowercase()
         return when {
-            "not a bot" in r || "confirm you" in r && "bot" in r -> YtError("YouTube asked to confirm you're not a bot", true)
+            "not a bot" in r || "confirm you" in r && "bot" in r -> YtError(tr("YouTube asked to confirm you're not a bot", "YouTube bot olmadığınızı doğrulamanızı istedi"), true, weak = true)
             // "This content is not available on this country domain due to a legal complaint from the government."
-            isGeo(r) -> YtError("Blocked in your country (legal complaint)", false, geo = true)
+            isGeo(r) -> YtError(tr("Blocked in your country (legal complaint)", "Ülkenizde engelli (yasal şikâyet)"), false, geo = true)
             // "Join this channel to get access to members-only content like this video, and other exclusive perks."
-            Members.inReason(reason) -> YtError("Members-only video", false, members = true)
+            Members.inReason(reason) -> YtError(tr("Members-only video", "Üyelere özel video"), false, members = true)
             "age" in r && ("confirm" in r || "restrict" in r || "inappropriate" in r) || status == "AGE_CHECK_REQUIRED" ||
-                status == "AGE_VERIFICATION_REQUIRED" -> YtError("Age-restricted video: needs sign-in, not supported", false)
-            "private" in r -> YtError("Private video", false)
-            "live" in r && ("stream" in r || "event" in r) -> YtError("Live streams can't be downloaded", false)
-            status == "LOGIN_REQUIRED" -> YtError(reason.ifBlank { "YouTube wants a sign-in for this video" }, true)
-            status == "ERROR" -> YtError(reason.ifBlank { "Video unavailable" }, true) // e.g. "made for kids" on visionos
-            status == "UNPLAYABLE" -> YtError(reason.ifBlank { "Video can't be played" }, true)
-            status == "CONTENT_CHECK_REQUIRED" -> YtError("Video needs a content warning confirmation", true)
-            else -> YtError(reason.ifBlank { "YouTube said: $status" }, true)
+                status == "AGE_VERIFICATION_REQUIRED" -> YtError(tr("Age-restricted video: needs sign-in, not supported", "Yaş kısıtlamalı video: oturum açma gerekir, desteklenmiyor"), false)
+            "private" in r -> YtError(tr("Private video", "Özel video"), false)
+            "live" in r && ("stream" in r || "event" in r) -> YtError(tr("Live streams can't be downloaded", "Canlı yayınlar indirilemez"), false)
+            status == "LOGIN_REQUIRED" -> YtError(reason.ifBlank { tr("YouTube wants a sign-in for this video", "YouTube bu video için oturum açılmasını istiyor") }, true)
+            status == "ERROR" -> YtError(reason.ifBlank { tr("Video unavailable", "Video kullanılamıyor") }, true) // e.g. "made for kids" on visionos
+            status == "UNPLAYABLE" -> YtError(reason.ifBlank { tr("Video can't be played", "Video oynatılamıyor") }, true)
+            status == "CONTENT_CHECK_REQUIRED" -> YtError(tr("Video needs a content warning confirmation", "Video için içerik uyarısı onayı gerekiyor"), true)
+            else -> YtError(reason.ifBlank { tr("YouTube said: $status", "YouTube yanıtı: $status") }, true)
         }
     }
 
@@ -205,6 +212,8 @@ object Yt {
                 approxDurationMs = f.optString("approxDurationMs").toLongOrNull() ?: 0L,
                 drc = f.optBoolean("isDrc") || f.optString("xtags").contains("drc"),
                 audioTrackDefault = if (track != null && track.has("audioIsDefault")) track.optBoolean("audioIsDefault") else null,
+                audioTrackId = track?.optString("id")?.ifEmpty { null },
+                audioOriginal = track != null && AudioTracks.isOriginal(track.optString("displayName"), url),
             )
         }
     }
@@ -232,16 +241,18 @@ data class Plan(val video: Format?, val audio: Format?, val single: Format?) {
 }
 
 object Pick {
-    /** Audio-only streams of one container; DRC and dubbed (non-default) tracks dropped. */
-    fun audioCandidates(formats: List<Format>, fmt: AudioFmt): List<Format> {
+    /**
+     * Audio-only streams of one container in one language, DRC dropped. [lang] null = the original track (dubbed
+     * videos list every auto-dub too, alphabetically, so "the first one" was Arabic); a language with no stream of
+     * this container falls back to the original.
+     */
+    fun audioCandidates(formats: List<Format>, fmt: AudioFmt, lang: String? = null): List<Format> {
         val plain = formats.filter { !it.hasVideo && !it.drc && (if (fmt == AudioFmt.M4A) it.isAac else it.isOpus) }
-        val hasTracks = plain.any { it.audioTrackDefault != null }
-        val main = if (hasTracks) plain.filter { it.audioTrackDefault != false } else plain
-        return main.distinctBy { it.itag }.sortedByDescending { it.bitsPerSec }
+        return AudioTracks.select(plain, lang).distinctBy { it.itag }.sortedByDescending { it.bitsPerSec }
     }
 
-    fun audio(formats: List<Format>, fmt: AudioFmt, q: AudioQ): Format? {
-        val c = audioCandidates(formats, fmt)
+    fun audio(formats: List<Format>, fmt: AudioFmt, q: AudioQ, lang: String? = null): Format? {
+        val c = audioCandidates(formats, fmt, lang)
         return if (q == AudioQ.HIGH) c.firstOrNull() else c.lastOrNull()
     }
 
@@ -298,4 +309,45 @@ object Pick {
     /** The remembered height if offered, else the closest lower one, else the lowest offered. */
     fun closest(choices: List<VideoChoice>, wantP: Int): VideoChoice? =
         choices.filter { it.p <= wantP }.maxByOrNull { it.p } ?: choices.minByOrNull { it.p }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Audio languages (dubbed videos: the uploader's original track + YouTube's auto-dubs)
+
+/** One audio language of a video. [lang] "en", "zh-Hans"; [original] = the uploader's own track. */
+data class AudioTrack(val lang: String, val original: Boolean, val name: String = "") {
+    /** "English · original", "Turkish", in the app's language. */
+    fun label(locale: java.util.Locale): String {
+        val shown = java.util.Locale.forLanguageTag(lang).getDisplayName(locale)
+            .takeIf { it.isNotBlank() && !it.equals(lang, ignoreCase = true) }?.replaceFirstChar { it.titlecase(locale) }
+            ?: name.substringBefore(" - ").ifBlank { lang }
+        return shown + if (original) (if (locale.language == "tr") " · orijinal" else " · original") else ""
+    }
+}
+
+object AudioTracks {
+    /** displayName "English original" / HLS NAME "English - original", or xtags acont=original in the stream URL. */
+    fun isOriginal(name: String?, url: String?): Boolean =
+        name?.contains("original", ignoreCase = true) == true ||
+            url?.let { "acont%3Doriginal" in it || "acont=original" in it || "acont%253Doriginal" in it } == true
+
+    /** Languages offered by the stream list, original first; empty for a single-track video. */
+    fun of(formats: List<Format>): List<AudioTrack> =
+        sortTracks(formats.filter { !it.hasVideo && it.audioLang != null }.groupBy { it.audioLang!! }
+            .map { (l, fs) -> AudioTrack(l, fs.any { it.audioOriginal }) })
+
+    fun sortTracks(l: List<AudioTrack>): List<AudioTrack> =
+        l.distinctBy { it.lang }.sortedWith(compareByDescending<AudioTrack> { it.original }.thenBy { it.lang })
+
+    /**
+     * Streams in language [lang] (null = the original). Single-track video (no track info) = all of them; original
+     * not marked = YouTube's default track, else all.
+     */
+    fun select(formats: List<Format>, lang: String?): List<Format> {
+        if (formats.none { it.audioTrackId != null || it.audioTrackDefault != null }) return formats
+        if (lang != null) formats.filter { it.audioLang == lang }.takeIf { it.isNotEmpty() }?.let { return it }
+        formats.filter { it.audioOriginal }.takeIf { it.isNotEmpty() }?.let { return it }
+        formats.filter { it.audioTrackDefault == true }.takeIf { it.isNotEmpty() }?.let { return it }
+        return formats
+    }
 }

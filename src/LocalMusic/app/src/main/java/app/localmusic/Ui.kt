@@ -21,6 +21,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.tr
 
 const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -90,12 +91,12 @@ fun Context.icon(res: Int, sizeDp: Int = 44, padDp: Int = 10, tint: Int = C.TEXT
 
 fun ImageView.tint(color: Int) { imageTintList = ColorStateList.valueOf(color) }
 
-fun Context.askText(title: String, initial: String, ok: String = "Save", cb: (String) -> Unit) {
+fun Context.askText(title: String, initial: String, ok: String = tr("Save", "Kaydet"), cb: (String) -> Unit) {
     val et = EditText(this).apply { setText(initial); setSingleLine(); selectAll() }
     val box = FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(et) }
     AlertDialog.Builder(this).setTitle(title).setView(box)
         .setPositiveButton(ok) { _, _ -> et.text.toString().trim().takeIf { it.isNotEmpty() }?.let(cb) }
-        .setNegativeButton("Cancel", null).show()
+        .setNegativeButton(tr("Cancel", "İptal"), null).show()
     et.requestFocus()
 }
 
@@ -107,7 +108,7 @@ fun Context.menu(title: String?, items: List<Pair<String, () -> Unit>>) {
 
 fun Context.confirm(title: String, msg: String, ok: String, cb: () -> Unit) {
     AlertDialog.Builder(this).setTitle(title).setMessage(msg)
-        .setPositiveButton(ok) { _, _ -> cb() }.setNegativeButton("Cancel", null).show()
+        .setPositiveButton(ok) { _, _ -> cb() }.setNegativeButton(tr("Cancel", "İptal"), null).show()
 }
 
 /** Album art square with a note placeholder. */
@@ -181,7 +182,7 @@ class SeekSlider(ctx: Context) : View(ctx) {
     init {
         minimumHeight = ctx.dp(48)
         isClickable = true
-        contentDescription = "Seek"
+        contentDescription = tr("Seek", "İlerleme çubuğu")
     }
 
     fun set(position: Long, duration: Long) {

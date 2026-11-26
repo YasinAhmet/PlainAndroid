@@ -1,5 +1,7 @@
 package app.trekmap.trail
 
+import app.plain.lang.tr
+import app.plain.lang.PlainLang
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.Service
@@ -118,6 +120,7 @@ class DownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
+        PlainLang.init(this)
         super.onCreate()
         instance = this
         watcher = Net.WifiWatcher(this) { n ->
@@ -131,7 +134,7 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startFg(notif("Preparing map download…", null, 0, 0))
+        startFg(notif(tr("Preparing map download…", "Harita indirmeye hazırlanılıyor…"), null, 0, 0))
         val id = intent?.getStringExtra("id")
         if (id != null) {
             stopAllFlag = false
@@ -323,7 +326,7 @@ class DownloadService : Service() {
         }
         if (diskFull) {
             Dev.event("download", "storage full — stopped “${pack.name}”")
-            Notif.warn(this, "Phone storage is full", "The map download “${pack.name}” stopped. Free some space, then resume it.")
+            Notif.warn(this, tr("Phone storage is full", "Telefon hafızası dolu"), tr("The map download “${pack.name}” stopped. Free some space, then resume it.", "“${pack.name}” harita indirmesi durdu. Yer açın, sonra sürdürün."))
         }
         pack.state = when {
             diskFull -> "incomplete"
@@ -359,7 +362,7 @@ class DownloadService : Service() {
         val zs = pack.zRange(Layer.LAND)
         val total = zs.sumOf { z -> gridFor(z)?.count() ?: Geo.tileCount(pack.bbox, z, z) }
         pr.total += total
-        landNote = "Private land: reading OpenStreetMap…"
+        landNote = tr("Private land: reading OpenStreetMap…", "Özel arazi: OpenStreetMap okunuyor…")
 
         // 1. OpenStreetMap through Overpass (mirrors in turn; big answers take a while)
         var osm: LandData? = null
@@ -380,7 +383,7 @@ class DownloadService : Service() {
         if (osm == null) throw IllegalStateException("OpenStreetMap servers unavailable ($osmErr)")
 
         // 2. WorldCover cropland / built-up (range requests on the public COGs)
-        landNote = "Private land: reading satellite land cover…"
+        landNote = tr("Private land: reading satellite land cover…", "Özel arazi: uydu arazi örtüsü okunuyor…")
         val cover = try {
             WorldCover.read(pack.bbox, { url, from, len ->
                 val net = awaitWifi(cancelled) ?: throw java.io.IOException("cancelled")
@@ -396,7 +399,7 @@ class DownloadService : Service() {
         if (cancelled()) return
 
         // 3. render
-        landNote = "Private land: drawing the map layer…"
+        landNote = tr("Private land: drawing the map layer…", "Özel arazi: harita katmanı çiziliyor…")
         var n = 0
         var kept = 0
         var bytes = 0L
@@ -502,11 +505,12 @@ class DownloadService : Service() {
     private fun publish(p: Pack, pr: Downloads.Prog, done: AtomicLong, bytes: AtomicLong, failed: AtomicInteger) {
         pr.done = done.get(); pr.bytes = bytes.get(); pr.failed = failed.get(); pr.waitingWifi = waiting
         val pct = if (pr.total > 0) (pr.done * 100 / pr.total).toInt() else 0
-        val text = if (pr.waitingWifi) "Waiting for Wi-Fi — mobile data is never used"
-        else landNote?.let { "$pct% · $it" } ?: "$pct% · ${pr.done} / ${pr.total} tiles · ${Fmt.mb(pr.bytes)} this session"
+        val pctS = tr("$pct%", "%$pct")
+        val text = if (pr.waitingWifi) tr("Waiting for Wi-Fi — mobile data is never used", "Wi-Fi bekleniyor — mobil veri hiç kullanılmaz")
+        else landNote?.let { "$pctS · $it" } ?: ("$pctS · " + tr("${pr.done} / ${pr.total} tiles · ${Fmt.mb(pr.bytes)} this session", "${pr.done} / ${pr.total} karo · bu oturumda ${Fmt.mb(pr.bytes)}"))
         try {
             getSystemService(NotificationManager::class.java)
-                .notify(NOTIF_ID, notif("Downloading ${p.name}", text, pr.total, pr.done))
+                .notify(NOTIF_ID, notif(tr("Downloading ${p.name}", "İndiriliyor: ${p.name}"), text, pr.total, pr.done))
         } catch (_: Exception) {}
         Downloads.fire()
     }

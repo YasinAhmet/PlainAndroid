@@ -1,5 +1,6 @@
 package app.plain.battery
 
+import app.plain.lang.tr
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -109,9 +110,9 @@ object Drain {
     fun formatDuration(ms: Long): String {
         val m = ms / 60000
         return when {
-            m < 60 -> "${m}m"
-            m < 48 * 60 -> "${m / 60}h ${m % 60}m"
-            else -> "${m / 1440}d ${(m % 1440) / 60}h"
+            m < 60 -> tr("${m}m", "$m dk")
+            m < 48 * 60 -> tr("${m / 60}h ${m % 60}m", "${m / 60} sa ${m % 60} dk")
+            else -> tr("${m / 1440}d ${(m % 1440) / 60}h", "${m / 1440} g ${(m % 1440) / 60} sa")
         }
     }
 }

@@ -1,5 +1,7 @@
 package app.localmusic
 
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.text.Normalizer
 import java.util.Locale
 
@@ -81,12 +83,19 @@ object Text {
 
     fun isGenericAlbum(key: String): Boolean = key.isEmpty() || key in GENERIC_ALBUMS
 
-    fun count(n: Int, word: String) = "$n $word" + if (n == 1) "" else "s"
+    /** "3 songs" / "3 şarkı" ([word] is the English singular; Turkish takes no plural after a number). */
+    fun count(n: Int, word: String): String =
+        if (PlainLang.turkish) "$n " + (TR_WORDS[word] ?: word) else "$n $word" + if (n == 1) "" else "s"
+
+    private val TR_WORDS = mapOf(
+        "song" to "şarkı", "video" to "video", "artist" to "sanatçı", "album" to "albüm", "folder" to "klasör",
+        "piece" to "parça", "channel" to "kanal", "file" to "dosya", "playlist" to "çalma listesi", "day" to "gün",
+    )
 
     /** "5 h 12 min", "42 min" */
     fun longTime(ms: Long): String {
         val min = (ms + 30_000) / 60_000
-        return if (min >= 60) "${min / 60} h ${min % 60} min" else "$min min"
+        return if (min >= 60) tr("${min / 60} h ${min % 60} min", "${min / 60} sa ${min % 60} dk") else tr("$min min", "$min dk")
     }
 
     fun time(ms: Long): String {

@@ -1,5 +1,6 @@
 package app.plain.maps
 
+import app.plain.lang.tr
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
@@ -57,12 +58,12 @@ class Situational(
     private fun checkCancel() { if (cancel.get()) throw InterruptedException() }
 
     fun run() {
-        net = Net.Net0(Net.wifi(ctx) ?: throw IOException("No Wi-Fi. Sync only runs on Wi-Fi."))
+        net = Net.Net0(Net.wifi(ctx) ?: throw IOException(tr("No Wi-Fi. Sync only runs on Wi-Fi.", "Wi-Fi yok. Eşitleme yalnızca Wi-Fi ile çalışır.")))
         val cur = Sync.dataFile(ctx)
-        if (!cur.exists()) throw IOException("Do a full sync first.")
+        if (!cur.exists()) throw IOException(tr("Do a full sync first.", "Önce tam eşitleme yapın."))
         val dir = File(ctx.filesDir, "sync").apply { mkdirs() }
         val tmp = File(dir, "data-sit.db")
-        report(0.01f, "Copying the offline data")
+        report(0.01f, tr("Copying the offline data", "Çevrimdışı veri kopyalanıyor"))
         cur.copyTo(tmp, overwrite = true)
         val db = SQLiteDatabase.openDatabase(tmp.path, null, SQLiteDatabase.OPEN_READWRITE)
         try {
@@ -79,14 +80,14 @@ class Situational(
         checkCancel()
         val old = File(dir, "data-old.db")
         old.delete()
-        if (!cur.renameTo(old)) { tmp.delete(); throw IOException("could not replace the data") }
-        if (!tmp.renameTo(cur)) { old.renameTo(cur); throw IOException("could not install the new data") }
+        if (!cur.renameTo(old)) { tmp.delete(); throw IOException(tr("could not replace the data", "veri değiştirilemedi")) }
+        if (!tmp.renameTo(cur)) { old.renameTo(cur); throw IOException(tr("could not install the new data", "yeni veri kurulamadı")) }
         old.delete()
-        report(1f, "Done")
+        report(1f, tr("Done", "Bitti"))
     }
 
     private fun notices(db: SQLiteDatabase) {
-        report(0.03f, "İETT announcements")
+        report(0.03f, tr("İETT announcements", "İETT duyuruları"))
         val json = Net.soap(net, NOTICES, "GetDuyurular_json")
         db.execSQL("CREATE TABLE IF NOT EXISTS notice(ref TEXT, kind TEXT, at TEXT, msg TEXT)")
         db.execSQL("DELETE FROM notice")
@@ -104,18 +105,18 @@ class Situational(
             }
         }
         db.execSQL("CREATE INDEX IF NOT EXISTS notice_ref ON notice(ref)")
-        report(0.06f, "$n announcements")
+        report(0.06f, tr("$n announcements", "$n duyuru"))
     }
 
     /** EGO's announcement list: the line numbers in each title get a notice; "durak:NNNNN" for stop notices. */
     private fun egoNotices(db: SQLiteDatabase) {
-        report(0.03f, "EGO announcements")
+        report(0.03f, tr("EGO announcements", "EGO duyuruları"))
         val list = Ego.parseNotices(Net.text(net.n, Ego.NOTICES))
         db.execSQL("CREATE TABLE IF NOT EXISTS notice(ref TEXT, kind TEXT, at TEXT, msg TEXT)")
         db.execSQL("DELETE FROM notice")
         for (n in list) for (r in n.refs) db.execSQL("INSERT INTO notice VALUES(?,?,?,?)", arrayOf(r, "Duyuru", n.date, n.title))
         db.execSQL("CREATE INDEX IF NOT EXISTS notice_ref ON notice(ref)")
-        report(0.06f, "${list.size} announcements")
+        report(0.06f, tr("${list.size} announcements", "${list.size} duyuru"))
     }
 
     /**
@@ -192,14 +193,15 @@ class Situational(
                         }
                     }
                     val n = doneN.incrementAndGet()
-                    if (n % 10 == 0 || n == refs.size) report(0.06f + 0.92f * n / refs.size, "Bus times: line $n of ${refs.size}")
+                    if (n % 10 == 0 || n == refs.size) report(0.06f + 0.92f * n / refs.size, tr("Bus times: line $n of ${refs.size}", "Otobüs saatleri: hat $n / ${refs.size}"))
                 }
             }
         }
         futures.forEach { it.get() }
         pool.shutdown()
         checkCancel()
-        if (failures.get() > refs.size / 2) throw IOException("${City.operator}'s service did not answer for most lines (${failures.get()} of ${refs.size}). Try again later.")
+        if (failures.get() > refs.size / 2) throw IOException(tr("${City.operator}'s service did not answer for most lines (${failures.get()} of ${refs.size}). Try again later.",
+            "${City.operator} servisi hatların çoğu için yanıt vermedi (${failures.get()} / ${refs.size}). Daha sonra yeniden deneyin."))
         return doneN.get() - failures.get() to changed
     }
 }

@@ -1,5 +1,7 @@
 package app.plain.maps
 
+import app.plain.lang.tr
+
 /**
  * The city this build is for (the "istanbul" and "ankara" product flavors).
  * Everything city-specific lives here; the rest of the app is shared.
@@ -9,7 +11,10 @@ object City {
     val istanbul get() = id == "istanbul"
     val ankara get() = id == "ankara"
 
+    /** For the app's name ("Plain Istanbul Map"); [localName] in running text. */
     val name get() = if (ankara) "Ankara" else "Istanbul"
+
+    val localName get() = if (ankara) "Ankara" else tr("Istanbul", "İstanbul")
 
     /** Everything kept: map, places, lines and stops. */
     val area: BBox
@@ -42,12 +47,16 @@ object City {
     val operator get() = if (ankara) "EGO" else "İETT"
 
     val mapSourceText
-        get() = if (ankara) "The map, places and metro, Ankaray, Başkentray and cable-car lines come from openstreetmap.fr's daily Central Anatolia extract (about 120 MB)."
-        else "The city (Avcılar–Kartal, Başakşehir–Sarıyer) comes from a weekly OpenStreetMap extract. The outer districts come from OpenStreetMap's public server, which is often busy; then they are left out and the next sync tries again."
+        get() = if (ankara) tr("The map, places and metro, Ankaray, Başkentray and cable-car lines come from openstreetmap.fr's daily Central Anatolia extract (about 120 MB).",
+            "Harita, yerler ve metro, Ankaray, Başkentray ve teleferik hatları openstreetmap.fr'nin günlük İç Anadolu dosyasından gelir (yaklaşık 120 MB).")
+        else tr("The city (Avcılar–Kartal, Başakşehir–Sarıyer) comes from a weekly OpenStreetMap extract. The outer districts come from OpenStreetMap's public server, which is often busy; then they are left out and the next sync tries again.",
+            "Şehir (Avcılar–Kartal, Başakşehir–Sarıyer) haftalık bir OpenStreetMap dosyasından gelir. Dış ilçeler OpenStreetMap'in genel sunucusundan gelir; sunucu sık sık meşgul olur, o zaman dış ilçeler atlanır ve bir sonraki eşitleme yeniden dener.")
 
     val busSourceText
-        get() = if (ankara) "Bus lines, stops and timetables: EGO (ego.gov.tr hareket saatleri). Stop positions and route shapes: OpenStreetMap."
-        else "Bus lines, stops, route shapes and timetables: İBB Open Data Portal (İETT)."
+        get() = if (ankara) tr("Bus lines, stops and timetables: EGO (ego.gov.tr hareket saatleri). Stop positions and route shapes: OpenStreetMap.",
+            "Otobüs hatları, duraklar ve saatler: EGO (ego.gov.tr hareket saatleri). Durak konumları ve güzergâh çizimleri: OpenStreetMap.")
+        else tr("Bus lines, stops, route shapes and timetables: İBB Open Data Portal (İETT).",
+            "Otobüs hatları, duraklar, güzergâh çizimleri ve saatler: İBB Açık Veri Portalı (İETT).")
 
-    val downloadSize get() = if (ankara) "about 200 MB" else "about 350 MB"
+    val downloadSize get() = if (ankara) tr("about 200 MB", "yaklaşık 200 MB") else tr("about 350 MB", "yaklaşık 350 MB")
 }

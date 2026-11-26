@@ -29,6 +29,8 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -109,6 +111,7 @@ class GalleryActivity : Activity() {
     private val reload = Runnable { load() }
 
     override fun onCreate(b: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(b)
         prefs = getSharedPreferences("gallery", MODE_PRIVATE)
         page = b?.getInt("page") ?: 0
@@ -121,21 +124,21 @@ class GalleryActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        back = label("‹", 26f).apply { contentDescription = "Back"; setPadding(0, 0, 0, dp(4)); setOnClickListener { goBack() } }
-        title = label("Gallery", 17f, TEXT2).apply {
+        back = label("‹", 26f).apply { contentDescription = tr("Back", "Geri"); setPadding(0, 0, 0, dp(4)); setOnClickListener { goBack() } }
+        title = label(tr("Gallery", "Galeri"), 17f, TEXT2).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
         }
-        pageSel = button("All on page") { selectPage() }.apply { setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }
-        menuBtn = label("⋮", 22f).apply { contentDescription = "Menu"; setOnClickListener { showMenu(it) } }
+        pageSel = button(tr("All on page", "Sayfadakiler")) { selectPage() }.apply { setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }
+        menuBtn = label("⋮", 22f).apply { contentDescription = tr("Menu", "Menü"); setOnClickListener { showMenu(it) } }
         top.addView(back, LinearLayout.LayoutParams(dp(44), dp(48)))
         top.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
         // straight to Plain Camera (shown only when it's installed)
-        camBtn = button("Camera") { openCamera() }.apply {
+        camBtn = button(tr("Camera", "Kamera")) { openCamera() }.apply {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
             setTextColor(TEXT2)
-            contentDescription = "Open Plain Camera"
+            contentDescription = tr("Open Plain Camera", "Plain Camera'yı aç")
         }
         top.addView(pageSel, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(10) })
         top.addView(camBtn, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(2) })
@@ -165,9 +168,9 @@ class GalleryActivity : Activity() {
             setPadding(dp(6), dp(8), dp(6), 0)
         }
         val alp = { LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4); marginEnd = dp(4) } }
-        catBtn = button("Categorize") { categorize() }
-        removeBtn = button("Remove") { removeFromCategory() }.apply { contentDescription = "Remove from this category" }
-        deleteBtn = button("Delete") { trash(selectedItems()) }
+        catBtn = button(tr("Categorize", "Kategorile")) { categorize() }
+        removeBtn = button(tr("Remove", "Çıkar")) { removeFromCategory() }.apply { contentDescription = tr("Remove from this category", "Bu kategoriden çıkar") }
+        deleteBtn = button(tr("Delete", "Sil")) { trash(selectedItems()) }
         actions.addView(catBtn, alp())
         actions.addView(removeBtn, alp())
         actions.addView(deleteBtn, alp())
@@ -177,8 +180,8 @@ class GalleryActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
-        prev = button("‹ Previous") { go(page - 1) }
-        next = button("Next ›") { go(page + 1) }
+        prev = button(tr("‹ Previous", "‹ Önceki")) { go(page - 1) }
+        next = button(tr("Next ›", "Sonraki ›")) { go(page + 1) }
         pageLabel = label("", 15f, TEXT2).apply { setOnClickListener { askPage() } }
         bar.addView(prev, LinearLayout.LayoutParams(-2, dp(44)))
         bar.addView(pageLabel, LinearLayout.LayoutParams(0, dp(44), 1f))
@@ -207,7 +210,7 @@ class GalleryActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
-        if (hasRead()) { if (dirty) load() } else showMessage("Allow access to your photos and videos to see them here.\n\nTap to allow.")
+        if (hasRead()) { if (dirty) load() } else showMessage(tr("Allow access to your photos and videos to see them here.\n\nTap to allow.", "Fotoğraf ve videolarınızı burada görmek için erişim izni verin.\n\nİzin vermek için dokunun."))
     }
 
     override fun onPause() {
@@ -243,7 +246,7 @@ class GalleryActivity : Activity() {
 
     override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) {
         if (hasRead()) { hideMessage(); load() }
-        else showMessage("Allow access to your photos and videos to see them here.\n\nTap to allow.")
+        else showMessage(tr("Allow access to your photos and videos to see them here.\n\nTap to allow.", "Fotoğraf ve videolarınızı burada görmek için erişim izni verin.\n\nİzin vermek için dokunun."))
     }
 
     private fun showMessage(t: String) {
@@ -267,7 +270,7 @@ class GalleryActivity : Activity() {
 
     private fun openCamera() {
         val i = cameraIntent() ?: return
-        try { startActivity(i) } catch (_: Exception) { toast("Plain Camera isn't installed.") }
+        try { startActivity(i) } catch (_: Exception) { toast(tr("Plain Camera isn't installed.", "Plain Camera yüklü değil.")) }
     }
 
     // ------------------------------------------------------------------ data
@@ -278,7 +281,7 @@ class GalleryActivity : Activity() {
                 val l = try { Library.load(this) } catch (e: Exception) { null }
                 main.post {
                     if (isDestroyed) return@post
-                    if (l == null) { showMessage("Couldn't read the media library."); return@post }
+                    if (l == null) { showMessage(tr("Couldn't read the media library.", "Medya kitaplığı okunamadı.")); return@post }
                     items = l
                     loaded = true
                     refresh()
@@ -318,9 +321,9 @@ class GalleryActivity : Activity() {
             else for (n in ns) { counts[n] = (counts[n] ?: 0) + 1; covers.putIfAbsent(n, it) }
         }
         val out = ArrayList<Folder>()
-        out += Folder("All", Screen.ALL, items.firstOrNull(), items.size)
+        out += Folder(tr("All", "Tümü"), Screen.ALL, items.firstOrNull(), items.size)
         for (n in t.names) out += Folder(n, Screen.CATEGORY, covers[n], counts[n] ?: 0)
-        if (t.names.isNotEmpty()) out += Folder("Uncategorized", Screen.UNSORTED, unsortedCover, unsorted)
+        if (t.names.isNotEmpty()) out += Folder(tr("Uncategorized", "Kategorisiz"), Screen.UNSORTED, unsortedCover, unsorted)
         return out
     }
 
@@ -378,26 +381,27 @@ class GalleryActivity : Activity() {
             val f = r.map { folders[it] }
             grid.labels = f.map { it.name to Paging.count(it.count) }
             grid.items = f.map { it.cover }
-            grid.contentDescription = "Folder grid, ${f.size} folders"
+            grid.contentDescription = tr("Folder grid, ${f.size} folders", "Klasör ızgarası, ${f.size} klasör")
             loadThumbs(f.mapNotNull { it.cover }, emptyList())
         } else {
             grid.labels = null
             val slice = r.map { shown[it] }
             grid.items = slice
-            grid.contentDescription = "Page grid, ${slice.size} items"
+            grid.contentDescription = tr("Page grid, ${slice.size} items", "Sayfa ızgarası, ${slice.size} öğe")
             loadThumbs(slice, Paging.range(page + 1, perPage, n).map { shown[it] })
         }
-        pageLabel.text = "Page ${page + 1} / $pages"
+        pageLabel.text = tr("Page ${page + 1} / $pages", "Sayfa ${page + 1} / $pages")
         prev.isEnabled = page > 0
         prev.alpha = if (page > 0) 1f else 0.35f
         next.isEnabled = page < pages - 1
         next.alpha = if (page < pages - 1) 1f else 0.35f
         if (hasRead() && loaded) {
             when {
-                items.isEmpty() -> showMessage("No photos or videos yet.")
+                items.isEmpty() -> showMessage(tr("No photos or videos yet.", "Henüz fotoğraf veya video yok."))
                 screen == Screen.CATEGORY && shown.isEmpty() ->
-                    showMessage("Nothing in “$category” yet.\n\nOpen All, choose ⋮ › Select, pick photos and tap Categorize.")
-                screen == Screen.UNSORTED && shown.isEmpty() -> showMessage("Everything is in a category.")
+                    showMessage(tr("Nothing in “$category” yet.\n\nOpen All, choose ⋮ › Select, pick photos and tap Categorize.",
+                        "“$category” henüz boş.\n\nTümü'nü açın, ⋮ › Seç'i seçin, fotoğrafları işaretleyip Kategorile'ye dokunun."))
+                screen == Screen.UNSORTED && shown.isEmpty() -> showMessage(tr("Everything is in a category.", "Her şey bir kategoride."))
                 else -> hideMessage()
             }
         }
@@ -469,18 +473,20 @@ class GalleryActivity : Activity() {
     // ------------------------------------------------------------------ menu
     private fun showMenu(anchor: View) {
         val m = PopupMenu(this, anchor)
-        if (screen != Screen.FOLDERS) m.menu.add(0, 1, 0, "Select")
-        if (screen == Screen.FOLDERS) m.menu.add(0, 4, 0, "New category…")
-        m.menu.add(0, 2, 1, "Categories").setCheckable(true).isChecked = catsOn
-        m.menu.add(0, 3, 2, "Hold to delete").setCheckable(true).isChecked = holdDelete
-        m.menu.add(0, 5, 3, PlainUpdate.label(this))
+        if (screen != Screen.FOLDERS) m.menu.add(0, 1, 0, tr("Select", "Seç"))
+        if (screen == Screen.FOLDERS) m.menu.add(0, 4, 0, tr("New category…", "Yeni kategori…"))
+        m.menu.add(0, 2, 1, tr("Categories", "Kategoriler")).setCheckable(true).isChecked = catsOn
+        m.menu.add(0, 3, 2, tr("Hold to delete", "Basılı tutarak sil")).setCheckable(true).isChecked = holdDelete
+        m.menu.add(0, 6, 3, PlainLang.label())
+        m.menu.add(0, 5, 4, PlainUpdate.label(this))
         m.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startSelect()
                 2 -> setCats(!catsOn)
                 3 -> setHoldDelete(!holdDelete)
-                4 -> Categories.askName(this, "New category", "") { n -> Categories.get(this).create(n); Categories.save(this); refresh() }
+                4 -> Categories.askName(this, tr("New category", "Yeni kategori"), "") { n -> Categories.get(this).create(n); Categories.save(this); refresh() }
                 5 -> PlainUpdate.check(this)
+                6 -> PlainLang.choose(this, anchor)
             }
             true
         }
@@ -497,20 +503,23 @@ class GalleryActivity : Activity() {
 
     private fun setHoldDelete(on: Boolean) {
         prefs.edit().putBoolean("holdDelete", on).apply()
-        if (!on) { toast("Hold now selects."); return }
+        if (!on) { toast(tr("Hold now selects.", "Basılı tutmak artık seçer.")); return }
         if (Build.VERSION.SDK_INT >= 31 && !canManage()) {
             AlertDialog.Builder(this)
-                .setTitle("Hold to delete is on")
-                .setMessage("Holding a photo moves it to the trash (Undo for a few seconds, restorable for 30 days).\n\n" +
+                .setTitle(tr("Hold to delete is on", "Basılı tutarak silme açık"))
+                .setMessage(tr("Holding a photo moves it to the trash (Undo for a few seconds, restorable for 30 days).\n\n" +
                     "To skip Android's confirmation each time, allow Plain Gallery under “Media management”. " +
-                    "Without it, Android asks once per delete.")
-                .setPositiveButton("Open setting") { _, _ ->
+                    "Without it, Android asks once per delete.",
+                    "Bir fotoğrafı basılı tutmak onu çöp kutusuna taşır (birkaç saniye Geri al, 30 gün içinde geri yüklenebilir).\n\n" +
+                    "Android'in her seferki onayını atlamak için “Medya yönetimi” altında Plain Gallery'ye izin verin. " +
+                    "İzin yoksa Android her silmede bir kez sorar."))
+                .setPositiveButton(tr("Open setting", "Ayarı aç")) { _, _ ->
                     try { startActivity(Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:$packageName"))) }
-                    catch (_: Exception) { toast("Couldn't open the setting.") }
+                    catch (_: Exception) { toast(tr("Couldn't open the setting.", "Ayar açılamadı.")) }
                 }
-                .setNegativeButton("Not now", null)
+                .setNegativeButton(tr("Not now", "Şimdi değil"), null)
                 .show()
-        } else toast("Hold a photo to move it to the trash.")
+        } else toast(tr("Hold a photo to move it to the trash.", "Çöp kutusuna taşımak için fotoğrafı basılı tutun."))
     }
 
     // ------------------------------------------------------------------ selection
@@ -550,14 +559,14 @@ class GalleryActivity : Activity() {
         back.visibility = if (selecting || nested) View.VISIBLE else View.GONE
         back.text = if (selecting) "✕" else "‹"
         back.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (selecting) 20f else 26f)
-        back.contentDescription = if (selecting) "Cancel selection" else "Back"
+        back.contentDescription = if (selecting) tr("Cancel selection", "Seçimi iptal et") else tr("Back", "Geri")
         title.setPadding(dp(if (selecting || nested) 2 else 14), dp(8), dp(8), dp(8))
         title.text = when {
-            selecting -> "${Paging.count(selected.size)} selected"
-            screen == Screen.FOLDERS -> "Categories"
+            selecting -> tr("${Paging.count(selected.size)} selected", "${Paging.count(selected.size)} seçili")
+            screen == Screen.FOLDERS -> tr("Categories", "Kategoriler")
             screen == Screen.CATEGORY -> "$category · ${Paging.count(shown.size)}"
-            screen == Screen.UNSORTED -> "Uncategorized · ${Paging.count(shown.size)}"
-            else -> "Gallery · ${Paging.count(items.size)}"
+            screen == Screen.UNSORTED -> tr("Uncategorized", "Kategorisiz") + " · ${Paging.count(shown.size)}"
+            else -> tr("Gallery", "Galeri") + " · ${Paging.count(items.size)}"
         }
         pageSel.visibility = if (selecting) View.VISIBLE else View.GONE
         menuBtn.visibility = if (selecting) View.GONE else View.VISIBLE
@@ -575,7 +584,7 @@ class GalleryActivity : Activity() {
         Categories.choose(this, ids, {
             endSelect()
             refresh()
-            toast("Categories saved.")
+            toast(tr("Categories saved.", "Kategoriler kaydedildi."))
         })
     }
 
@@ -587,19 +596,19 @@ class GalleryActivity : Activity() {
         Categories.save(this)
         endSelect()
         refresh()
-        toast("Removed ${Paging.count(ids.size)} from “$c”.")
+        toast(tr("Removed ${Paging.count(ids.size)} from “$c”.", "${Paging.count(ids.size)} öğe çıkarıldı: “$c”"))
     }
 
     /** Hold a category folder: rename or delete it (its photos stay in the gallery). */
     private fun folderOptions(name: String) {
         AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf("Rename", "Delete category")) { _, w ->
+            .setItems(arrayOf(tr("Rename", "Yeniden adlandır"), tr("Delete category", "Kategoriyi sil"))) { _, w ->
                 val t = Categories.get(this)
-                if (w == 0) Categories.askName(this, "Rename category", name) { n -> t.rename(name, n); Categories.save(this); refresh() }
-                else AlertDialog.Builder(this).setTitle("Delete “$name”?")
-                    .setMessage("Only the category goes. The photos and videos stay in the gallery.")
-                    .setPositiveButton("Delete") { _, _ -> t.delete(name); Categories.save(this); refresh() }
-                    .setNegativeButton("Cancel", null)
+                if (w == 0) Categories.askName(this, tr("Rename category", "Kategoriyi yeniden adlandır"), name) { n -> t.rename(name, n); Categories.save(this); refresh() }
+                else AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
+                    .setMessage(tr("Only the category goes. The photos and videos stay in the gallery.", "Yalnızca kategori silinir. Fotoğraf ve videolar galeride kalır."))
+                    .setPositiveButton(tr("Delete", "Sil")) { _, _ -> t.delete(name); Categories.save(this); refresh() }
+                    .setNegativeButton(tr("Cancel", "İptal"), null)
                     .show()
             }
             .show()
@@ -614,14 +623,14 @@ class GalleryActivity : Activity() {
     private fun trash(list: List<Item>) {
         val l = list.filter { it.inStore }
         if (l.isEmpty() || pendingTrash.isNotEmpty()) return
-        if (Build.VERSION.SDK_INT < 30) { toast("Open the item to delete it."); return }
+        if (Build.VERSION.SDK_INT < 30) { toast(tr("Open the item to delete it.", "Silmek için öğeyi açın.")); return }
         pendingTrash = l
         try {
             val pi = MediaStore.createTrashRequest(contentResolver, l.map { it.uri }, true)
             startIntentSenderForResult(pi.intentSender, RC_TRASH, null, 0, 0, 0)
         } catch (e: Exception) {
             pendingTrash = emptyList()
-            toast("Couldn't delete: ${e.message}")
+            toast(tr("Couldn't delete: ${e.message}", "Silinemedi: ${e.message}"))
         }
     }
 
@@ -632,7 +641,7 @@ class GalleryActivity : Activity() {
         if (!undo.showing) undoBatch.clear()
         undoBatch += l
         val n = undoBatch.size
-        undo.show("Moved ${Paging.count(n)} to trash") { restore(ArrayList(undoBatch)) }
+        undo.show(tr("Moved ${Paging.count(n)} to trash", "${Paging.count(n)} öğe çöpe taşındı")) { restore(ArrayList(undoBatch)) }
         refresh()
     }
 
@@ -645,7 +654,7 @@ class GalleryActivity : Activity() {
             startIntentSenderForResult(pi.intentSender, RC_RESTORE, null, 0, 0, 0)
         } catch (e: Exception) {
             pendingRestore = emptyList()
-            toast("Couldn't restore: ${e.message}")
+            toast(tr("Couldn't restore: ${e.message}", "Geri yüklenemedi: ${e.message}"))
         }
     }
 
@@ -672,7 +681,7 @@ class GalleryActivity : Activity() {
                     Library.restore(l)
                     items = Library.items
                     refresh()
-                    toast("Restored ${Paging.count(l.size)}.")
+                    toast(tr("Restored ${Paging.count(l.size)}.", "${Paging.count(l.size)} öğe geri yüklendi."))
                 }
             }
         }
@@ -686,11 +695,11 @@ class GalleryActivity : Activity() {
             hint = "1 – $pages"
         }
         AlertDialog.Builder(this)
-            .setTitle("Go to page")
+            .setTitle(tr("Go to page", "Sayfaya git"))
             .setView(e)
-            .setPositiveButton("Go") { _, _ -> e.text.toString().toIntOrNull()?.let { go((it - 1).coerceIn(0, pages - 1)) } }
-            .setNeutralButton("First") { _, _ -> go(0) }
-            .setNegativeButton("Last") { _, _ -> go(pages - 1) }
+            .setPositiveButton(tr("Go", "Git")) { _, _ -> e.text.toString().toIntOrNull()?.let { go((it - 1).coerceIn(0, pages - 1)) } }
+            .setNeutralButton(tr("First", "İlk")) { _, _ -> go(0) }
+            .setNegativeButton(tr("Last", "Son")) { _, _ -> go(pages - 1) }
             .show()
     }
 

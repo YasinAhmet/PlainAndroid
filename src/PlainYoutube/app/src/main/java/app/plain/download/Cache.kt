@@ -92,8 +92,14 @@ class CacheMeta(
     var publicUri: String? = null, // set once complete and published under Music|Movies/PlainDownload/Cached/
     var relPath: String? = null,
     var fileName: String? = null,
+    val lang: String = "", // audio language of a dubbed video ("en", "tr"); "" = single track (or cached before 2.8)
+    val langOriginal: Boolean = false, // [lang] is the uploader's original track
+    var langKnown: Boolean = false, // made since 2.8 (picks the original); older dubbed entries may hold a dub
 ) {
-    val key get() = "${videoId}_$quality"
+    val key get() = keyOf(videoId, quality, lang)
+
+    /** Holds the audio the player wants: [want] null = the original (single-track and older entries count), else that language. */
+    fun langMatches(want: String?): Boolean = if (want == null) lang.isEmpty() || langOriginal else lang == want
 
     /** Complete and living as a public MediaStore file (the private copy is gone). */
     val published get() = publicUri != null
@@ -116,9 +122,13 @@ class CacheMeta(
         put("used", lastUsed); put("size", size); put("ext", ext); put("codecs", codecs); put("bw", bandwidth)
         put("res", resolution)
         album?.let { put("album", it) }; publicUri?.let { put("uri", it) }; relPath?.let { put("rel", it) }; fileName?.let { put("file", it) }
+        if (lang.isNotEmpty()) { put("lang", lang); put("langOrig", langOriginal) }
+        if (langKnown) put("lk", true)
     }.toString()
 
     companion object {
+        fun keyOf(videoId: String, quality: Int, lang: String) = "${videoId}_$quality" + if (lang.isNotEmpty()) "_$lang" else ""
+
         fun decode(s: String): CacheMeta? = try {
             val o = JSONObject(s)
             CacheMeta(
@@ -127,7 +137,7 @@ class CacheMeta(
                 Ranges.decode(o.optString("aDone")), o.optLong("used"), o.optLong("size"), o.optString("ext"),
                 o.optString("codecs"), o.optLong("bw"), o.optString("res"),
                 o.optString("album").ifEmpty { null }, o.optString("uri").ifEmpty { null }, o.optString("rel").ifEmpty { null },
-                o.optString("file").ifEmpty { null },
+                o.optString("file").ifEmpty { null }, o.optString("lang"), o.optBoolean("langOrig"), o.optBoolean("lk"),
             )
         } catch (_: Exception) { null }
     }
@@ -269,10 +279,15 @@ object Modes {
         JSONObject(playerJson).optJSONObject("microformat")?.optJSONObject("playerMicroformatRenderer")?.optString("category")?.ifEmpty { null }
     } catch (_: Exception) { null }
 
-    /** Audio stream to listen to: itag 140 (M4A) first, then 251 (Opus WebM), then any AAC / Opus. */
-    fun listenFormat(formats: List<Format>): Format? =
-        formats.firstOrNull { it.itag == 140 && !it.drc } ?: formats.firstOrNull { it.itag == 251 && !it.drc }
-            ?: Pick.audio(formats, AudioFmt.M4A, AudioQ.HIGH) ?: Pick.audio(formats, AudioFmt.OPUS, AudioQ.HIGH)
+    /**
+     * Audio stream to listen to, in language [lang] (null = the original): itag 140 (M4A) first, then 251 (Opus WebM),
+     * then any AAC / Opus.
+     */
+    fun listenFormat(formats: List<Format>, lang: String? = null): Format? {
+        val fs = AudioTracks.select(formats.filter { !it.hasVideo }, lang)
+        return fs.firstOrNull { it.itag == 140 && !it.drc } ?: fs.firstOrNull { it.itag == 251 && !it.drc }
+            ?: Pick.audio(fs, AudioFmt.M4A, AudioQ.HIGH) ?: Pick.audio(fs, AudioFmt.OPUS, AudioQ.HIGH)
+    }
 }
 
 object Id3 {
@@ -300,7 +315,28 @@ object Hls {
         val label get() = "${height}p" + if (fps > 30) "$fps" else ""
     }
 
-    data class Master(val variants: List<Variant>, val audio: Map<String, String>) // group id -> playlist uri
+    /** One audio rendition of a group: dubbed videos have one per language (all DEFAULT=NO, alphabetical, original last). */
+    data class Rendition(val uri: String, val lang: String?, val name: String, val original: Boolean, val default: Boolean)
+
+    /** [audio] = group id -> the original (else default) rendition's playlist uri; [renditions] = every language. */
+    data class Master(val variants: List<Variant>, val audio: Map<String, String>, val renditions: Map<String, List<Rendition>> = emptyMap()) {
+        /** Audio languages offered, original first; empty for a single-track video. */
+        val tracks: List<AudioTrack>
+            get() = AudioTracks.sortTracks(renditions.values.flatten().filter { it.lang != null }.map { AudioTrack(it.lang!!, it.original, it.name) })
+                .takeIf { it.size > 1 }.orEmpty()
+
+        /** Audio playlist of [group] in [lang] (null = original) and the language it really is ("" = single-track video). */
+        fun audioFor(group: String, lang: String?): Pair<String, String>? {
+            val rs = renditions[group]
+            if (rs.isNullOrEmpty()) return audio[group]?.let { it to "" }
+            val r = pickRendition(rs, lang)
+            return r.uri to if (tracks.isNotEmpty()) r.lang.orEmpty() else ""
+        }
+    }
+
+    fun pickRendition(rs: List<Rendition>, lang: String?): Rendition =
+        (if (lang != null) rs.firstOrNull { it.lang == lang } else null)
+            ?: rs.firstOrNull { it.original } ?: rs.firstOrNull { it.default } ?: rs.first()
 
     data class Seg(val duration: Double, val uri: String)
 
@@ -314,11 +350,17 @@ object Hls {
     fun parseMaster(text: String, base: String): Master {
         val lines = text.lines().map { it.trim() }
         val vs = ArrayList<Variant>()
-        val audio = LinkedHashMap<String, String>()
+        val rends = LinkedHashMap<String, MutableList<Rendition>>()
         for ((i, l) in lines.withIndex()) {
             if (l.startsWith("#EXT-X-MEDIA:")) {
                 val a = attrs(l)
-                if (a["TYPE"] == "AUDIO" && a["URI"] != null && a["GROUP-ID"] != null) audio.putIfAbsent(a["GROUP-ID"]!!, resolve(base, a["URI"]!!))
+                if (a["TYPE"] == "AUDIO" && a["URI"] != null && a["GROUP-ID"] != null) {
+                    val uri = resolve(base, a["URI"]!!)
+                    val name = a["NAME"].orEmpty()
+                    // LANGUAGE "en" / YT-EXT-AUDIO-CONTENT-ID "en.4"; the original says so in NAME and in the uri's xtags
+                    val lang = a["LANGUAGE"]?.ifEmpty { null } ?: a["YT-EXT-AUDIO-CONTENT-ID"]?.substringBefore('.')?.ifEmpty { null }
+                    rends.getOrPut(a["GROUP-ID"]!!) { ArrayList() } += Rendition(uri, lang, name, AudioTracks.isOriginal(name, uri), a["DEFAULT"] == "YES")
+                }
             } else if (l.startsWith("#EXT-X-STREAM-INF:")) {
                 val a = attrs(l)
                 val uri = lines.drop(i + 1).firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: continue
@@ -329,7 +371,9 @@ object Hls {
                 )
             }
         }
-        return Master(vs, audio)
+        val audio = LinkedHashMap<String, String>()
+        for ((g, rs) in rends) audio[g] = pickRendition(rs, null).uri
+        return Master(vs, audio, rends)
     }
 
     fun parseMedia(text: String, base: String): List<Seg> {

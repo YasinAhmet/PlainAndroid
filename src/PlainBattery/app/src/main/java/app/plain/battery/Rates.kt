@@ -1,5 +1,7 @@
 package app.plain.battery
 
+import app.plain.lang.tr
+
 /** Recent window, time-left estimates and standby current. Pure, unit-tested. */
 object Rates {
     /** Two snapshots of the same stats period, [batteryHours] of time on battery apart. */
@@ -72,9 +74,9 @@ object Rates {
     }
 
     fun formatHours(h: Double): String = when {
-        h < 1 -> "${Math.round(h * 60)} min"
-        h < 10 -> "%.1f h".format(java.util.Locale.US, h)
-        h < 48 -> "${Math.round(h)} h"
-        else -> "%.1f days".format(java.util.Locale.US, h / 24)
+        h < 1 -> "${Math.round(h * 60)} " + tr("min", "dk")
+        h < 10 -> tr("%.1f h", "%.1f sa").format(java.util.Locale.US, h)
+        h < 48 -> "${Math.round(h)} " + tr("h", "sa")
+        else -> tr("%.1f days", "%.1f gün").format(java.util.Locale.US, h / 24)
     }
 }

@@ -1,5 +1,6 @@
 package app.localmusic
 
+import app.plain.lang.tr
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -35,8 +36,8 @@ class Song(
     /** Artist named by the folders when the file has no artist tags ("Music/PlainDownload/Some Channel/" -> "Some Channel"). */
     val inferredArtist: String? =
         if (artist.isBlank() && albumArtist.isBlank() && externalUri == null) Naming.artistFromFolder(relPath) else null
-    /** Artist as shown in rows, now playing and the notification: the tag, else the folder, else "Unknown Artist". */
-    val shownArtist: String = artist.ifBlank { albumArtist }.ifBlank { inferredArtist ?: Naming.UNKNOWN_ARTIST }
+    /** Artist as shown in rows, now playing and the notification: the tag, else the folder, else "Unknown Artist" (in the UI language). */
+    val shownArtist: String get() = artist.ifBlank { albumArtist }.ifBlank { inferredArtist ?: tr(Naming.UNKNOWN_ARTIST, "Bilinmeyen sanatçı") }
     /** Artist used for the Artists tab and folders: album artist, else the lead track artist ("A, B feat. C" -> "A"), else the folder.
      *  A Plain Youtube file whose artist tag is its channel keeps the channel whole ("Rock, Paper" stays one artist). */
     val mainArtist: String = PlainYoutube.place(relPath)?.channel
@@ -93,8 +94,8 @@ class LibraryIndex(all: List<Song>) {
         val top = artists.maxBy { it.value }
         val artist = when {
             artists.size == 1 -> top.key
-            top.value * 2 >= v.size -> top.key + " & more"
-            else -> "Various artists"
+            top.value * 2 >= v.size -> top.key + tr(" & more", " ve diğerleri")
+            else -> tr("Various artists", "Çeşitli sanatçılar")
         }
         Group(k, majority(v.map { it.albumName }), trackOrder(v), artist)
     }.sortedWith(compareBy({ Text.sortKey(it.title) }, { it.key }))

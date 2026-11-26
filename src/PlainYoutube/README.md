@@ -589,6 +589,14 @@ page: Feed | Search | Following | Channel | Playlist, each a list with "Load mor
 - Controls: play/pause, seek bar with times (cached part shown as the secondary bar), −10 s / +10 s, quality (Watch),
   Save, Download… (the normal options), Full screen (landscape + hidden bars). The player rotates with the sensor
   only while it is open; the screen stays on only while playing.
+- **Audio language (2.8).** Dubbed videos (YouTube auto-dubs) carry one audio track per language. Every client
+  lists them alphabetically with `DEFAULT=NO` everywhere, the uploader's track last (HLS `NAME="English - original"`,
+  stream URL xtags `acont=original`; `/player` `audioTrack.displayName` "English original", id `en.4`), so taking the
+  first one played **Arabic** (verified on KrLj6nc516A, 25 dubs). The player, Listen, Download and Cache jobs now take
+  the original (`AudioTracks.select`, `Hls.pickRendition`); an **Audio** button next to Quality (only for dubbed
+  videos) picks another language, remembered per video (`audio_langs` prefs; the original is not stored). Cache
+  entries of a dubbed video carry the language in the key (`<id>_<q>_<lang>`); single-track keys are unchanged.
+  Entries cached before 2.8 (`lk` missing) may hold a dub: the Audio button shows for them and any pick leaves them.
 - **Streaming strategy** (verified live 2026-11-26):
 
   | Client | HLS master | itag 18 (360p muxed) | Adaptive streams |

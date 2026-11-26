@@ -35,6 +35,8 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.TextView
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ExecutorService
@@ -50,7 +52,14 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
 
     private enum class Tab { APPS, RESTORE, SETUP }
-    private enum class Filter(val label: String) { USER("User apps"), SYSTEM("System apps"), PLAIN("Plain apps") }
+    private enum class Filter {
+        USER, SYSTEM, PLAIN;
+        val label: String get() = when (this) {
+            USER -> tr("User apps", "Kullanıcı")
+            SYSTEM -> tr("System apps", "Sistem")
+            PLAIN -> tr("Plain apps", "Plain")
+        }
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
@@ -99,6 +108,7 @@ class MainActivity : Activity() {
     private lateinit var restoreEmpty: TextView
     private lateinit var restoreBtn: TextView
     private lateinit var setupBox: LinearLayout
+    private lateinit var menuBtn: TextView
 
     private val appAdapter = AppAdapter()
     private val restoreAdapter = RestoreAdapter()
@@ -108,6 +118,7 @@ class MainActivity : Activity() {
     private val onPermission = Shizuku.OnRequestPermissionResultListener { _, _ -> main.post { refreshShizuku(); loadRestore() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlainLang.init(this)
         super.onCreate(savedInstanceState)
         window.setBackgroundDrawable(ColorDrawable(C.BG))
         if (Build.VERSION.SDK_INT >= 30) {
@@ -119,6 +130,7 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         }
         buildUi()
+        savedInstanceState?.let { restoreState(it) }
         try {
             Shizuku.addBinderReceivedListenerSticky(onBinder)
             Shizuku.addBinderDeadListener(onBinderDead)
@@ -133,6 +145,22 @@ class MainActivity : Activity() {
         refreshShizuku()
         // Apps may have been removed or added elsewhere while we were away.
         if (!busy && !loading) loadApps()
+    }
+
+    /** Keeps tab, filter and selections across a recreate (language change, rotation). */
+    override fun onSaveInstanceState(out: Bundle) {
+        super.onSaveInstanceState(out)
+        out.putString("tab", tab.name)
+        out.putString("filter", filter.name)
+        out.putStringArrayList("selected", ArrayList(selected))
+        out.putStringArrayList("restoreSelected", ArrayList(restoreSelected))
+    }
+
+    private fun restoreState(b: Bundle) {
+        b.getStringArrayList("selected")?.let { selected.addAll(it) }
+        b.getStringArrayList("restoreSelected")?.let { restoreSelected.addAll(it) }
+        Filter.values().firstOrNull { it.name == b.getString("filter") }?.let { filter = it }
+        Tab.values().firstOrNull { it.name == b.getString("tab") }?.let { if (it != Tab.APPS) showTab(it) }
     }
 
     override fun onDestroy() {
@@ -165,8 +193,10 @@ class MainActivity : Activity() {
 
         // 1. Always-visible warning.
         val banner = text(
-            "Use at your own risk. Removing the wrong system app can break calls, the home screen or updates. " +
+            tr("Use at your own risk. Removing the wrong system app can break calls, the home screen or updates. " +
                 "Removed system apps can be restored from the Restore tab.",
+                "Kullanım sorumluluğu size aittir. Yanlış sistem uygulamasını kaldırmak aramaları, ana ekranı veya " +
+                    "güncellemeleri bozabilir. Kaldırılan sistem uygulamaları Geri yükle sekmesinden geri getirilebilir."),
             13f, C.RED, lines = 0,
         ).apply {
             background = outline(dpf(10), C.RED)
@@ -177,14 +207,15 @@ class MainActivity : Activity() {
         // Toolbar
         val bar = hbox().apply { setPadding(dp(16), dp(4), dp(4), 0) }
         bar.addView(text("Plain Uninstaller", 20f, C.TEXT, bold = true), lpL(0, WRAP, 1f))
-        bar.addView(toolButton("?", "How to declutter") { showHelp() })
-        bar.addView(toolButton("⋮", "Menu") { showMenu() })
+        bar.addView(toolButton("?", tr("How to declutter", "Nasıl sadeleştirilir")) { showHelp() })
+        menuBtn = toolButton("⋮", tr("Menu", "Menü")) { showMenu() }
+        bar.addView(menuBtn)
         root.addView(bar, lpL(MATCH, WRAP))
 
         // Tabs
         val tabs = hbox().apply { setPadding(dp(12), dp(4), dp(12), dp(4)) }
         val tv = LinkedHashMap<Tab, TextView>()
-        for ((t, label) in listOf(Tab.APPS to "Apps", Tab.RESTORE to "Restore", Tab.SETUP to "Setup")) {
+        for ((t, label) in listOf(Tab.APPS to tr("Apps", "Uygulamalar"), Tab.RESTORE to tr("Restore", "Geri yükle"), Tab.SETUP to tr("Setup", "Kurulum"))) {
             val v = text(label, 15f, C.DIM, bold = true).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(10), 0, dp(10))
@@ -251,7 +282,7 @@ class MainActivity : Activity() {
         page.addView(chipRow, lpL(MATCH, WRAP))
 
         search = EditText(this).apply {
-            hint = "Search apps or package names"
+            hint = tr("Search apps or package names", "Uygulama veya paket adı ara")
             textSize = 14f
             setTextColor(C.TEXT)
             setHintTextColor(C.LABEL)
@@ -273,18 +304,18 @@ class MainActivity : Activity() {
         val selRow = hbox()
         countText = text("", 13f, C.DIM)
         selRow.addView(countText, lpL(0, WRAP, 1f))
-        selRow.addView(pill("Select all visible") { selectAllVisible() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
-        selRow.addView(pill("Clear") { selected.clear(); updateSelection() }.apply { textSize = 13f })
+        selRow.addView(pill(tr("Select all visible", "Görünenleri seç")) { selectAllVisible() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
+        selRow.addView(pill(tr("Clear", "Temizle")) { selected.clear(); updateSelection() }.apply { textSize = 13f })
         page.addView(selRow, lpL(MATCH, WRAP).margins(b = dp(4)))
 
         val listBox = FrameLayout(this)
         appList = listView(appAdapter) { pos -> visible.getOrNull(pos)?.let { toggle(it.pkg) } }
-        appsEmpty = text("Loading apps…", 14f, C.LABEL, lines = 0).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) }
+        appsEmpty = text(tr("Loading apps…", "Uygulamalar yükleniyor…"), 14f, C.LABEL, lines = 0).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) }
         listBox.addView(appList, FrameLayout.LayoutParams(MATCH, MATCH))
         listBox.addView(appsEmpty, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         page.addView(listBox, lpL(MATCH, 0, 1f))
 
-        uninstallBtn = bottomButton("Uninstall 0 selected") { startUninstall() }
+        uninstallBtn = bottomButton(tr("Uninstall 0 selected", "Kaldır (0 seçili)")) { startUninstall() }
         page.addView(uninstallBtn, lpL(MATCH, WRAP).margins(t = dp(6)))
         return page
     }
@@ -296,10 +327,10 @@ class MainActivity : Activity() {
 
         val row = hbox()
         row.addView(View(this), lpL(0, 1, 1f))
-        row.addView(pill("Refresh") { loadRestore() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
-        row.addView(pill("Select all") { restoreSelected.addAll(restoreItems.map { it.pkg }); updateRestoreSelection() }
+        row.addView(pill(tr("Refresh", "Yenile")) { loadRestore() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
+        row.addView(pill(tr("Select all", "Tümünü seç")) { restoreSelected.addAll(restoreItems.map { it.pkg }); updateRestoreSelection() }
             .apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
-        row.addView(pill("Clear") { restoreSelected.clear(); updateRestoreSelection() }.apply { textSize = 13f })
+        row.addView(pill(tr("Clear", "Temizle")) { restoreSelected.clear(); updateRestoreSelection() }.apply { textSize = 13f })
         page.addView(row, lpL(MATCH, WRAP).margins(b = dp(4)))
 
         val listBox = FrameLayout(this)
@@ -311,7 +342,7 @@ class MainActivity : Activity() {
         listBox.addView(restoreEmpty, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         page.addView(listBox, lpL(MATCH, 0, 1f))
 
-        restoreBtn = bottomButton("Restore 0 selected") { startRestore() }
+        restoreBtn = bottomButton(tr("Restore 0 selected", "Geri yükle (0 seçili)")) { startRestore() }
         page.addView(restoreBtn, lpL(MATCH, WRAP).margins(t = dp(6)))
         return page
     }
@@ -348,17 +379,24 @@ class MainActivity : Activity() {
 
     private fun showMenu() {
         menu(null, listOf(
-            "How to declutter" to { showHelp() },
-            "Setup for system apps" to { showTab(Tab.SETUP) },
-            "Restore removed apps" to { showTab(Tab.RESTORE) },
+            tr("How to declutter", "Nasıl sadeleştirilir") to { showHelp() },
+            tr("Setup for system apps", "Sistem uygulamaları için kurulum") to { showTab(Tab.SETUP) },
+            tr("Restore removed apps", "Kaldırılanları geri yükle") to { showTab(Tab.RESTORE) },
             PlainUpdate.label(this) to { PlainUpdate.check(this) },
+            // Dropdown under the ⋮ button. A change recreates the activity; tab, filter and
+            // selections come back through onSaveInstanceState. Not while a batch is running.
+            PlainLang.label() to {
+                PlainLang.choose(this, menuBtn) {
+                    if (busy) toast(tr("The new language shows after this job", "Yeni dil bu işlemden sonra görünür")) else recreate()
+                }
+            },
         ))
     }
 
     private fun showHelp() {
         longMessage(
-            "How to declutter",
-            "1. Start with apps you recognise: games, trials, shopping, a second browser, the maker's own " +
+            tr("How to declutter", "Nasıl sadeleştirilir"),
+            tr("1. Start with apps you recognise: games, trials, shopping, a second browser, the maker's own " +
                 "store or \"tips\" apps you never open.\n\n" +
                 "2. Leave anything you're unsure about. A name you don't recognise is often a part of the phone " +
                 "(camera, SIM, calls, fingerprint). Protected parts are hidden from the list altogether.\n\n" +
@@ -368,14 +406,25 @@ class MainActivity : Activity() {
                 "Without Shizuku, the tab shows the adb commands to run from a PC.\n\n" +
                 "5. A factory reset brings every system app back by itself, so there's nothing to restore after one.\n\n" +
                 "User apps can be removed straight away. System apps need Shizuku: see the Setup tab.",
-        ).setPositiveButton("OK", null).show()
+                "1. Tanıdığınız uygulamalarla başlayın: oyunlar, deneme sürümleri, alışveriş, ikinci bir tarayıcı, " +
+                    "üreticinin kendi mağazası ya da hiç açmadığınız \"ipuçları\" uygulamaları.\n\n" +
+                    "2. Emin olmadıklarınızı bırakın. Tanımadığınız bir ad çoğu zaman telefonun bir parçasıdır " +
+                    "(kamera, SIM, aramalar, parmak izi). Korunan parçalar listede hiç gösterilmez.\n\n" +
+                    "3. Google Play hizmetleri ve Play Store Riskli olarak işaretlidir: onlar olmadan birçok uygulama, " +
+                    "bildirim ve güncelleme çalışmaz.\n\n" +
+                    "4. Bir sistem uygulamasını yanlışlıkla mı kaldırdınız? Geri yükle sekmesini açın, uygulamayı seçin " +
+                    "ve Geri yükle'ye dokunun. Shizuku yoksa sekme, bilgisayardan çalıştırılacak adb komutlarını gösterir.\n\n" +
+                    "5. Fabrika ayarlarına sıfırlama tüm sistem uygulamalarını kendiliğinden geri getirir; sonrasında " +
+                    "geri yüklenecek bir şey kalmaz.\n\n" +
+                    "Kullanıcı uygulamaları hemen kaldırılabilir. Sistem uygulamaları için Shizuku gerekir: Kurulum sekmesine bakın."),
+        ).setPositiveButton(tr("OK", "Tamam"), null).show()
     }
 
     // ---------------------------------------------------------------- Apps tab
 
     private fun loadApps() {
         loading = true
-        if (apps.isEmpty()) appsEmpty.text = "Loading apps…"
+        if (apps.isEmpty()) appsEmpty.text = tr("Loading apps…", "Uygulamalar yükleniyor…")
         worker.execute {
             val d = Apps.defaults(this)
             val list = Apps.load(this, d)
@@ -409,9 +458,9 @@ class MainActivity : Activity() {
         visible = apps.filter { matchesFilter(it) && (q.isEmpty() || q in it.label.lowercase() || q in it.pkg.lowercase()) }
         appsEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         if (!loading && visible.isEmpty()) {
-            appsEmpty.text = if (query.isNotEmpty()) "No apps match \"$query\"." else when (filter) {
-                Filter.PLAIN -> "No Plain apps installed."
-                else -> "Nothing here."
+            appsEmpty.text = if (query.isNotEmpty()) tr("No apps match \"$query\".", "\"$query\" ile eşleşen uygulama yok.") else when (filter) {
+                Filter.PLAIN -> tr("No Plain apps installed.", "Yüklü Plain uygulaması yok.")
+                else -> tr("Nothing here.", "Burada bir şey yok.")
             }
         }
         appAdapter.notifyDataSetChanged()
@@ -430,9 +479,11 @@ class MainActivity : Activity() {
 
     private fun updateSelection() {
         val shownSel = visible.count { it.pkg in selected }
-        countText.text = if (selected.size == shownSel) "${visible.size} shown · ${selected.size} selected"
-        else "${visible.size} shown · ${selected.size} selected (${selected.size - shownSel} hidden by filter)"
-        uninstallBtn.text = "Uninstall ${selected.size} selected"
+        countText.text = if (selected.size == shownSel)
+            tr("${visible.size} shown · ${selected.size} selected", "${visible.size} gösteriliyor · ${selected.size} seçili")
+        else tr("${visible.size} shown · ${selected.size} selected (${selected.size - shownSel} hidden by filter)",
+            "${visible.size} gösteriliyor · ${selected.size} seçili (${selected.size - shownSel} filtre dışında)")
+        uninstallBtn.text = tr("Uninstall ${selected.size} selected", "Kaldır (${selected.size} seçili)")
         uninstallBtn.setTextColor(if (selected.isEmpty()) C.LABEL else C.TEXT)
         uninstallBtn.background = ripple(outline(dpf(20), if (selected.isEmpty()) C.OUTLINE_BTN else C.RED))
         appAdapter.notifyDataSetChanged()
@@ -472,7 +523,7 @@ class MainActivity : Activity() {
         texts.addView(label)
         texts.addView(pkg)
         row.addView(texts, lpL(0, WRAP, 1f))
-        val tag = tag("Risky", C.ORANGE)
+        val tag = tag(tr("Risky", "Riskli"), C.ORANGE)
         row.addView(tag, lpL(WRAP, WRAP).margins(l = dp(6)))
         val check = checkBox()
         row.addView(check, lpL(WRAP, WRAP))
@@ -490,8 +541,8 @@ class MainActivity : Activity() {
             val h = v.tag as RowHolder
             val a = visible[position]
             h.label.text = a.label
-            h.pkg.text = if (a.system) "${a.pkg} · system" else a.pkg
-            h.tag.text = "Risky"
+            h.pkg.text = if (a.system) a.pkg + tr(" · system", " · sistem") else a.pkg
+            h.tag.text = tr("Risky", "Riskli")
             h.tag.setTextColor(C.ORANGE)
             h.tag.background = outline(dpf(8), C.ORANGE)
             h.tag.visibility = if (a.level == Level.RISKY) View.VISIBLE else View.GONE
@@ -511,47 +562,52 @@ class MainActivity : Activity() {
     private fun startUninstall() {
         if (busy) return
         val targets = targetsInOrder()
-        if (targets.isEmpty()) { toast("Select apps first"); return }
+        if (targets.isEmpty()) { toast(tr("Select apps first", "Önce uygulama seçin")); return }
         val ready = shizuku == Shiz.State.READY
         val sys = Plan.needShizuku(targets)
         if (!ready && sys.isNotEmpty()) {
             val users = Plan.dialogQueue(targets)
             val b = longMessage(
-                "Shizuku needed for system apps",
-                "${sys.size} of the selected apps are system apps. Android only lets them be removed through " +
-                    "Shizuku (a free helper app, set up once over wireless debugging).\n\n" +
+                tr("Shizuku needed for system apps", "Sistem uygulamaları için Shizuku gerekli"),
+                tr("${sys.size} of the selected apps are system apps. Android only lets them be removed through " +
+                    "Shizuku (a free helper app, set up once over wireless debugging).\n\n",
+                    "Seçilen uygulamalardan ${sys.size} tanesi sistem uygulaması. Android bunların yalnızca Shizuku ile " +
+                        "kaldırılmasına izin verir (ücretsiz bir yardımcı uygulama, kablosuz hata ayıklamayla bir kez kurulur).\n\n") +
                     sys.joinToString("\n") { "• ${it.label}" } +
-                    if (users.isEmpty()) "" else "\n\nThe ${users.size} user apps can be removed now, one by one, with Android's own uninstall dialog.",
+                    if (users.isEmpty()) "" else tr("\n\nThe ${users.size} user apps can be removed now, one by one, with Android's own uninstall dialog.",
+                        "\n\n${users.size} kullanıcı uygulaması şimdi, Android'in kendi kaldırma penceresiyle tek tek kaldırılabilir."),
             )
-            b.setPositiveButton("Set up Shizuku") { _, _ -> showTab(Tab.SETUP) }
-            if (users.isNotEmpty()) b.setNeutralButton("Remove ${users.size} user apps") { _, _ -> confirmAndRun(users, false) }
-            b.setNegativeButton("Cancel", null).show()
+            b.setPositiveButton(tr("Set up Shizuku", "Shizuku'yu kur")) { _, _ -> showTab(Tab.SETUP) }
+            if (users.isNotEmpty()) b.setNeutralButton(tr("Remove ${users.size} user apps", "${users.size} kullanıcı uygulamasını kaldır")) { _, _ -> confirmAndRun(users, false) }
+            b.setNegativeButton(tr("Cancel", "İptal"), null).show()
             return
         }
         confirmAndRun(targets, ready)
     }
 
     private fun confirmAndRun(targets: List<Target>, viaShizuku: Boolean) {
-        val how = if (viaShizuku) "They will be removed silently through Shizuku." +
-            (if (Plan.needShizuku(targets).isNotEmpty()) " System apps are removed for this user only and can be restored from the Restore tab." else "")
-        else "Android will ask you to confirm each one."
-        longMessage("Uninstall ${targets.size} apps?", Plan.describe(targets) + "\n\n" + how)
-            .setPositiveButton("Uninstall") { _, _ -> confirmRisky(targets, viaShizuku) }
-            .setNegativeButton("Cancel", null).show()
+        val how = if (viaShizuku) tr("They will be removed silently through Shizuku.", "Shizuku ile sessizce kaldırılacaklar.") +
+            (if (Plan.needShizuku(targets).isNotEmpty()) tr(" System apps are removed for this user only and can be restored from the Restore tab.",
+                " Sistem uygulamaları yalnızca bu kullanıcı için kaldırılır ve Geri yükle sekmesinden geri getirilebilir.") else "")
+        else tr("Android will ask you to confirm each one.", "Android her biri için onay isteyecek.")
+        longMessage(tr("Uninstall ${targets.size} apps?", "${targets.size} uygulama kaldırılsın mı?"), Plan.describe(targets) + "\n\n" + how)
+            .setPositiveButton(tr("Uninstall", "Kaldır")) { _, _ -> confirmRisky(targets, viaShizuku) }
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     private fun confirmRisky(targets: List<Target>, viaShizuku: Boolean) {
         val risky = Plan.risky(targets)
         if (risky.isEmpty()) { run(targets, viaShizuku); return }
         val msg = risky.joinToString("\n\n") { t -> "• ${t.label}\n   ${Safety.riskReason(t.pkg, defaults) ?: t.pkg}" } +
-            "\n\nOnly continue if you know you don't need these."
-        longMessage("Remove ${risky.size} risky apps?", msg)
-            .setPositiveButton("Remove anyway") { _, _ -> run(targets, viaShizuku) }
-            .setNeutralButton("Skip risky") { _, _ ->
+            tr("\n\nOnly continue if you know you don't need these.",
+                "\n\nYalnızca bunlara ihtiyacınız olmadığından eminseniz devam edin.")
+        longMessage(tr("Remove ${risky.size} risky apps?", "${risky.size} riskli uygulama kaldırılsın mı?"), msg)
+            .setPositiveButton(tr("Remove anyway", "Yine de kaldır")) { _, _ -> run(targets, viaShizuku) }
+            .setNeutralButton(tr("Skip risky", "Riskli olanları atla")) { _, _ ->
                 val safe = targets.filterNot { it.risky }
                 if (safe.isNotEmpty()) run(safe, viaShizuku)
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     private fun run(targets: List<Target>, viaShizuku: Boolean) {
@@ -561,13 +617,13 @@ class MainActivity : Activity() {
     /** Path b: Shizuku, silent, in the background, with a progress dialog and a per-app report. */
     private fun runShizuku(targets: List<Target>) {
         busy = true
-        val (dialog, status, bar) = progressDialog("Uninstalling", targets.size)
+        val (dialog, status, bar) = progressDialog(tr("Uninstalling", "Kaldırılıyor"), targets.size)
         worker.execute {
             val results = ArrayList<Pair<Target, String?>>()
             for ((i, pair) in Plan.shizukuCommands(targets).withIndex()) {
                 if (destroyed) break
                 val (t, cmd) = pair
-                main.post { if (!destroyed) { status.text = "${i + 1} of ${targets.size}: ${t.label}"; bar.progress = i } }
+                main.post { if (!destroyed) { status.text = tr("${i + 1} of ${targets.size}: ${t.label}", "${i + 1}/${targets.size}: ${t.label}"); bar.progress = i } }
                 val r = Shiz.run(cmd)
                 val ok = Commands.uninstallOk(r)
                 if (ok && t.system) Apps.appendLog(this, LogEntry(System.currentTimeMillis(), LogEntry.REMOVED, t.pkg, t.label))
@@ -577,7 +633,7 @@ class MainActivity : Activity() {
                 if (destroyed) return@post
                 try { dialog.dismiss() } catch (_: Exception) {}
                 busy = false
-                finishBatch("Uninstall", results)
+                finishBatch(tr("Uninstall", "Kaldırma"), results)
             }
         }
     }
@@ -595,7 +651,7 @@ class MainActivity : Activity() {
         current = t
         if (t == null) {
             busy = false
-            finishBatch("Uninstall", ArrayList(dialogResults))
+            finishBatch(tr("Uninstall", "Kaldırma"), ArrayList(dialogResults))
             return
         }
         @Suppress("DEPRECATION")
@@ -605,7 +661,7 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             startActivityForResult(i, REQ_UNINSTALL)
         } catch (e: Exception) {
-            dialogResults.add(t to "Could not open the uninstall dialog")
+            dialogResults.add(t to tr("Could not open the uninstall dialog", "Kaldırma penceresi açılamadı"))
             nextDialog()
         }
     }
@@ -620,8 +676,8 @@ class MainActivity : Activity() {
         val gone = !Apps.isInstalled(this, t.pkg)
         dialogResults.add(t to when {
             gone -> null
-            resultCode == RESULT_CANCELED -> "Cancelled"
-            else -> "Not removed"
+            resultCode == RESULT_CANCELED -> tr("Cancelled", "İptal edildi")
+            else -> tr("Not removed", "Kaldırılmadı")
         })
         // Let the uninstall activity finish closing before opening the next one.
         main.postDelayed({ if (!destroyed) nextDialog() }, 300)
@@ -630,15 +686,16 @@ class MainActivity : Activity() {
     private fun finishBatch(what: String, results: List<Pair<Target, String?>>) {
         val ok = results.count { it.second == null }
         val lines = results.joinToString("\n") { (t, err) -> if (err == null) "✓ ${t.label}" else "✗ ${t.label} — $err" }
-        longMessage("$what: $ok of ${results.size} done", lines.ifEmpty { "Nothing was done." })
-            .setPositiveButton("OK", null).show()
+        longMessage(tr("$what: $ok of ${results.size} done", "$what: $ok/${results.size} tamamlandı"),
+            lines.ifEmpty { tr("Nothing was done.", "Hiçbir şey yapılmadı.") })
+            .setPositiveButton(tr("OK", "Tamam"), null).show()
         selected.removeAll(results.filter { it.second == null }.map { it.first.pkg }.toSet())
         loadApps()
     }
 
     private fun progressDialog(title: String, max: Int): Triple<AlertDialog, TextView, ProgressBar> {
         val box = vbox(24, 12)
-        val status = text("Starting…", 14f, C.TEXT, lines = 2)
+        val status = text(tr("Starting…", "Başlıyor…"), 14f, C.TEXT, lines = 2)
         val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { this.max = max; progress = 0 }
         box.addView(status, lpL(MATCH, WRAP))
         box.addView(bar, lpL(MATCH, WRAP).margins(t = dp(12)))
@@ -652,7 +709,7 @@ class MainActivity : Activity() {
         if (restoreLoading || busy) return
         restoreLoading = true
         val ready = shizuku == Shiz.State.READY
-        restoreStatus.text = "Looking for removed system apps…"
+        restoreStatus.text = tr("Looking for removed system apps…", "Kaldırılan sistem uygulamaları aranıyor…")
         worker.execute {
             val log = RemovedLog.currentlyRemoved(Apps.readLog(this))
             var fromShizuku = false
@@ -682,15 +739,20 @@ class MainActivity : Activity() {
     private fun updateRestoreSelection() {
         val ready = shizuku == Shiz.State.READY
         restoreStatus.text = when {
-            restoreLoading -> "Looking for removed system apps…"
-            ready -> "System apps removed for this user. They are still on the phone and come back with their data. " +
-                "Apps removed with this app are listed first."
-            else -> "Shizuku isn't ready, so this list comes from Android itself and restoring is done from a PC: " +
-                "select apps and tap the button to get the adb commands. Or finish the Setup tab to restore here."
+            restoreLoading -> tr("Looking for removed system apps…", "Kaldırılan sistem uygulamaları aranıyor…")
+            ready -> tr("System apps removed for this user. They are still on the phone and come back with their data. " +
+                "Apps removed with this app are listed first.",
+                "Bu kullanıcı için kaldırılan sistem uygulamaları. Hâlâ telefondalar ve verileriyle geri gelirler. " +
+                    "Bu uygulamayla kaldırılanlar önce listelenir.")
+            else -> tr("Shizuku isn't ready, so this list comes from Android itself and restoring is done from a PC: " +
+                "select apps and tap the button to get the adb commands. Or finish the Setup tab to restore here.",
+                "Shizuku hazır değil; bu liste Android'den gelir ve geri yükleme bilgisayardan yapılır: uygulamaları " +
+                    "seçip adb komutları için düğmeye dokunun. Ya da burada geri yüklemek için Kurulum sekmesini tamamlayın.")
         }
         restoreEmpty.visibility = if (restoreItems.isEmpty()) View.VISIBLE else View.GONE
-        restoreEmpty.text = if (restoreLoading) "" else "No removed system apps found."
-        restoreBtn.text = if (ready) "Restore ${restoreSelected.size} selected" else "Show adb commands for ${restoreSelected.size}"
+        restoreEmpty.text = if (restoreLoading) "" else tr("No removed system apps found.", "Kaldırılmış sistem uygulaması bulunamadı.")
+        restoreBtn.text = if (ready) tr("Restore ${restoreSelected.size} selected", "Geri yükle (${restoreSelected.size} seçili)")
+        else tr("Show adb commands for ${restoreSelected.size}", "adb komutlarını göster (${restoreSelected.size})")
         restoreBtn.setTextColor(if (restoreSelected.isEmpty()) C.LABEL else C.TEXT)
         restoreBtn.background = ripple(outline(dpf(20), if (restoreSelected.isEmpty()) C.OUTLINE_BTN else C.GREEN))
         restoreAdapter.notifyDataSetChanged()
@@ -706,7 +768,7 @@ class MainActivity : Activity() {
             val r = restoreItems[position]
             h.label.text = r.label
             h.pkg.text = r.pkg
-            h.tag.text = "Removed here"
+            h.tag.text = tr("Removed here", "Burada kaldırıldı")
             h.tag.setTextColor(C.DIM)
             h.tag.background = outline(dpf(8), C.OUTLINE_BTN)
             h.tag.visibility = if (r.removedByThisApp) View.VISIBLE else View.GONE
@@ -719,15 +781,15 @@ class MainActivity : Activity() {
     private fun startRestore() {
         if (busy) return
         val chosen = restoreItems.filter { it.pkg in restoreSelected }
-        if (chosen.isEmpty()) { toast("Select apps first"); return }
+        if (chosen.isEmpty()) { toast(tr("Select apps first", "Önce uygulama seçin")); return }
         if (shizuku != Shiz.State.READY) { showAdbCommands(chosen); return }
         busy = true
-        val (dialog, status, bar) = progressDialog("Restoring", chosen.size)
+        val (dialog, status, bar) = progressDialog(tr("Restoring", "Geri yükleniyor"), chosen.size)
         worker.execute {
             val results = ArrayList<Pair<Target, String?>>()
             for ((i, r) in chosen.withIndex()) {
                 if (destroyed) break
-                main.post { if (!destroyed) { status.text = "${i + 1} of ${chosen.size}: ${r.label}"; bar.progress = i } }
+                main.post { if (!destroyed) { status.text = tr("${i + 1} of ${chosen.size}: ${r.label}", "${i + 1}/${chosen.size}: ${r.label}"); bar.progress = i } }
                 val res = Shiz.run(Commands.restore(r.pkg))
                 val ok = Commands.restoreOk(res)
                 if (ok) Apps.appendLog(this, LogEntry(System.currentTimeMillis(), LogEntry.RESTORED, r.pkg, r.label))
@@ -738,7 +800,7 @@ class MainActivity : Activity() {
                 try { dialog.dismiss() } catch (_: Exception) {}
                 busy = false
                 restoreSelected.removeAll(results.filter { it.second == null }.map { it.first.pkg }.toSet())
-                finishBatch("Restore", results)
+                finishBatch(tr("Restore", "Geri yükleme"), results)
                 loadRestore()
             }
         }
@@ -746,15 +808,17 @@ class MainActivity : Activity() {
 
     private fun showAdbCommands(items: List<RestoreItem>) {
         val cmds = items.joinToString("\n") { Commands.adb(Commands.restore(it.pkg)) }
-        val msg = "On a PC with Android platform-tools: turn on USB debugging on this phone, connect it by cable, " +
-            "allow the PC when asked, then run:\n\n$cmds"
-        longMessage("Restore from a PC", msg)
-            .setPositiveButton("Copy commands") { _, _ ->
+        val msg = tr("On a PC with Android platform-tools: turn on USB debugging on this phone, connect it by cable, " +
+            "allow the PC when asked, then run:",
+            "Android platform-tools kurulu bir bilgisayarda: bu telefonda USB hata ayıklamayı açın, kabloyla bağlayın, " +
+                "sorulunca bilgisayara izin verin ve şunu çalıştırın:") + "\n\n$cmds"
+        longMessage(tr("Restore from a PC", "Bilgisayardan geri yükle"), msg)
+            .setPositiveButton(tr("Copy commands", "Komutları kopyala")) { _, _ ->
                 val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cb.setPrimaryClip(ClipData.newPlainText("adb commands", cmds))
-                toast("Copied")
+                toast(tr("Copied", "Kopyalandı"))
             }
-            .setNegativeButton("Close", null).show()
+            .setNegativeButton(tr("Close", "Kapat"), null).show()
     }
 
     // ---------------------------------------------------------------- Setup tab
@@ -763,11 +827,16 @@ class MainActivity : Activity() {
         if (destroyed) return
         shizuku = Shiz.state(this)
         appsStatus.text = when (shizuku) {
-            Shiz.State.READY -> "Shizuku ready: user and system apps are removed silently."
+            Shiz.State.READY -> tr("Shizuku ready: user and system apps are removed silently.",
+                "Shizuku hazır: kullanıcı ve sistem uygulamaları sessizce kaldırılır.")
             Shiz.State.NOT_INSTALLED, Shiz.State.NOT_RUNNING ->
-                "Without Shizuku: user apps only, each through Android's uninstall dialog. Tap here to set up system apps."
-            Shiz.State.NO_PERMISSION, Shiz.State.DENIED -> "Shizuku is running but hasn't allowed Plain Uninstaller yet. Tap here."
-            Shiz.State.TOO_OLD -> "Shizuku is too old (before v11). Update it to remove system apps. Tap here."
+                tr("Without Shizuku: user apps only, each through Android's uninstall dialog. Tap here to set up system apps.",
+                    "Shizuku olmadan: yalnızca kullanıcı uygulamaları, her biri Android'in kaldırma penceresiyle. " +
+                        "Sistem uygulamaları için kurulum: buraya dokunun.")
+            Shiz.State.NO_PERMISSION, Shiz.State.DENIED -> tr("Shizuku is running but hasn't allowed Plain Uninstaller yet. Tap here.",
+                "Shizuku çalışıyor ama Plain Uninstaller'a henüz izin vermedi. Buraya dokunun.")
+            Shiz.State.TOO_OLD -> tr("Shizuku is too old (before v11). Update it to remove system apps. Tap here.",
+                "Shizuku çok eski (v11 öncesi). Sistem uygulamalarını kaldırmak için güncelleyin. Buraya dokunun.")
         }
         appsStatus.setTextColor(if (shizuku == Shiz.State.READY) C.GREEN else C.DIM)
         if (tab == Tab.SETUP) renderSetup()
@@ -801,86 +870,117 @@ class MainActivity : Activity() {
         val ready = s == Shiz.State.READY
 
         box.addView(text(
-            if (ready) "Ready: system apps can be removed" else "Setup for system apps",
+            if (ready) tr("Ready: system apps can be removed", "Hazır: sistem uygulamaları kaldırılabilir")
+            else tr("Setup for system apps", "Sistem uygulamaları için kurulum"),
             18f, if (ready) C.GREEN else C.TEXT, bold = true, lines = 0,
         ), lpL(MATCH, WRAP).margins(l = dp(4), t = dp(4)))
         box.addView(text(
-            if (ready) "Shizuku ${Shiz.versionText() ?: ""} is running and Plain Uninstaller is allowed to use it."
-            else "User apps can always be removed. System apps need Shizuku, a free app that runs commands with " +
+            if (ready) tr("Shizuku ${Shiz.versionText() ?: ""} is running and Plain Uninstaller is allowed to use it.",
+                "Shizuku ${Shiz.versionText() ?: ""} çalışıyor ve Plain Uninstaller onu kullanabilir.")
+            else tr("User apps can always be removed. System apps need Shizuku, a free app that runs commands with " +
                 "the same rights as a PC connected over USB. Work through the steps; each one ticks itself off " +
                 "when you come back here.",
+                "Kullanıcı uygulamaları her zaman kaldırılabilir. Sistem uygulamaları için Shizuku gerekir: komutları " +
+                    "USB ile bağlı bir bilgisayarla aynı yetkilerle çalıştıran ücretsiz bir uygulama. Adımları sırayla " +
+                    "izleyin; buraya döndüğünüzde her biri kendiliğinden işaretlenir."),
             13f, C.DIM, lines = 0,
         ), lpL(MATCH, WRAP).margins(l = dp(4), t = dp(4), b = dp(8)))
 
         // 1. Shizuku installed
-        step(box, 1, "Shizuku installed?", installed,
-            if (installed) "Shizuku is installed." else "Install Shizuku from the Play Store (or its website if there is no Play Store on this phone), then come back.",
-        ) { if (!installed) it.addView(stepButton("Get Shizuku") { openShizukuDownload() }) }
+        step(box, 1, tr("Shizuku installed?", "Shizuku yüklü mü?"), installed,
+            if (installed) tr("Shizuku is installed.", "Shizuku yüklü.")
+            else tr("Install Shizuku from the Play Store (or its website if there is no Play Store on this phone), then come back.",
+                "Shizuku'yu Play Store'dan (bu telefonda Play Store yoksa sitesinden) yükleyin, sonra geri dönün."),
+        ) { if (!installed) it.addView(stepButton(tr("Get Shizuku", "Shizuku'yu indir")) { openShizukuDownload() }) }
 
         // 2. Developer options
-        step(box, 2, "Developer options on?", dev,
-            if (dev) "Developer options are on."
-            else "Open About phone and tap \"Build number\" 7 times (on some phones it is under Software information). " +
+        step(box, 2, tr("Developer options on?", "Geliştirici seçenekleri açık mı?"), dev,
+            if (dev) tr("Developer options are on.", "Geliştirici seçenekleri açık.")
+            else tr("Open About phone and tap \"Build number\" 7 times (on some phones it is under Software information). " +
                 "Enter your PIN if asked, then come back.",
-        ) { if (!dev) it.addView(stepButton("Open About phone") { openSettings(Settings.ACTION_DEVICE_INFO_SETTINGS) }) }
+                "Telefon hakkında bölümünü açın ve \"Yapım numarası\" satırına 7 kez dokunun (bazı telefonlarda " +
+                    "Yazılım bilgileri altındadır). İstenirse PIN'inizi girin, sonra geri dönün."),
+        ) { if (!dev) it.addView(stepButton(tr("Open About phone", "Telefon hakkında")) { openSettings(Settings.ACTION_DEVICE_INFO_SETTINGS) }) }
 
         // 3. Wireless debugging
         val wDone = running || wireless == true
-        val wifiLine = when (wifi) { true -> "Wi-Fi is connected."; false -> "Wi-Fi is NOT connected: connect to any Wi-Fi first (no internet needed)."; null -> "" }
+        val wifiLine = when (wifi) {
+            true -> tr("Wi-Fi is connected.", "Wi-Fi bağlı.")
+            false -> tr("Wi-Fi is NOT connected: connect to any Wi-Fi first (no internet needed).",
+                "Wi-Fi bağlı DEĞİL: önce herhangi bir Wi-Fi ağına bağlanın (internet gerekmez).")
+            null -> ""
+        }
         val wText = if (Build.VERSION.SDK_INT >= 30) {
-            (if (running) "Done: Shizuku is already running.\n\n" else "") +
-                "Wireless debugging needs Wi-Fi to be connected. In Developer options, turn on \"Wireless debugging\" " +
-                "and confirm. Leave the screen open for the next step.\n$wifiLine"
+            (if (running) tr("Done: Shizuku is already running.\n\n", "Tamam: Shizuku zaten çalışıyor.\n\n") else "") +
+                tr("Wireless debugging needs Wi-Fi to be connected. In Developer options, turn on \"Wireless debugging\" " +
+                    "and confirm. Leave the screen open for the next step.",
+                    "Kablosuz hata ayıklama için Wi-Fi bağlı olmalı. Geliştirici seçeneklerinde \"Kablosuz hata ayıklama\" " +
+                        "ayarını açın ve onaylayın. Sonraki adım için ekranı açık bırakın.") + "\n$wifiLine"
         } else {
-            "This phone runs Android ${Build.VERSION.RELEASE}, which has no wireless debugging. Shizuku has to be started " +
+            tr("This phone runs Android ${Build.VERSION.RELEASE}, which has no wireless debugging. Shizuku has to be started " +
                 "once from a PC over USB: turn on \"USB debugging\" in Developer options, connect the cable and run the " +
-                "command shown in the Shizuku app (\"Start via connected computer\"), usually:\n" +
+                "command shown in the Shizuku app (\"Start via connected computer\"), usually:\n",
+                "Bu telefonda Android ${Build.VERSION.RELEASE} var ve kablosuz hata ayıklama yok. Shizuku bir kez bilgisayardan " +
+                    "USB ile başlatılmalı: Geliştirici seçeneklerinde \"USB hata ayıklama\" ayarını açın, kabloyu takın ve " +
+                    "Shizuku uygulamasında gösterilen komutu (\"Start via connected computer\") çalıştırın, genellikle:\n") +
                 "adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh"
         }
-        step(box, 3, if (Build.VERSION.SDK_INT >= 30) "Wireless debugging" else "USB debugging (Android 10 and older)", wDone, wText) {
-            it.addView(stepButton("Open Developer options") { openSettings(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) })
+        step(box, 3, if (Build.VERSION.SDK_INT >= 30) tr("Wireless debugging", "Kablosuz hata ayıklama")
+            else tr("USB debugging (Android 10 and older)", "USB hata ayıklama (Android 10 ve öncesi)"), wDone, wText) {
+            it.addView(stepButton(tr("Open Developer options", "Geliştirici seçenekleri")) { openSettings(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) })
         }
 
         // 4. Start Shizuku
-        val startText = if (running) "Shizuku is running." else if (Build.VERSION.SDK_INT >= 30) {
-            "Open Shizuku. The first time, tap \"Pairing\", then in Developer options > Wireless debugging tap " +
+        val startText = if (running) tr("Shizuku is running.", "Shizuku çalışıyor.") else if (Build.VERSION.SDK_INT >= 30) {
+            tr("Open Shizuku. The first time, tap \"Pairing\", then in Developer options > Wireless debugging tap " +
                 "\"Pair device with pairing code\" and type that code into Shizuku's notification. Then tap \"Start\" in Shizuku.\n\n" +
-                "After a reboot, pairing isn't needed again: turn Wireless debugging back on and tap \"Start\" in Shizuku."
+                "After a reboot, pairing isn't needed again: turn Wireless debugging back on and tap \"Start\" in Shizuku.",
+                "Shizuku'yu açın. İlk seferde \"Eşleştirme\" (Pairing) düğmesine dokunun, sonra Geliştirici seçenekleri > " +
+                    "Kablosuz hata ayıklama'da \"Cihazı eşleme koduyla eşle\" seçeneğine dokunup kodu Shizuku'nun " +
+                    "bildirimine yazın. Ardından Shizuku'da \"Başlat\" (Start) düğmesine dokunun.\n\n" +
+                    "Yeniden başlatmadan sonra eşleştirme gerekmez: Kablosuz hata ayıklamayı yeniden açın ve Shizuku'da " +
+                    "\"Başlat\" (Start) düğmesine dokunun.")
         } else {
-            "Open Shizuku and start it with the PC command from step 3. After a reboot it has to be started again the same way."
+            tr("Open Shizuku and start it with the PC command from step 3. After a reboot it has to be started again the same way.",
+                "Shizuku'yu açın ve 3. adımdaki bilgisayar komutuyla başlatın. Yeniden başlatmadan sonra aynı şekilde tekrar başlatılmalı.")
         }
-        step(box, 4, "Start Shizuku", running, startText) {
-            if (!running && installed) it.addView(stepButton("Open Shizuku") { openShizuku() })
+        step(box, 4, tr("Start Shizuku", "Shizuku'yu başlat"), running, startText) {
+            if (!running && installed) it.addView(stepButton(tr("Open Shizuku", "Shizuku'yu aç")) { openShizuku() })
         }
 
         // 5. Permission
         val allowed = ready
         val permText = when (s) {
-            Shiz.State.READY -> "Plain Uninstaller is allowed."
-            Shiz.State.DENIED -> "Permission was denied. Open Shizuku > Authorized applications and switch Plain Uninstaller on."
-            Shiz.State.TOO_OLD -> "This Shizuku is older than v11 and can't be used. Update it (step 1)."
-            Shiz.State.NO_PERMISSION -> "Tap Allow, then choose \"Allow all the time\" in Shizuku's dialog."
-            else -> "Available once Shizuku is running."
+            Shiz.State.READY -> tr("Plain Uninstaller is allowed.", "Plain Uninstaller'a izin verildi.")
+            Shiz.State.DENIED -> tr("Permission was denied. Open Shizuku > Authorized applications and switch Plain Uninstaller on.",
+                "İzin reddedildi. Shizuku > Yetkili uygulamalar bölümünü açın ve Plain Uninstaller'ı etkinleştirin.")
+            Shiz.State.TOO_OLD -> tr("This Shizuku is older than v11 and can't be used. Update it (step 1).",
+                "Bu Shizuku v11'den eski ve kullanılamaz. Güncelleyin (1. adım).")
+            Shiz.State.NO_PERMISSION -> tr("Tap Allow, then choose \"Allow all the time\" in Shizuku's dialog.",
+                "İzin ver'e dokunun, sonra Shizuku penceresinde \"Her zaman izin ver\" (Allow all the time) seçeneğini seçin.")
+            else -> tr("Available once Shizuku is running.", "Shizuku çalışınca kullanılabilir.")
         }
-        step(box, 5, "Allow Plain Uninstaller", allowed, permText) {
+        step(box, 5, tr("Allow Plain Uninstaller", "Plain Uninstaller'a izin ver"), allowed, permText) {
             when (s) {
-                Shiz.State.NO_PERMISSION -> it.addView(stepButton("Allow") {
-                    if (!Shiz.requestPermission()) toast("Shizuku couldn't ask. Open Shizuku and allow it there.")
+                Shiz.State.NO_PERMISSION -> it.addView(stepButton(tr("Allow", "İzin ver")) {
+                    if (!Shiz.requestPermission()) toast(tr("Shizuku couldn't ask. Open Shizuku and allow it there.",
+                        "Shizuku izin isteyemedi. Shizuku'yu açıp oradan izin verin."))
                 })
-                Shiz.State.DENIED -> it.addView(stepButton("Open Shizuku") { openShizuku() })
-                Shiz.State.TOO_OLD -> it.addView(stepButton("Update Shizuku") { openShizukuDownload() })
+                Shiz.State.DENIED -> it.addView(stepButton(tr("Open Shizuku", "Shizuku'yu aç")) { openShizuku() })
+                Shiz.State.TOO_OLD -> it.addView(stepButton(tr("Update Shizuku", "Shizuku'yu güncelle")) { openShizukuDownload() })
                 else -> {}
             }
         }
 
         if (ready) {
-            box.addView(text("Ready: system apps can be removed", 16f, C.GREEN, bold = true, lines = 0),
+            box.addView(text(tr("Ready: system apps can be removed", "Hazır: sistem uygulamaları kaldırılabilir"), 16f, C.GREEN, bold = true, lines = 0),
                 lpL(MATCH, WRAP).margins(l = dp(4), t = dp(12)))
-            box.addView(pill("Go to apps", C.GREEN, C.GREEN) { setFilter(Filter.SYSTEM); showTab(Tab.APPS) },
+            box.addView(pill(tr("Go to apps", "Uygulamalara git"), C.GREEN, C.GREEN) { setFilter(Filter.SYSTEM); showTab(Tab.APPS) },
                 lpL(WRAP, WRAP).margins(l = dp(4), t = dp(8), b = dp(16)))
         }
         box.addView(text(
-            "Shizuku stops when the phone restarts; nothing of Plain Uninstaller runs in the background.",
+            tr("Shizuku stops when the phone restarts; nothing of Plain Uninstaller runs in the background.",
+                "Shizuku telefon yeniden başlayınca durur; Plain Uninstaller'ın hiçbir parçası arka planda çalışmaz."),
             12f, C.LABEL, lines = 0,
         ), lpL(MATCH, WRAP).margins(l = dp(4), t = dp(8), b = dp(16)))
     }
@@ -905,7 +1005,7 @@ class MainActivity : Activity() {
 
     private fun openSettings(action: String) {
         try { startActivity(Intent(action)) } catch (_: Exception) {
-            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { toast("Couldn't open Settings") }
+            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { toast(tr("Couldn't open Settings", "Ayarlar açılamadı")) }
         }
     }
 
@@ -914,17 +1014,17 @@ class MainActivity : Activity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${Shiz.PKG}")))
         } catch (_: ActivityNotFoundException) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))) } catch (_: Exception) {
-                toast("No app can open shizuku.rikka.app/download")
+                toast(tr("No app can open shizuku.rikka.app/download", "shizuku.rikka.app/download adresini açacak uygulama yok"))
             }
         } catch (_: Exception) {
-            toast("Couldn't open the download page")
+            toast(tr("Couldn't open the download page", "İndirme sayfası açılamadı"))
         }
     }
 
     private fun openShizuku() {
         val i = try { packageManager.getLaunchIntentForPackage(Shiz.PKG) } catch (_: Exception) { null }
-        if (i == null) { toast("Shizuku isn't installed"); return }
-        try { startActivity(i) } catch (_: Exception) { toast("Couldn't open Shizuku") }
+        if (i == null) { toast(tr("Shizuku isn't installed", "Shizuku yüklü değil")); return }
+        try { startActivity(i) } catch (_: Exception) { toast(tr("Couldn't open Shizuku", "Shizuku açılamadı")) }
     }
 
     companion object {

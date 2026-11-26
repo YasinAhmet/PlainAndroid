@@ -1,5 +1,7 @@
 package app.plain.uninstaller
 
+import app.plain.lang.tr
+
 /** What the app does with a package in the list. */
 enum class Level { HIDDEN, RISKY, NORMAL }
 
@@ -125,16 +127,22 @@ object Safety {
         if (level(pkg, d) != Level.RISKY) return null
         return when {
             pkg == "com.google.android.gms" || pkg.startsWith("com.google.android.gms.") ->
-                "Google Play services: many apps, notifications, location and sign-in stop working"
-            pkg == "com.android.vending" -> "Play Store: no more app installs or updates from Google Play"
-            pkg == "com.google.android.gsf" -> "Google Services Framework: Google sign-in and push messages break"
-            pkg == d.dialer -> "Your phone app: you may not be able to make calls"
-            pkg == d.sms -> "Your SMS app: you may not be able to read or send texts"
+                tr("Google Play services: many apps, notifications, location and sign-in stop working",
+                    "Google Play hizmetleri: birçok uygulama, bildirim, konum ve oturum açma çalışmaz")
+            pkg == "com.android.vending" -> tr("Play Store: no more app installs or updates from Google Play",
+                "Play Store: Google Play'den uygulama yükleme ve güncelleme olmaz")
+            pkg == "com.google.android.gsf" -> tr("Google Services Framework: Google sign-in and push messages break",
+                "Google Services Framework: Google ile oturum açma ve anlık bildirimler bozulur")
+            pkg == d.dialer -> tr("Your phone app: you may not be able to make calls", "Telefon uygulamanız: arama yapamayabilirsiniz")
+            pkg == d.sms -> tr("Your SMS app: you may not be able to read or send texts",
+                "SMS uygulamanız: mesaj okuyamayabilir veya gönderemeyebilirsiniz")
             pkg == d.webView || "webview" in pkg.lowercase() || pkg.startsWith("com.google.android.trichromelibrary") ->
-                "WebView: apps that show web pages (including logins) can crash"
-            pkg.endsWith("documentsui") -> "Files picker: apps can no longer open or save files"
-            pkg.endsWith("cellbroadcastreceiver") -> "Emergency alerts"
-            else -> "Part of the phone's core functions"
+                tr("WebView: apps that show web pages (including logins) can crash",
+                    "WebView: web sayfası gösteren uygulamalar (girişler dahil) çökebilir")
+            pkg.endsWith("documentsui") -> tr("Files picker: apps can no longer open or save files",
+                "Dosya seçici: uygulamalar artık dosya açamaz veya kaydedemez")
+            pkg.endsWith("cellbroadcastreceiver") -> tr("Emergency alerts", "Acil durum uyarıları")
+            else -> tr("Part of the phone's core functions", "Telefonun temel işlevlerinin bir parçası")
         }
     }
 

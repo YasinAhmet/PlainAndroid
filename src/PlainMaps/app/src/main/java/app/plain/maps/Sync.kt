@@ -1,5 +1,6 @@
 package app.plain.maps
 
+import app.plain.lang.tr
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteStatement
@@ -116,8 +117,8 @@ class Sync(
         var waited = 0
         while (true) {
             Net.wifi(ctx)?.let { return it }
-            if (waited == 0) say(lastF, "Waiting for Wi-Fi…")
-            if (waited > 600) throw IOException("No Wi-Fi. Sync only runs on Wi-Fi.")
+            if (waited == 0) say(lastF, tr("Waiting for Wi-Fi…", "Wi-Fi bekleniyor…"))
+            if (waited > 600) throw IOException(tr("No Wi-Fi. Sync only runs on Wi-Fi.", "Wi-Fi yok. Eşitleme yalnızca Wi-Fi ile çalışır."))
             sleep(3000); waited += 3
         }
     }
@@ -160,7 +161,8 @@ class Sync(
             if (::work.isInitialized && work.isOpen) work.close()
         }
         finish()
-        if (missing > 0) say(1f, "Done. $missing outer squares could not be loaded (OpenStreetMap server busy); the next sync tries them again.")
+        if (missing > 0) say(1f, tr("Done. $missing outer squares could not be loaded (OpenStreetMap server busy); the next sync tries them again.",
+            "Bitti. $missing dış kare yüklenemedi (OpenStreetMap sunucusu meşgul); bir sonraki eşitleme yeniden dener."))
     }
 
     // ------------------------------------------------------------------ databases
@@ -197,7 +199,7 @@ class Sync(
             work.execSQL("INSERT INTO wmeta VALUES('version', '$VERSION')")
             work.execSQL("INSERT INTO wmeta VALUES('started', '${System.currentTimeMillis()}')")
         } else {
-            say(0f, "Continuing the last sync…")
+            say(0f, tr("Continuing the last sync…", "Son eşitlemeye devam ediliyor…"))
             work.rawQuery("SELECT v FROM wmeta WHERE k='area'", null).use { c -> if (c.moveToFirst()) BBox.decode(c.getString(0))?.let { area = it } }
         }
     }
@@ -230,7 +232,7 @@ class Sync(
     private class Res(val name: String, val format: String, val url: String, val stamp: String)
 
     private fun ckan(pkg: String): List<Res> {
-        val txt = retry("İBB catalogue") { Net.text(net.n, CKAN + pkg) }
+        val txt = retry(tr("İBB catalogue", "İBB kataloğu")) { Net.text(net.n, CKAN + pkg) }
         val out = ArrayList<Res>()
         Json(txt.byteInputStream()).use { j ->
             j.beginObject()
@@ -254,22 +256,22 @@ class Sync(
     }
 
     private fun transit() {
-        say(0.01f, "İETT: checking the open-data catalogue")
+        say(0.01f, tr("İETT: checking the open-data catalogue", "İETT: açık veri kataloğu denetleniyor"))
         val g = ckan(GTFS_PKG)
         val s = ckan(SHAPES_PKG)
         fun pick(name: String, fmt: String? = null) = g.firstOrNull { it.name == name && (fmt == null || it.format == fmt) }
-        val stops = pick("stops") ?: throw IOException("İETT feed has no stops file")
-        val routes = pick("routes") ?: throw IOException("İETT feed has no routes file")
-        val trips = pick("trips") ?: throw IOException("İETT feed has no trips file")
-        val cal = pick("calendar") ?: throw IOException("İETT feed has no calendar file")
+        val stops = pick("stops") ?: throw IOException(tr("İETT feed has no stops file", "İETT verisinde stops dosyası yok"))
+        val routes = pick("routes") ?: throw IOException(tr("İETT feed has no routes file", "İETT verisinde routes dosyası yok"))
+        val trips = pick("trips") ?: throw IOException(tr("İETT feed has no trips file", "İETT verisinde trips dosyası yok"))
+        val cal = pick("calendar") ?: throw IOException(tr("İETT feed has no calendar file", "İETT verisinde calendar dosyası yok"))
         // the zipped stop_times is complete; the CSV copy is cut off at a spreadsheet's row limit
-        val st = pick("stop_times", "zip") ?: g.firstOrNull { it.name.contains("stop_times") } ?: throw IOException("İETT feed has no stop_times")
+        val st = pick("stop_times", "zip") ?: g.firstOrNull { it.name.contains("stop_times") } ?: throw IOException(tr("İETT feed has no stop_times", "İETT verisinde stop_times yok"))
         val shp = s.firstOrNull { it.format.contains("json") || it.url.endsWith(".geojson") }
         val fp = listOf(stops, routes, trips, cal, st).joinToString("|") { it.stamp } + "|" + (shp?.stamp ?: "")
 
         val old = dataFile(ctx)
         if (old.exists() && oldMeta(old, "transit_fp") == fp && oldMeta(old, "version") == VERSION) {
-            say(0.1f, "İETT: unchanged since the last sync, keeping it")
+            say(0.1f, tr("İETT: unchanged since the last sync, keeping it", "İETT: son eşitlemeden beri değişmemiş, korunuyor"))
             copyBus(old)
             setMeta("transit_fp", fp)
             oldMeta(old, "gtfs_date")?.let { setMeta("gtfs_date", it) }
@@ -279,23 +281,23 @@ class Sync(
             st to (if (st.format == "zip") "stop_times.zip" else "stop_times.csv")) + listOfNotNull(shp?.let { it to "shapes.geojson" })
         files.forEachIndexed { i, (r, name) ->
             val f = File(dl, name)
-            retry("İETT download") {
+            retry(tr("İETT download", "İETT indirmesi")) {
                 Net.download(net, r.url, f, { d, t ->
                     val part = if (t > 0) d.toFloat() / t else 0f
-                    say(0.01f + 0.1f * (i + part) / files.size, "İETT: downloading $name (${d / 1048576} MB)")
+                    say(0.01f + 0.1f * (i + part) / files.size, tr("İETT: downloading $name (${d / 1048576} MB)", "İETT: $name indiriliyor (${d / 1048576} MB)"))
                 }, { cancel.get() })
             }
         }
-        say(0.11f, "İETT: reading timetables")
+        say(0.11f, tr("İETT: reading timetables", "İETT: saatler okunuyor"))
         val t = Transit.read(File(dl, "stops.csv"), File(dl, "routes.csv"), File(dl, "trips.csv"), File(dl, "calendar.csv"),
             File(dl, files[4].second), { say(0.12f, "İETT: $it") }, { cancel.get() })
-        if (t.patterns.isEmpty()) throw IOException("İETT feed has no usable trips")
+        if (t.patterns.isEmpty()) throw IOException(tr("İETT feed has no usable trips", "İETT verisinde kullanılabilir sefer yok"))
         val wanted = t.patterns.map { t.routes[it.route].code }.filter { it.isNotEmpty() }.toHashSet()
         if (shp != null) {
-            say(0.14f, "İETT: reading route shapes")
+            say(0.14f, tr("İETT: reading route shapes", "İETT: güzergâh çizimleri okunuyor"))
             File(dl, "shapes.geojson").inputStream().buffered(1 shl 16).use { Transit.readShapes(it, wanted, 1.2e-5, t.shapes) { cancel.get() } }
         }
-        say(0.16f, "İETT: saving ${t.patterns.size} routes")
+        say(0.16f, tr("İETT: saving ${t.patterns.size} routes", "İETT: ${t.patterns.size} güzergâh kaydediliyor"))
         writeBus(t)
         setMeta("transit_fp", fp)
         setMeta("gtfs_date", st.stamp.substringAfter('@').take(10))
@@ -373,8 +375,8 @@ class Sync(
                 sVar.bindString(4, p.headsign()); sVar.bindString(5, r.code); sVar.bindLong(6, sid.toLong())
                 sVar.bindBlob(7, Codec.ints(stopIds)); sVar.bindBlob(8, Codec.ints(p.dists)); sVar.bindLong(9, p.trips.size.toLong())
                 sVar.executeInsert()
-                for (tr in p.trips) {
-                    sTrip.bindLong(1, vid); sTrip.bindLong(2, tr[0].toLong()); sTrip.bindLong(3, tr[1].toLong()); sTrip.bindLong(4, tr[2].toLong())
+                for (tp in p.trips) {
+                    sTrip.bindLong(1, vid); sTrip.bindLong(2, tp[0].toLong()); sTrip.bindLong(3, tp[1].toLong()); sTrip.bindLong(4, tp[2].toLong())
                     sTrip.executeInsert()
                 }
                 stopIds.forEachIndexed { k, s ->
@@ -386,9 +388,9 @@ class Sync(
 
     // ------------------------------------------------------------------ 1b. EGO (Ankara)
     private fun egoLines() {
-        say(0.01f, "EGO: reading the line list")
-        val codes = retry("EGO line list") { EgoFetch.lineCodes(net) }
-        val lines = EgoFetch.lines(net, codes, cancel) { n -> if (n % 10 == 0 || n == codes.size) say(0.01f + 0.18f * n / codes.size, "EGO: timetables, line $n of ${codes.size}") }
+        say(0.01f, tr("EGO: reading the line list", "EGO: hat listesi okunuyor"))
+        val codes = retry(tr("EGO line list", "EGO hat listesi")) { EgoFetch.lineCodes(net) }
+        val lines = EgoFetch.lines(net, codes, cancel) { n -> if (n % 10 == 0 || n == codes.size) say(0.01f + 0.18f * n / codes.size, tr("EGO: timetables, line $n of ${codes.size}", "EGO: saatler, hat $n / ${codes.size}")) }
         work.execSQL("CREATE TABLE IF NOT EXISTS egoline(code TEXT PRIMARY KEY, data TEXT)")
         tx(work) {
             work.execSQL("DELETE FROM egoline")
@@ -404,8 +406,8 @@ class Sync(
 
     private fun egoTransit() {
         val lines = storedEgoLines()
-        if (lines.isEmpty()) throw IOException("EGO's lines were not read")
-        say(0.84f, "EGO: placing the stops on the map")
+        if (lines.isEmpty()) throw IOException(tr("EGO's lines were not read", "EGO hatları okunamadı"))
+        say(0.84f, tr("EGO: placing the stops on the map", "EGO: duraklar haritaya yerleştiriliyor"))
         val osm = ArrayList<Ego.OsmStop>()
         work.rawQuery("SELECT ref,name,lat,lon FROM osmstop", null).use { c ->
             while (c.moveToNext()) osm.add(Ego.OsmStop(c.getString(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3)))
@@ -419,17 +421,20 @@ class Sync(
             }
         }
         val placed = Ego.place(lines, osm, interpolate = false)
-        say(0.86f, "EGO: following the lines along the streets")
+        say(0.86f, tr("EGO: following the lines along the streets", "EGO: hatlar sokaklar boyunca izleniyor"))
         val ways = ArrayList<DoubleArray>()
         work.rawQuery("SELECT data FROM road", null).use { c -> while (c.moveToNext()) ways.addAll(Codec.shape(c.getBlob(0))) }
         val roads = if (ways.isEmpty()) null else RoadGraph(ways)
         ways.clear()
         val routed = Ego.route(lines, placed.pos, shapes, roads)
         val t = Ego.toTransit(lines, routed.pos, shapes + routed.shapes)
-        if (t.patterns.isEmpty()) throw IOException("No EGO line could be placed on the map")
+        if (t.patterns.isEmpty()) throw IOException(tr("No EGO line could be placed on the map", "Hiçbir EGO hattı haritaya yerleştirilemedi"))
         writeBus(t)
         setMeta("gtfs_date", java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
         val all = lines.flatMap { l -> l.stops.map { it.first } }.toSet()
+        // the numbers alone, so the settings can word them in either language; ego_stats stays for older app versions
+        setMeta("ego_nums", listOf(t.patterns.size, lines.size, placed.byRef, placed.byName, routed.onRoad, routed.straight,
+            all.count { it !in routed.pos }, routed.roadLines, shapes.size).joinToString(","))
         setMeta("ego_stats", "${t.patterns.size} of ${lines.size} EGO lines on the map · stops placed by number ${placed.byRef}, " +
             "by name ${placed.byName}, along the street ${routed.onRoad}, estimated ${routed.straight}, not found ${all.count { it !in routed.pos }} · " +
             "${routed.roadLines} lines drawn along the streets, ${shapes.size} from OpenStreetMap routes")
@@ -523,12 +528,12 @@ class Sync(
     private fun core() {
         if (done("core")) return
         val f = File(dl, "core.osm.pbf")
-        retry("Map download") {
+        retry(tr("Map download", "Harita indirmesi")) {
             Net.download(net, City.mapUrl, f, { d, t ->
-                say(0.2f + 0.07f * (if (t > 0) d.toFloat() / t else 0f), "Map: downloading the city (${d / 1048576} MB)")
+                say(0.2f + 0.07f * (if (t > 0) d.toFloat() / t else 0f), tr("Map: downloading the city (${d / 1048576} MB)", "Harita: şehir indiriliyor (${d / 1048576} MB)"))
             }, { cancel.get() })
         }
-        say(0.27f, "Map: reading the city")
+        say(0.27f, tr("Map: reading the city", "Harita: şehir okunuyor"))
         val ex = PbfExtract(f)
         val keepBus = City.ankara // EGO needs OSM's bus stops (their "ref" is the EGO stop number) and bus routes
         ex.wantRelation = { Filters.multipolygon(it) || Filters.route(it) || (keepBus && Filters.busRoute(it)) }
@@ -549,7 +554,7 @@ class Sync(
             Ego.extent(egoLines, placed.pos)?.let { area = grow(City.area, it.pad(3000.0)) }
             a = area
             saveArea()
-            say(0.4f, String.format(java.util.Locale.US, "Map: EGO reaches %.2f–%.2f N, %.2f–%.2f E", area.s, area.n, area.w, area.e))
+            say(0.4f, String.format(java.util.Locale.US, tr("Map: EGO reaches %.2f–%.2f N, %.2f–%.2f E", "Harita: EGO %.2f–%.2f K, %.2f–%.2f D arası"), area.s, area.n, area.w, area.e))
         }
         fun inArea(lat: Double, lon: Double) = lat in a.s..a.n && lon in a.w..a.e
         fun inArea(g: DoubleArray): Boolean { val b = Clip.bounds(g); return b[2] >= a.w && b[0] <= a.e && b[3] >= a.s && b[1] <= a.n }
@@ -559,7 +564,7 @@ class Sync(
         work.execSQL("DELETE FROM osmstop"); work.execSQL("DELETE FROM osmroute")
         ex.cancelled = { cancel.get() }
         var step = 0
-        ex.progress = { say(0.3f + 0.08f * ++step, "Map: $it") }
+        ex.progress = { say(0.3f + 0.08f * ++step, tr("Map: ", "Harita: ") + it) }
         val w = writer()
         val routes = ArrayList<OsmEl>()
         tx(work) {
@@ -601,7 +606,7 @@ class Sync(
                 fit()
                 // places were read before the area was known
                 if (City.ankara) out.execSQL("DELETE FROM poi WHERE lat<? OR lat>? OR lon<? OR lon>?", arrayOf<Any>(area.s, area.n, area.w, area.e))
-                say(0.53f, "Metro, tram and ferry lines")
+                say(0.53f, tr("Metro, tram and ferry lines", "Metro, tramvay ve vapur hatları"))
                 lines(routes) { m -> if (m.type == 'n') ex.memberNode(m.ref) else null }
                 setMeta("core", (if (City.mapCoversArea) area else ex.bbox)?.encode() ?: "")
                 mark("core")
@@ -713,10 +718,10 @@ class Sync(
         while (queue.isNotEmpty()) {
             checkCancel()
             val (b, depth) = queue.removeFirst()
-            if (depth == 0) say(0.55f + 0.33f * finished / all.size, "Outer districts: square ${finished + 1} of ${all.size}")
+            if (depth == 0) say(0.55f + 0.33f * finished / all.size, tr("Outer districts: square ${finished + 1} of ${all.size}", "Dış ilçeler: kare ${finished + 1} / ${all.size}"))
             val f = File(dl, "out.json")
             try {
-                overpass(outskirtsQuery(b), f, "outer districts", attempts = 4)
+                overpass(outskirtsQuery(b), f, tr("outer districts", "dış ilçeler"), attempts = 4)
                 var ok = false
                 work.beginTransaction(); out.beginTransaction()
                 w.begin()
@@ -766,9 +771,9 @@ class Sync(
                 throw e
             } catch (e: IOException) {
                 attempt++
-                if (attempt >= attempts) throw IOException("OpenStreetMap server busy ($what): ${e.message}")
+                if (attempt >= attempts) throw IOException(tr("OpenStreetMap server busy ($what): ${e.message}", "OpenStreetMap sunucusu meşgul ($what): ${e.message}"))
                 val ra = (e as? Net.Http)?.retryAfter ?: 0
-                say(lastF, "Server busy ($what), retrying in ${maxOf(wait / 1000, ra.toLong())} s…")
+                say(lastF, tr("Server busy ($what), retrying in ${maxOf(wait / 1000, ra.toLong())} s…", "Sunucu meşgul ($what), ${maxOf(wait / 1000, ra.toLong())} sn sonra yeniden deneniyor…"))
                 sleep(maxOf(wait, ra * 1000L))
                 wait = minOf(wait * 2, 60_000L)
                 net.n = wifi()
@@ -787,8 +792,8 @@ class Sync(
                 throw e
             } catch (e: IOException) {
                 attempt++
-                if (attempt >= 5) throw IOException("$what failed: ${e.message}")
-                say(lastF, "$what failed (${e.message}), retrying…")
+                if (attempt >= 5) throw IOException(tr("$what failed: ${e.message}", "$what başarısız: ${e.message}"))
+                say(lastF, tr("$what failed (${e.message}), retrying…", "$what başarısız (${e.message}), yeniden deneniyor…"))
                 sleep(wait)
                 wait *= 2
                 net.n = wifi()
@@ -801,7 +806,7 @@ class Sync(
         val sink = pieceSink()
         val pieces = Pieces(sink)
         if (!done("land")) {
-            say(0.89f, "Building the coastline")
+            say(0.89f, tr("Building the coastline", "Kıyı şeridi oluşturuluyor"))
             val ways = ArrayList<DoubleArray>()
             work.rawQuery("SELECT data FROM coast", null).use { c -> while (c.moveToNext()) ways.addAll(Codec.shape(c.getBlob(0))) }
             // with every outer square loaded the coast is complete for the province, else only for the core
@@ -822,7 +827,7 @@ class Sync(
             setMeta("land_area", landBox.encode())
         }
         if (!done("overlay")) {
-            say(0.91f, "Drawing lines, stops and places into the map")
+            say(0.91f, tr("Drawing lines, stops and places into the map", "Hatlar, duraklar ve yerler haritaya çiziliyor"))
             tx(work) {
                 // bus routes (each shape once)
                 out.rawQuery("SELECT id,data FROM shape WHERE id<${Store.RAIL_VAR0} AND id IN (SELECT shape FROM variant)", null).use { c ->
@@ -866,7 +871,7 @@ class Sync(
                 mark("overlay")
             }
         }
-        say(0.94f, "Packing map cells")
+        say(0.94f, tr("Packing map cells", "Harita hücreleri paketleniyor"))
         out.execSQL("DELETE FROM cell")
         work.execSQL("CREATE INDEX IF NOT EXISTS piece_i ON piece(lvl,x,y,k)")
         tx(out) {
@@ -879,7 +884,7 @@ class Sync(
                 ins.bindLong(1, cl.toLong()); ins.bindLong(2, cx.toLong()); ins.bindLong(3, cy.toLong()); ins.bindBlob(4, buf.toArray())
                 ins.executeInsert()
                 buf.clear()
-                if (++n % 500 == 0) { checkCancel(); say(0.94f + 0.04f * minOf(1f, n / 12000f), "Packing map cells ($n)") }
+                if (++n % 500 == 0) { checkCancel(); say(0.94f + 0.04f * minOf(1f, n / 12000f), tr("Packing map cells ($n)", "Harita hücreleri paketleniyor ($n)")) }
             }
             work.rawQuery("SELECT lvl,x,y,data FROM piece ORDER BY lvl,x,y,k,rowid", null).use { c ->
                 while (c.moveToNext()) {
@@ -898,21 +903,21 @@ class Sync(
         setMeta("synced_at", System.currentTimeMillis().toString())
         setMeta("outskirts_missing", missing.toString())
         out.rawQuery("SELECT count(*) FROM poi WHERE cat<>${Poi.PLACE}", null).use { c -> if (c.moveToFirst()) setMeta("places", c.getLong(0).toString()) }
-        say(0.99f, "Finishing")
+        say(0.99f, tr("Finishing", "Bitiriliyor"))
     }
 
     private fun finish() {
         val cur = dataFile(ctx)
         val old = File(dir, "data-old.db")
         old.delete()
-        if (cur.exists() && !cur.renameTo(old)) throw IOException("could not replace the old data")
+        if (cur.exists() && !cur.renameTo(old)) throw IOException(tr("could not replace the old data", "eski veri değiştirilemedi"))
         if (!newF.renameTo(cur)) {
             old.renameTo(cur)
-            throw IOException("could not install the new data")
+            throw IOException(tr("could not install the new data", "yeni veri kurulamadı"))
         }
         old.delete()
         workF.delete()
         dl.listFiles()?.forEach { it.delete() }
-        say(1f, "Done")
+        say(1f, tr("Done", "Bitti"))
     }
 }

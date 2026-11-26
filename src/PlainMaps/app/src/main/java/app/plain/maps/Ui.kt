@@ -165,6 +165,6 @@ class CappedLinear(ctx: Context) : LinearLayout(ctx) {
 
 object Fmt {
     fun dist(m: Double): String = if (m < 1000) "${(m / 10).toInt() * 10} m" else String.format(java.util.Locale.US, "%.1f km", m / 1000)
-    fun date(t: Long): String = java.text.SimpleDateFormat("d MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t))
+    fun date(t: Long): String = java.text.SimpleDateFormat("d MMM yyyy HH:mm", app.plain.lang.PlainLang.locale).format(java.util.Date(t))
     fun mb(bytes: Long): String = String.format(java.util.Locale.US, "%.0f MB", bytes / 1048576.0)
 }

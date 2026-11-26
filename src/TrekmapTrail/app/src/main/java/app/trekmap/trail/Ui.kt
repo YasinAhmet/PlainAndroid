@@ -16,6 +16,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -71,18 +73,18 @@ fun Context.button(label: String, color: Int = C.CARD, onClick: (View) -> Unit):
     setOnClickListener(onClick)
 }
 
-fun Context.askText(title: String, initial: String, ok: String = "Save", cb: (String) -> Unit) {
+fun Context.askText(title: String, initial: String, ok: String = tr("Save", "Kaydet"), cb: (String) -> Unit) {
     val et = EditText(this).apply { setText(initial); setSingleLine(); selectAll() }
     val box = FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(et) }
     AlertDialog.Builder(this).setTitle(title).setView(box)
         .setPositiveButton(ok) { _, _ -> et.text.toString().trim().takeIf { it.isNotEmpty() }?.let(cb) }
-        .setNegativeButton("Cancel", null).show()
+        .setNegativeButton(tr("Cancel", "İptal"), null).show()
 }
 
 fun Context.confirm(title: String, msg: String, ok: String, cb: () -> Unit) {
     AlertDialog.Builder(this).setTitle(title).setMessage(msg)
         .setPositiveButton(ok) { _, _ -> cb() }
-        .setNegativeButton("Cancel", null).show()
+        .setNegativeButton(tr("Cancel", "İptal"), null).show()
 }
 
 fun Context.choose(title: String, items: List<Pair<String, () -> Unit>>) {
@@ -101,7 +103,7 @@ object Fmt {
         return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, ss) else String.format(Locale.US, "%d:%02d", m, ss)
     }
 
-    fun date(t: Long): String = SimpleDateFormat("d MMM yyyy HH:mm", Locale.getDefault()).format(Date(t))
+    fun date(t: Long): String = SimpleDateFormat("d MMM yyyy HH:mm", PlainLang.locale).format(Date(t))
 
     fun mb(bytes: Long): String {
         val mb = bytes / 1048576.0

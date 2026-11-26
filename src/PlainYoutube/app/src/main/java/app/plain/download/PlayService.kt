@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.IBinder
+import app.plain.lang.PlainLang
+import app.plain.lang.tr
 
 /**
  * 2.4 background playback (pattern from LocalMusic's PlaybackService). A mediaPlayback foreground service that does
@@ -27,6 +29,7 @@ class PlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
+        PlainLang.init(this)
         super.onCreate()
         instance = this
         channel(this)
@@ -74,7 +77,7 @@ class PlayService : Service() {
 
         fun channel(c: Context) {
             c.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW).apply {
+                NotificationChannel(CHANNEL, tr("Playback", "Oynatma"), NotificationManager.IMPORTANCE_LOW).apply {
                     setShowBadge(false); setSound(null, null); enableVibration(false)
                 },
             )
@@ -122,14 +125,14 @@ class PlayService : Service() {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setCategory(Notification.CATEGORY_TRANSPORT)
             val acts = ArrayList<Notification.Action>()
-            if (p?.inQueue == true) acts += action(c, R.drawable.ic_prev, "Previous", PlayControl.PREV)
-            acts += action(c, R.drawable.ic_back10, "Back 10 s", PlayControl.BACK)
-            acts += if (playing) action(c, R.drawable.ic_pause, "Pause", PlayControl.TOGGLE) else action(c, R.drawable.ic_play, "Play", PlayControl.TOGGLE)
-            acts += action(c, R.drawable.ic_fwd10, "Forward 10 s", PlayControl.FWD)
-            if (p?.inQueue == true) acts += action(c, R.drawable.ic_next, "Next", PlayControl.NEXT)
-            acts += action(c, R.drawable.ic_close, "Close", PlayControl.CLOSE)
+            if (p?.inQueue == true) acts += action(c, R.drawable.ic_prev, tr("Previous", "Önceki"), PlayControl.PREV)
+            acts += action(c, R.drawable.ic_back10, tr("Back 10 s", "10 sn geri"), PlayControl.BACK)
+            val play = acts.size // the play/pause button (found by position, not by its translated title)
+            acts += if (playing) action(c, R.drawable.ic_pause, tr("Pause", "Duraklat"), PlayControl.TOGGLE) else action(c, R.drawable.ic_play, tr("Play", "Oynat"), PlayControl.TOGGLE)
+            acts += action(c, R.drawable.ic_fwd10, tr("Forward 10 s", "10 sn ileri"), PlayControl.FWD)
+            if (p?.inQueue == true) acts += action(c, R.drawable.ic_next, tr("Next", "Sonraki"), PlayControl.NEXT)
+            acts += action(c, R.drawable.ic_close, tr("Close", "Kapat"), PlayControl.CLOSE)
             acts.forEach { b.addAction(it) }
-            val play = acts.indexOfFirst { it.title == "Pause" || it.title == "Play" }
             val style = Notification.MediaStyle().setShowActionsInCompactView(play - 1, play, play + 1)
             p?.sessionToken?.let { style.setMediaSession(it) }
             b.setStyle(style)
@@ -142,6 +145,7 @@ class PlayService : Service() {
 class PlayControl : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         // the process may have been restarted since the notification was posted: rebuild the player from its saved state
+        PlainLang.init(c)
         Store.init(c); Account.init(c)
         val cmd = i.action.orEmpty()
         PlayerPanel.uiMain.post {

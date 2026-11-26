@@ -15,6 +15,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import app.plain.lang.tr
 import kotlin.math.min
 
 /** Full-screen now-playing: big art, seek slider with elapsed/remaining, transport, shuffle/repeat, queue, sleep. */
@@ -49,9 +50,9 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         addView(col, LayoutParams(MATCH, MATCH))
 
         val top = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(act.icon(R.drawable.ic_down, desc = "Close") { act.closeNowPlaying() })
+        top.addView(act.icon(R.drawable.ic_down, desc = tr("Close", "Kapat")) { act.closeNowPlaying() })
         top.addView(from, lpL(0, WRAP, 1f))
-        top.addView(act.icon(R.drawable.ic_more, desc = "More") { Player.current?.let { act.songMenu(it) } })
+        top.addView(act.icon(R.drawable.ic_more, desc = tr("More", "Diğer")) { Player.current?.let { act.songMenu(it) } })
         col.addView(top, lpL(MATCH, WRAP))
         chrome += top
 
@@ -74,7 +75,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         title.marqueeRepeatLimit = -1
         texts.addView(title); texts.addView(artist)
         titleRow.addView(texts, lpL(0, WRAP, 1f))
-        titleRow.addView(act.icon(R.drawable.ic_add_list, 48, 11, desc = "Add to playlist") { Player.current?.let { act.addToPlaylist(listOf(it)) } })
+        titleRow.addView(act.icon(R.drawable.ic_add_list, 48, 11, desc = tr("Add to playlist", "Çalma listesine ekle")) { Player.current?.let { act.addToPlaylist(listOf(it)) } })
         col.addView(titleRow, lpL(MATCH, WRAP))
         chrome += titleRow
 
@@ -83,24 +84,24 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         chrome += slider
 
         val controls = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        shuffleBtn = act.icon(R.drawable.ic_shuffle, 52, 13, desc = "Shuffle") { Player.toggleShuffle() }
-        repeatBtn = act.icon(R.drawable.ic_repeat, 52, 13, desc = "Repeat") { Player.cycleRepeat() }
-        playBtn = act.icon(R.drawable.ic_play, 72, 20, 0xFF000000.toInt(), "Play/pause") { Player.toggle() }
+        shuffleBtn = act.icon(R.drawable.ic_shuffle, 52, 13, desc = tr("Shuffle", "Karıştır")) { Player.toggleShuffle() }
+        repeatBtn = act.icon(R.drawable.ic_repeat, 52, 13, desc = tr("Repeat", "Tekrarla")) { Player.cycleRepeat() }
+        playBtn = act.icon(R.drawable.ic_play, 72, 20, 0xFF000000.toInt(), tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
         playBtn.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33000000), oval(C.TEXT), null)
         fun spacer() = View(act).also { controls.addView(it, lpL(0, 1, 1f)) }
         controls.addView(shuffleBtn); spacer()
-        controls.addView(act.icon(R.drawable.ic_prev, 60, 14, desc = "Previous") { Player.prev() }); spacer()
+        controls.addView(act.icon(R.drawable.ic_prev, 60, 14, desc = tr("Previous", "Önceki")) { Player.prev() }); spacer()
         controls.addView(playBtn); spacer()
-        controls.addView(act.icon(R.drawable.ic_next, 60, 14, desc = "Next") { Player.next() }); spacer()
+        controls.addView(act.icon(R.drawable.ic_next, 60, 14, desc = tr("Next", "Sonraki")) { Player.next() }); spacer()
         controls.addView(repeatBtn)
         col.addView(controls, lpL(MATCH, WRAP).apply { topMargin = act.dp(4) })
         chrome += controls
 
         bottom = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        sleepBtn = act.icon(R.drawable.ic_timer, 48, 12, desc = "Sleep timer") { act.sleepMenu() }
+        sleepBtn = act.icon(R.drawable.ic_timer, 48, 12, desc = tr("Sleep timer", "Uyku zamanlayıcısı")) { act.sleepMenu() }
         bottom.addView(sleepBtn)
         bottom.addView(sleepText, lpL(0, WRAP, 1f))
-        bottom.addView(act.icon(R.drawable.ic_queue, 48, 12, desc = "Queue") { act.openQueue() })
+        bottom.addView(act.icon(R.drawable.ic_queue, 48, 12, desc = tr("Queue", "Sıra")) { act.openQueue() })
         col.addView(bottom, lpL(MATCH, WRAP).apply { topMargin = act.dp(8) })
         chrome += bottom
 
@@ -142,10 +143,10 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     private fun syncVideo(s: Song) {
         var btn = videoBtn
         if (s.isVideo && btn == null) {
-            btn = act.text("Video", 14f, C.TEXT, bold = true).apply {
+            btn = act.text(tr("Video", "Video"), 14f, C.TEXT, bold = true).apply {
                 gravity = Gravity.CENTER
                 setPadding(act.dp(14), act.dp(6), act.dp(14), act.dp(6))
-                contentDescription = "Show the video"
+                contentDescription = tr("Show the video", "Videoyu göster")
                 setOnClickListener { Store.prefs.edit().putBoolean("video", !videoWanted()).apply(); Player.current?.let { syncVideo(it) } }
             }
             videoBtn = btn
@@ -195,8 +196,8 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         val active = Player.sleepAt > 0 || Player.sleepEndOfSong
         sleepBtn.tint(if (active) C.ACCENT else C.TEXT)
         sleepText.text = when {
-            Player.sleepAt > 0 -> "Pausing in " + Text.time(Player.sleepAt - SystemClock.elapsedRealtime())
-            Player.sleepEndOfSong -> "Pausing after this song"
+            Player.sleepAt > 0 -> tr("Pausing in ", "Duraklatmaya kalan: ") + Text.time(Player.sleepAt - SystemClock.elapsedRealtime())
+            Player.sleepEndOfSong -> tr("Pausing after this song", "Bu şarkıdan sonra duraklar")
             else -> ""
         }
     }
@@ -220,11 +221,11 @@ class QueueView(private val act: MainActivity) : LinearLayout(act) {
         isClickable = true
         setBackgroundColor(C.PANEL)
         val top = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(6), act.dp(6), act.dp(12), act.dp(6)) }
-        top.addView(act.icon(R.drawable.ic_down, desc = "Close") { act.closeOverlay(this) })
+        top.addView(act.icon(R.drawable.ic_down, desc = tr("Close", "Kapat")) { act.closeOverlay(this) })
         val t = LinearLayout(act).apply { orientation = VERTICAL }
-        t.addView(act.text("Queue", 20f, C.TEXT, bold = true)); t.addView(info)
+        t.addView(act.text(tr("Queue", "Sıra"), 20f, C.TEXT, bold = true)); t.addView(info)
         top.addView(t, lpL(0, WRAP, 1f))
-        top.addView(act.pill("Clear upcoming", C.CARD) { Player.clearUpcoming() })
+        top.addView(act.pill(tr("Clear upcoming", "Sıradakileri temizle"), C.CARD) { Player.clearUpcoming() })
         addView(top, lpL(MATCH, WRAP))
         list.divider = null
         list.selector = android.graphics.drawable.ColorDrawable(0)
@@ -245,8 +246,9 @@ class QueueView(private val act: MainActivity) : LinearLayout(act) {
         adapter.rows = rows
         adapter.notifyDataSetChanged()
         val left = songs.drop(q.pos + 1).sumOf { it.durationMs }
-        info.text = "${songs.size} songs · ${Text.time(left)} after this one" +
-            (if (q.shuffle) " · shuffle" else "") + when (q.repeat) { Repeat.OFF -> ""; Repeat.ALL -> " · repeat all"; Repeat.ONE -> " · repeat one" }
+        info.text = tr("${songs.size} songs · ${Text.time(left)} after this one", "${songs.size} şarkı · bundan sonra ${Text.time(left)}") +
+            (if (q.shuffle) tr(" · shuffle", " · karışık") else "") +
+            when (q.repeat) { Repeat.OFF -> ""; Repeat.ALL -> tr(" · repeat all", " · tümünü tekrarla"); Repeat.ONE -> tr(" · repeat one", " · birini tekrarla") }
     }
 }
 

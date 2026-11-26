@@ -18,6 +18,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import app.plain.lang.tr
 
 const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -39,10 +40,10 @@ object C {
 }
 
 /** Blue "MEMBERS" badge: members-only video (plays/downloads only with the account in ⋮ → Account). */
-fun Context.membersBadge() = text("MEMBERS", 10f, C.BLUE, bold = true).apply {
+fun Context.membersBadge() = text(tr("MEMBERS", "ÜYELER"), 10f, C.BLUE, bold = true).apply {
     background = GradientDrawable().apply { setColor(0xCC000000.toInt()); cornerRadius = dpf(4); setStroke(dp(1), C.BLUE) }
     setPadding(dp(4), dp(1), dp(4), dp(1))
-    contentDescription = "Members only"
+    contentDescription = tr("Members only", "Üyelere özel")
 }
 
 fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density + 0.5f).toInt()
@@ -115,7 +116,7 @@ fun Context.menu(title: String?, items: List<Pair<String, () -> Unit>>) {
 }
 
 fun Context.message(title: String, msg: String) {
-    AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("OK", null).show()
+    AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton(tr("OK", "Tamam"), null).show()
 }
 
 /** Row of chips that wraps onto new lines. */

@@ -15,6 +15,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Collections
+import app.plain.lang.tr
 
 /**
  * What the local proxy serves: a cached stream that fills itself from YouTube while the player is open.
@@ -49,7 +50,7 @@ abstract class CachedSource(protected val ctx: Context, val meta: CacheMeta) {
         Store.cache.save(meta)
         try {
             while (!closed && !cancelled()) {
-                if (transient) throw IOException("Not enough free storage (keeps 3 GB free)")
+                if (transient) throw IOException(tr("Not enough free storage (keeps 3 GB free)", "Yeterli boş alan yok (3 GB boş tutulur)"))
                 if (!fillStep()) break
                 progress(meta.fraction)
             }
@@ -97,7 +98,7 @@ abstract class CachedSource(protected val ctx: Context, val meta: CacheMeta) {
 
     /** Waits on [lock] for the filler (bounded), failing fast when it stopped with an error. */
     protected fun awaitLocked(ms: Long) {
-        error?.let { throw IOException(it.message ?: "Network error", it) }
+        error?.let { throw IOException(it.message ?: tr("Network error", "Ağ hatası"), it) }
         if (closed) throw Cancelled()
         lock.wait(ms)
     }
@@ -147,7 +148,7 @@ class ProgressiveSource(
             start = meta.done.firstGap(target, meta.total) ?: return false
             end = if (meta.total > 0) minOf(meta.done.nextStart(start, meta.total), start + CHUNK) else start + CHUNK
         }
-        val u = url ?: throw IOException("No stream address")
+        val u = url ?: throw IOException(tr("No stream address", "Akış adresi yok"))
         var con: HttpURLConnection? = null
         try {
             con = open(u, ua, "bytes=$start-${end - 1}")
@@ -273,7 +274,7 @@ class HlsSource(
                 val r = refresh ?: throw Expired()
                 if (++refreshes > 3) throw Expired()
                 val (v, a) = r()
-                if (v.size.toLong() != meta.total) throw IOException("YouTube changed the segments")
+                if (v.size.toLong() != meta.total) throw IOException(tr("YouTube changed the segments", "YouTube parçaları değiştirdi"))
                 vSegs = v; aSegs = a
                 return true
             }
@@ -509,9 +510,9 @@ object CachePublisher {
                 album = m.album,
             ))
             DownloadService.start(ctx)
-            return Result(false, "Not fully cached yet (${(m.fraction * 100).toInt()}%): queued as a normal download")
+            return Result(false, tr("Not fully cached yet (${(m.fraction * 100).toInt()}%): queued as a normal download", "Henüz tamamen önbellekte değil (%${(m.fraction * 100).toInt()}): normal indirme olarak sıraya alındı"))
         }
-        if (!publish(ctx, m)) return Result(false, "Couldn't write the file")
+        if (!publish(ctx, m)) return Result(false, tr("Couldn't write the file", "Dosya yazılamadı"))
         val cr = ctx.contentResolver
         val uri = Uri.parse(m.publicUri)
         val channel = Naming.channel(m.channel)
@@ -522,9 +523,9 @@ object CachePublisher {
             val n = cr.update(uri, ContentValues().apply {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, rel); put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             }, null, null)
-            if (n < 1) return Result(false, "Couldn't move the file (it may have been deleted)")
+            if (n < 1) return Result(false, tr("Couldn't move the file (it may have been deleted)", "Dosya taşınamadı (silinmiş olabilir)"))
         } catch (e: Exception) {
-            return Result(false, "Couldn't move the file: ${e.message}")
+            return Result(false, tr("Couldn't move the file: ${e.message}", "Dosya taşınamadı: ${e.message}"))
         }
         val shown = Saver.displayName(cr, uri) ?: name
         Store.add(Job(
@@ -533,7 +534,7 @@ object CachePublisher {
             state = State.DONE, uri = uri.toString(), fileName = shown, relPath = rel, finished = System.currentTimeMillis(), album = m.album,
         ))
         Store.cache.forget(m.kind, m.key) // the file lives on as a normal download
-        return Result(true, "Saved to $rel$shown")
+        return Result(true, tr("Saved to $rel$shown", "Kaydedildi: $rel$shown"))
     }
 }
 
@@ -544,11 +545,12 @@ object Sources {
 
     /** Listen = audio stream into the Music cache (itag 140, else 251). */
     fun music(ctx: Context, info: VideoInfo, title: String, channel: String, album: String?): ProgressiveSource {
-        val f = Modes.listenFormat(info.formats) ?: throw YtError("No audio stream offered", false)
-        val key = "${info.id}_${f.itag}"
+        val f = Modes.listenFormat(info.formats) ?: throw YtError(tr("No audio stream offered", "Ses akışı sunulmuyor"), false)
+        val key = CacheMeta.keyOf(info.id, f.itag, f.audioLang.orEmpty())
         val meta = Store.cache.get(CacheKind.MUSIC, key)?.takeIf { !it.published && (it.total == f.contentLength || f.contentLength <= 0) }
             ?: CacheMeta(CacheKind.MUSIC, info.id, f.itag, title, channel, info.durationSec, total = maxOf(0L, f.contentLength),
-                ext = if (f.isOpus) "webm" else "m4a").also { Store.cache.forget(CacheKind.MUSIC, key) }
+                ext = if (f.isOpus) "webm" else "m4a", lang = f.audioLang.orEmpty(), langOriginal = f.audioOriginal, langKnown = true)
+                .also { Store.cache.forget(CacheKind.MUSIC, key) }
         if (meta.album == null) meta.album = album
         val skip = HashSet<String>()
         var client = info.client
@@ -556,7 +558,7 @@ object Sources {
             skip += client
             val i2 = InnerTube.info(info.id, Net.network(ctx, Store.wifiOnly), skip, Clients.PLAY_ORDER)
             client = i2.client
-            val nf = i2.formats.firstOrNull { it.itag == f.itag } ?: throw YtError("Stream no longer offered", false)
+            val nf = i2.formats.firstOrNull { it.itag == f.itag && it.audioLang == f.audioLang } ?: throw YtError(tr("Stream no longer offered", "Akış artık sunulmuyor"), false)
             nf.url to ua(i2)
         }
         return ProgressiveSource(ctx, meta, f.url, ua(info), refresh)
@@ -569,7 +571,7 @@ object Sources {
      */
     fun membersVideo(ctx: Context, info: VideoInfo, title: String, channel: String): ProgressiveSource {
         val f = info.formats.firstOrNull { it.itag == 18 } ?: info.formats.filter { it.muxed && it.mime == "video/mp4" }.maxByOrNull { it.p }
-            ?: throw YtError("No single-file video stream for this members-only video: use Download (or Listen)", false)
+            ?: throw YtError(tr("No single-file video stream for this members-only video: use Download (or Listen)", "Bu üyelere özel video için tek dosyalık video akışı yok: İndir'i (ya da Dinle'yi) kullanın"), false)
         val key = "${info.id}_m${f.itag}"
         val meta = Store.cache.get(CacheKind.VIDEO, key)?.takeIf { !it.published && (it.total == f.contentLength || f.contentLength <= 0) }
             ?: CacheMeta(CacheKind.VIDEO, info.id, f.p, title, channel, info.durationSec, total = maxOf(0L, f.contentLength), ext = "mp4")
@@ -577,7 +579,7 @@ object Sources {
         meta.resolution = "${f.width}x${f.height}"
         val refresh = {
             val i2 = InnerTube.info(info.id, Net.network(ctx, Store.wifiOnly))
-            val nf = i2.formats.firstOrNull { it.itag == f.itag } ?: throw YtError("Stream no longer offered", false)
+            val nf = i2.formats.firstOrNull { it.itag == f.itag } ?: throw YtError(tr("Stream no longer offered", "Akış artık sunulmuyor"), false)
             nf.url to ua(i2)
         }
         return ProgressiveSource(ctx, meta, f.url, ua(info), refresh)
@@ -586,23 +588,27 @@ object Sources {
     /** Watch = one HLS quality (best H.264 up to [height]) into the Video cache. */
     fun video(ctx: Context, calls: Calls, info0: VideoInfo, title: String, channel: String, height: Int): CachedSource {
         if (info0.members && info0.hls == null) return membersVideo(ctx, info0, title, channel)
+        var lang = "" // audio language of a dubbed video: always the original here
         fun load(inf0: VideoInfo): Triple<Hls.Variant, Pair<String, String?>, String> {
             var inf = inf0
             if (inf.hls == null) inf = InnerTube.info(inf0.id, Net.network(ctx, Store.wifiOnly), order = Clients.HLS_ORDER)
-            val url = inf.hls ?: throw YtError("No video stream for this video", false)
+            val url = inf.hls ?: throw YtError(tr("No video stream for this video", "Bu video için video akışı yok"), false)
             val ua = ua(inf)
             val master = Hls.parseMaster(String(WebApi.get(ctx, calls, calls.gen, url, ua), Charsets.UTF_8), url)
-            val v = Hls.pick(Hls.choices(master), height) ?: throw YtError("No H.264 video stream", false)
+            val v = Hls.pick(Hls.choices(master), height) ?: throw YtError(tr("No H.264 video stream", "H.264 video akışı yok"), false)
             val vText = String(WebApi.get(ctx, calls, calls.gen, v.uri, ua), Charsets.UTF_8)
-            val aText = v.audio?.let { master.audio[it] }?.let { String(WebApi.get(ctx, calls, calls.gen, it, ua), Charsets.UTF_8) }
+            val a = v.audio?.let { master.audioFor(it, null) }
+            a?.let { lang = it.second }
+            val aText = a?.let { String(WebApi.get(ctx, calls, calls.gen, it.first, ua), Charsets.UTF_8) }
             return Triple(v, vText to aText, ua)
         }
         val (v, texts, ua) = load(info0)
         val vSegs = Hls.parseMedia(texts.first, v.uri)
         val aSegs = texts.second?.let { Hls.parseMedia(it, v.uri) }
-        val key = "${info0.id}_${v.height}"
+        val key = CacheMeta.keyOf(info0.id, v.height, lang)
         val meta = Store.cache.get(CacheKind.VIDEO, key)?.takeIf { !it.published && it.total == vSegs.size.toLong() }
-            ?: CacheMeta(CacheKind.VIDEO, info0.id, v.height, title, channel, info0.durationSec, total = vSegs.size.toLong())
+            ?: CacheMeta(CacheKind.VIDEO, info0.id, v.height, title, channel, info0.durationSec, total = vSegs.size.toLong(),
+                lang = lang, langOriginal = lang.isNotEmpty(), langKnown = true)
                 .also { Store.cache.forget(CacheKind.VIDEO, key) }
         meta.codecs = v.codecs; meta.bandwidth = v.bandwidth; meta.resolution = "${v.width}x${v.height}"
         val dir = Store.cache.entryDir(CacheKind.VIDEO, key).apply { mkdirs() }

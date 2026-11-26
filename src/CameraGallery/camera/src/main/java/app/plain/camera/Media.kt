@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Size
+import app.plain.lang.tr
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
@@ -35,7 +36,7 @@ object Media {
         }
         val coll = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        return ctx.contentResolver.insert(coll, v) ?: throw IOException("the media store refused a new file")
+        return ctx.contentResolver.insert(coll, v) ?: throw IOException(tr("the media store refused a new file", "medya deposu yeni dosyayı kabul etmedi"))
     }
 
     fun publish(ctx: Context, uri: Uri) {
@@ -61,7 +62,7 @@ object Media {
     /** Writes into a file another app handed us (ACTION_IMAGE_CAPTURE's EXTRA_OUTPUT). */
     fun writeTo(ctx: Context, uri: Uri, bytes: ByteArray) {
         val os = try { ctx.contentResolver.openOutputStream(uri, "wt") } catch (_: Exception) { null }
-            ?: ctx.contentResolver.openOutputStream(uri, "w") ?: throw IOException("can't write to $uri")
+            ?: ctx.contentResolver.openOutputStream(uri, "w") ?: throw IOException(tr("can't write to $uri", "yazılamıyor: $uri"))
         os.use { it.write(bytes) }
     }
 

@@ -21,9 +21,10 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import app.plain.lang.tr
 
 /** The account answered "signed out": cookies rotated away or revoked. Text never contains cookie data. */
-class AccountExpired : IOException("Account expired — import new cookies (⋮ → Account)")
+class AccountExpired : IOException(tr("Account expired — import new cookies (⋮ → Account)", "Hesabın süresi doldu — yeni çerezleri içe aktarın (⋮ → Hesap)"))
 
 /**
  * The signed-in account (2.0), used ONLY for: the subscriptions sync, account check, /player of members-only videos
@@ -43,7 +44,7 @@ object Account {
     @Volatile var name: String? = null
         private set
 
-    const val SIGNED_OUT = "Members-only — import your account in ⋮ → Account"
+    val SIGNED_OUT get() = tr("Members-only — import your account in ⋮ → Account", "Üyelere özel — hesabınızı ⋮ → Hesap'tan içe aktarın")
 
     fun init(ctx: Context) { app = ctx.applicationContext }
     val ctx: Context get() = app
@@ -152,7 +153,7 @@ object AuthHttp {
     ): String {
         val jar = Account.jar()
         if (jar == null || !AuthRule.useAccount(purpose, url, Account.usable && jar.signedIn, membersOnly)) {
-            throw YtError(if (Account.expired) "Account expired — import new cookies (⋮ → Account)" else Account.SIGNED_OUT, false)
+            throw YtError(if (Account.expired) tr("Account expired — import new cookies (⋮ → Account)", "Hesabın süresi doldu — yeni çerezleri içe aktarın (⋮ → Hesap)") else Account.SIGNED_OUT, false)
         }
         var last: IOException? = null
         for (attempt in 0 until 4) {
@@ -179,8 +180,8 @@ object AuthHttp {
                 val sc = con.headerFields.entries.filter { it.key != null && it.key.equals("Set-Cookie", true) }.flatMap { it.value }
                 if (sc.isNotEmpty() && jar.apply(sc, java.net.URL(url).host, now)) Account.rotated()
                 if (code == 401) { Account.markExpired(); throw AccountExpired() }
-                if (code in 300..399) throw YtError("YouTube redirected an account request (HTTP $code)", false)
-                if (code in 400..499 && code != 400) throw YtError("YouTube answered HTTP $code", false)
+                if (code in 300..399) throw YtError(tr("YouTube redirected an account request (HTTP $code)", "YouTube bir hesap isteğini yönlendirdi (HTTP $code)"), false)
+                if (code in 400..499 && code != 400) throw YtError(tr("YouTube answered HTTP $code", "YouTube yanıtı: HTTP $code"), false)
                 val bytes = (if (code in 200..299) con.inputStream else con.errorStream)?.use { Net.readAll(it, 12 shl 20) }
                     ?: throw IOException("HTTP $code")
                 if (code !in 200..299 && code != 400) throw IOException("HTTP $code")
@@ -197,7 +198,7 @@ object AuthHttp {
                 con.disconnect()
             }
         }
-        throw last ?: IOException("Network error")
+        throw last ?: IOException(tr("Network error", "Ağ hatası"))
     }
 
     private fun webHeaders() = Clients.webHeaders(null)
@@ -231,7 +232,7 @@ object AuthHttp {
     /** A channel's members-only videos (the UUMO… playlist), page 1 or a continuation. */
     fun membersPage(ctx: Context, calls: Calls, g: Int, channelId: String, token: String?): JSONObject {
         val fields = if (token != null) mapOf("continuation" to token)
-            else mapOf("browseId" to "VL" + (Members.playlistOf(channelId) ?: throw YtError("Not a channel", false)))
+            else mapOf("browseId" to "VL" + (Members.playlistOf(channelId) ?: throw YtError(tr("Not a channel", "Kanal değil"), false)))
         return JSONObject(post(ctx, Purpose.MEMBERS_TAB, Clients.BROWSE_URL, Clients.webBody(fields, null), true, webHeaders(), calls, g))
     }
 }
@@ -248,7 +249,7 @@ object AuthPlayer {
 
     fun info(ctx: Context, videoId: String, net: Network?): VideoInfo {
         val js = playerJs(ctx, net)
-        val sts = TvPlayer.sts(js) ?: throw YtError("Couldn't read YouTube's player version (signatureTimestamp)", false)
+        val sts = TvPlayer.sts(js) ?: throw YtError(tr("Couldn't read YouTube's player version (signatureTimestamp)", "YouTube oynatıcı sürümü okunamadı (signatureTimestamp)"), false)
         val c = TvPlayer.CLIENT
         var answer = ""
         for (attempt in 0 until 2) {
@@ -268,7 +269,7 @@ object AuthPlayer {
         val probe = JSONObject(answer).optJSONObject("playabilityStatus")
         if (probe?.optString("status") != "OK") {
             val r = Yt.parsePlayer(answer, c.key, videoId) as PlayerResult.Fail
-            if (r.error.members) throw YtError("Your account can't play this members-only video (not a member of the channel?)", false, members = true)
+            if (r.error.members) throw YtError(tr("Your account can't play this members-only video (not a member of the channel?)", "Hesabınız bu üyelere özel videoyu oynatamıyor (kanala üye değil misiniz?)"), false, members = true)
             throw r.error
         }
         val ch = TvPlayer.challenges(answer)
@@ -293,7 +294,7 @@ object AuthPlayer {
         var id = playerId
         if (id == null || now - playerIdAt > 6 * 3600_000L) {
             id = TvPlayer.playerId(String(anonGet(net, TvPlayer.IFRAME_API, 1 shl 20), Charsets.UTF_8))
-                ?: throw YtError("Couldn't find YouTube's player version", false)
+                ?: throw YtError(tr("Couldn't find YouTube's player version", "YouTube oynatıcı sürümü bulunamadı"), false)
             playerId = id; playerIdAt = now
         }
         val dir = File(ctx.cacheDir, "tvplayer").apply { mkdirs() }
@@ -363,10 +364,10 @@ object JsSolver {
         }
         val ok = latch.await(timeoutSec, TimeUnit.SECONDS)
         main.post { wv?.let { it.stopLoading(); it.destroy() } }
-        if (!ok) throw YtError("Signature solver timed out", false)
-        error?.let { throw YtError("Signature solver couldn't start ($it)", false) }
+        if (!ok) throw YtError(tr("Signature solver timed out", "İmza çözücü zaman aşımına uğradı"), false)
+        error?.let { throw YtError(tr("Signature solver couldn't start ($it)", "İmza çözücü başlatılamadı ($it)"), false) }
         val r = result
-        if (r == null || r == "null") throw YtError("Signature solver failed", false)
+        if (r == null || r == "null") throw YtError(tr("Signature solver failed", "İmza çözücü başarısız"), false)
         // evaluateJavascript returns the value JSON-encoded: a JS string -> "\"{...}\""
         return JSONArray("[$r]").getString(0)
     }

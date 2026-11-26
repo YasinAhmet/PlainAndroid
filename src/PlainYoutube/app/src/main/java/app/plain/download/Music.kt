@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 /**
  * YouTube Music artist pages (WEB_REMIX `browse` of the channel id). Verified 2026-11-26: a "- Topic" channel on
@@ -185,11 +186,12 @@ object Collect {
 
     fun summary(queued: Int, r: Result): String {
         val p = ArrayList<String>()
-        p += "Queued $queued"
-        if (r.skipped > 0) p += "skipped ${r.skipped} already downloaded or queued"
-        if (r.live > 0) p += "${r.live} live/upcoming"
+        p += tr("Queued $queued", "Sıraya alındı: $queued")
+        if (r.skipped > 0) p += tr("skipped ${r.skipped} already downloaded or queued", "zaten indirilmiş ya da sırada olan ${r.skipped} atlandı")
+        if (r.live > 0) p += tr("${r.live} live/upcoming", "${r.live} canlı/yakında")
         val s = p.joinToString(", ") + "."
-        return if (r.left > 0) "$s ${r.left} more are left (limit ${Bulk.MAX} per run): run Download all again to continue." else s
+        return if (r.left > 0) tr("$s ${r.left} more are left (limit ${Bulk.MAX} per run): run Download all again to continue.",
+            "$s ${r.left} tane daha kaldı (her seferde en çok ${Bulk.MAX}): devam etmek için Tümünü indir'i yeniden çalıştırın.") else s
     }
 }
 
@@ -200,13 +202,13 @@ data class BatchStats(val total: Int, val done: Int, val failed: Int, val cancel
         get() {
             val p = ArrayList<String>()
             p += "$done/$total"
-            if (downloading > 0) p += "$downloading downloading"
-            if (converting > 0) p += "$converting converting"
-            if (waiting > 0) p += "$waiting waiting to convert"
-            if (queued > 0) p += "$queued queued"
-            if (failed > 0) p += "$failed failed"
-            if (canceled > 0) p += "$canceled canceled"
-            if (active == 0 && failed == 0 && canceled == 0) p += "done"
+            if (downloading > 0) p += tr("$downloading downloading", "$downloading indiriliyor")
+            if (converting > 0) p += tr("$converting converting", "$converting dönüştürülüyor")
+            if (waiting > 0) p += tr("$waiting waiting to convert", "$waiting dönüştürme bekliyor")
+            if (queued > 0) p += tr("$queued queued", "$queued sırada")
+            if (failed > 0) p += tr("$failed failed", "$failed başarısız")
+            if (canceled > 0) p += tr("$canceled canceled", "$canceled iptal edildi")
+            if (active == 0 && failed == 0 && canceled == 0) p += tr("done", "bitti")
             return p.joinToString(" · ")
         }
 

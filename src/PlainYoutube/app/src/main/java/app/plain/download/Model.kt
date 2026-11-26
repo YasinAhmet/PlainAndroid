@@ -2,6 +2,7 @@ package app.plain.download
 
 import org.json.JSONArray
 import org.json.JSONObject
+import app.plain.lang.tr
 
 enum class State { QUEUED, RUNNING, DONE, FAILED, CANCELED }
 
@@ -52,8 +53,8 @@ data class Job(
     val active get() = state == State.QUEUED || state == State.RUNNING
 
     val what: String
-        get() = if (art) "Cover art" else if (cache) (if (kind == Kind.AUDIO) "Cache · music" else "Cache · video ${height}p")
-        else if (kind == Kind.AUDIO) "Audio ${audioFmt.label}" else "Video MP4 ${height}p" + if (codec == VCodec.AV1) " AV1" else ""
+        get() = if (art) tr("Cover art", "Kapak resmi") else if (cache) (if (kind == Kind.AUDIO) tr("Cache · music", "Önbellek · müzik") else tr("Cache · video ${height}p", "Önbellek · video ${height}p"))
+        else if (kind == Kind.AUDIO) tr("Audio ${audioFmt.label}", "Ses ${audioFmt.label}") else "Video MP4 ${height}p" + if (codec == VCodec.AV1) " AV1" else ""
 }
 
 object JobCodec {
@@ -127,7 +128,7 @@ object JobCodec {
      * parts); QUEUED jobs stay queued and run when the app is opened again (no background auto-start).
      */
     fun afterRestart(jobs: MutableList<Job>) {
-        for (j in jobs) if (j.state == State.RUNNING) { j.state = State.FAILED; j.error = "Interrupted"; j.phase = Phase.DOWNLOAD }
+        for (j in jobs) if (j.state == State.RUNNING) { j.state = State.FAILED; j.error = tr("Interrupted", "Yarıda kesildi"); j.phase = Phase.DOWNLOAD }
     }
 
     private inline fun <reified E : Enum<E>> enumOr(name: String, def: E): E =
