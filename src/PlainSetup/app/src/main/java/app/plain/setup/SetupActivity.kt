@@ -28,6 +28,8 @@ import java.util.concurrent.Executors
  */
 class SetupActivity : Activity(), Installer.Listener {
 
+    private companion object { const val REQ_UNINSTALL = 41 }
+
     private object C {
         const val BG = 0xFF000000.toInt()
         const val OUTLINE = 0xFF2A2A2A.toInt()
@@ -50,12 +52,20 @@ class SetupActivity : Activity(), Installer.Listener {
     private var focusPkg: String? = null      // set when another app asked for its update
     private var autoInstallFocus = false
     private var waitingPermission: List<Offer>? = null
+    private var pendingRollback: Offer? = null   // old release to install once the uninstall is done
+    private val prefs by lazy { getSharedPreferences("setup", MODE_PRIVATE) }
+
+    /** Apps rolled back on purpose: not pre-ticked, not in "Update all", until updated by hand. */
+    private var held: Set<String>
+        get() = prefs.getStringSet("held", emptySet())!!.toSet()
+        set(v) { prefs.edit().putStringSet("held", v).apply() }
 
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
     private lateinit var skip: TextView
     private lateinit var checkBtn: TextView
     private lateinit var installBtn: TextView
+    private lateinit var updateAllBtn: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,8 +155,18 @@ class SetupActivity : Activity(), Installer.Listener {
 
     private fun canInstall() = Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()
 
-    private fun install() {
-        val chosen = offers.filter { it.entry.pkg in selected && stateOf(it).let { s -> s == Catalog.State.NOT_INSTALLED || s == Catalog.State.UPDATE } }
+    private fun updates() = Catalog.updates(offers, ::installedCode, Build.VERSION.SDK_INT, held)
+
+    /** Bulk update: every installed Plain app with a newer version, whatever is ticked. */
+    private fun updateAll() {
+        val ups = updates()
+        if (ups.isEmpty()) { say("Everything is up to date."); return }
+        selected += ups.map { it.entry.pkg }
+        install(ups)
+    }
+
+    private fun install(only: List<Offer>? = null) {
+        val chosen = only ?: offers.filter { it.entry.pkg in selected && stateOf(it).let { s -> s == Catalog.State.NOT_INSTALLED || s == Catalog.State.UPDATE } }
         if (chosen.isEmpty()) { say("Nothing to install: tick an app that isn't installed or has an update."); return }
         if (!canInstall()) {
             waitingPermission = chosen
@@ -166,8 +186,82 @@ class SetupActivity : Activity(), Installer.Listener {
 
     private fun begin(chosen: List<Offer>) {
         chosen.forEach { results.remove(it.entry.pkg) }
+        // Installing the newest version by hand ends a hold; a rollback install starts one.
+        val rolling = chosen.filter { o -> offers.none { it.entry.pkg == o.entry.pkg && it.entry.versionCode == o.entry.versionCode } }.map { it.entry.pkg }
+        held = held - chosen.map { it.entry.pkg }.toSet() + rolling
         Installer.start(this, chosen)
         rebuild()
+    }
+
+    // ------------------------------------------------------------------ rollback
+
+    /** The local backup first (the version before the last update), then the online releases. */
+    private fun rollbackChoices(o: Offer): List<Offer> {
+        val code = installedCode(o.entry.pkg) ?: return emptyList()
+        val local = Backups.find(this, o.entry)?.takeIf { it.versionCode < code }
+        val online = Catalog.olderVersions(o, code, Build.VERSION.SDK_INT).filter { it.versionCode != local?.versionCode }
+        return listOfNotNull(local?.let { Offer(it, Source.LOCAL) }) + online.map { Offer(it, Source.ONLINE) }
+    }
+
+    private fun showOlder(o: Offer) {
+        val olds = rollbackChoices(o)
+        if (olds.isEmpty()) { say("No older version of ${o.entry.name} to go back to."); return }
+        val labels = olds.map {
+            it.entry.versionName + if (it.source == Source.LOCAL) "  ·  your previous version (saved on this phone)"
+            else Catalog.sizeText(it.entry.size).let { z -> if (z.isEmpty()) "  ·  download" else "  ·  download $z" }
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("${o.entry.name}: go back to")
+            .setItems(labels) { _, i -> confirmRollback(o, olds[i].entry, olds[i].source) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmRollback(o: Offer, old: Entry, src: Source) {
+        val now = installedName(o.entry.pkg) ?: "?"
+        if (o.entry.pkg == packageName) {
+            // Setup can't uninstall itself and carry on; hand over to the release page.
+            AlertDialog.Builder(this)
+                .setTitle("Plain Setup ${old.versionName}")
+                .setMessage("Setup can't replace itself with an older copy. The release page opens: download PlainSetup.apk there, " +
+                    "uninstall this Setup, then open the download.")
+                .setPositiveButton("Open page") { _, _ ->
+                    val page = old.url.substringBefore("/releases/download/") + "/releases/tag/" + old.url.substringAfter("/releases/download/").substringBefore('/')
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(page))) } catch (e: Exception) { say("No browser: ${e.message}") }
+                }
+                .setNegativeButton("Cancel", null).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Go back to ${o.entry.name} ${old.versionName}?")
+            .setMessage("Android can't install an older version over a newer one. Setup will:\n\n" +
+                "1. Uninstall ${o.entry.name} $now. Its app data is deleted: settings, saved lists and anything kept inside the app. " +
+                "Files in your shared folders (Music, Pictures, Download…) stay.\n" +
+                "2. Install ${old.versionName}" + (if (src == Source.LOCAL) " from the copy saved on this phone.\n\n" else " (downloaded and checked).\n\n") +
+                "Afterwards ${o.entry.name} stays on ${old.versionName}: Update all skips it until you update it yourself.")
+            .setPositiveButton("Uninstall and go back") { _, _ -> startRollback(Offer(old, src)) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun startRollback(old: Offer) {
+        if (Installer.busy) { say("Wait for the current install to finish."); return }
+        pendingRollback = old
+        @Suppress("DEPRECATION")
+        val i = Intent(Intent.ACTION_UNINSTALL_PACKAGE, Uri.parse("package:${old.entry.pkg}")).putExtra(Intent.EXTRA_RETURN_RESULT, true)
+        try { startActivityForResult(i, REQ_UNINSTALL) } catch (e: Exception) { pendingRollback = null; say("Can't uninstall: ${e.message}") }
+    }
+
+    @Deprecated("Activity result API needs AndroidX; this app has no libraries.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_UNINSTALL) return
+        val old = pendingRollback ?: return
+        pendingRollback = null
+        if (installedCode(old.entry.pkg) != null) { say("Rollback cancelled: ${old.entry.name} is still installed."); rebuild(); return }
+        selected.remove(old.entry.pkg)
+        if (!canInstall()) { waitingPermission = listOf(old); install(listOf(old)); return }
+        begin(listOf(old))
     }
 
     override fun onStatus(text: String) { setStatus(text, C.ACCENT); skip.visibility = if (text.startsWith("Confirm")) View.VISIBLE else View.GONE }
@@ -227,11 +321,19 @@ class SetupActivity : Activity(), Installer.Listener {
         val scroll = ScrollView(this).apply { addView(list) }
         checkBtn = pill("Check for updates", false) { checkOnline() }
         installBtn = pill("Install", true) { install() }
-        val bar = LinearLayout(this).apply {
+        updateAllBtn = pill("Update all", false) { updateAll() }.apply {
+            setTextColor(C.ACCENT); background = outline(C.ACCENT, 24); visibility = View.GONE
+        }
+        val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(12), dp(8), dp(12), dp(12))
             addView(checkBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
             addView(installBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(12))
+            addView(updateAllBtn, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            addView(row)
         }
         root.addView(head); root.addView(status); root.addView(skip)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(bar)
@@ -257,8 +359,9 @@ class SetupActivity : Activity(), Installer.Listener {
         if (!::list.isInitialized) return
         offers = Catalog.merge(bundled, online)
         // Pre-tick available updates the first time we see them (not while installing).
+        val hold = held
         if (!Installer.busy && focusPkg == null) for (o in offers) {
-            if (stateOf(o) == Catalog.State.UPDATE && o.entry.pkg !in results) selected += o.entry.pkg
+            if (stateOf(o) == Catalog.State.UPDATE && o.entry.pkg !in results && o.entry.pkg !in hold) selected += o.entry.pkg
         }
         list.removeAllViews()
         val busy = Installer.busy
@@ -269,6 +372,9 @@ class SetupActivity : Activity(), Installer.Listener {
         installBtn.text = if (busy) "Installing…" else if (n == 0) "Install" else "Install $n"
         installBtn.isEnabled = !busy && n > 0
         installBtn.alpha = if (installBtn.isEnabled) 1f else 0.4f
+        val ups = if (busy) 0 else updates().size
+        updateAllBtn.text = if (ups == 1) "Update all (1 app)" else "Update all ($ups apps)"
+        updateAllBtn.visibility = if (ups > 0) View.VISIBLE else View.GONE
         checkBtn.text = if (checking) "Checking…" else "Check for updates"
         checkBtn.isEnabled = !checking && !busy
 
@@ -294,7 +400,8 @@ class SetupActivity : Activity(), Installer.Listener {
         val title = text(e.name, 17f, C.TEXT, bold = true)
         val ver = when (st) {
             Catalog.State.NOT_INSTALLED -> "Not installed · ${e.versionName}"
-            Catalog.State.UPDATE -> "Update: ${installedName(e.pkg) ?: "?"} → ${e.versionName}"
+            Catalog.State.UPDATE -> if (e.pkg in held) "Kept at ${installedName(e.pkg) ?: "?"} (rolled back) · ${e.versionName} available"
+                else "Update: ${installedName(e.pkg) ?: "?"} → ${e.versionName}"
             Catalog.State.UP_TO_DATE -> "Installed ${e.versionName} · up to date"
             Catalog.State.NEWER_INSTALLED -> "Installed ${installedName(e.pkg) ?: ""} (newer)"
             Catalog.State.TOO_OLD_ANDROID -> "Needs ${Catalog.androidName(e.minSdk)} or newer"
@@ -311,6 +418,11 @@ class SetupActivity : Activity(), Installer.Listener {
             addView(text(ver, 13f, verColor))
             if (e.summary.isNotEmpty()) addView(text(e.summary, 13f, C.DIM).apply { setPadding(0, dp(4), 0, 0); maxLines = 4; ellipsize = TextUtils.TruncateAt.END })
             results[e.pkg]?.let { (ok, msg) -> addView(text(msg, 13f, if (ok) C.GREEN else C.RED, bold = true).apply { setPadding(0, dp(4), 0, 0) }) }
+            if (!busy && rollbackChoices(o).isNotEmpty())
+                addView(text("Older versions…", 13f, C.ACCENT, bold = true).apply {
+                    setPadding(0, dp(8), dp(16), dp(2))
+                    setOnClickListener { showOlder(o) }
+                }, LinearLayout.LayoutParams(-2, -2))
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

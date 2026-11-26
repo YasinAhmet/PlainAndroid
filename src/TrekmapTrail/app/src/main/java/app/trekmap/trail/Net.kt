@@ -14,7 +14,7 @@ import java.net.URL
  * Even if Android would route traffic over mobile data, these sockets can only use Wi-Fi.
  */
 object Net {
-    const val UA = "TrekmapTrail/1.0 (personal offline hiking map; Android)"
+    const val UA = "PlainTrekking/1.0 (personal offline hiking map; Android)"
 
     class Http(val code: Int) : IOException("HTTP $code")
 

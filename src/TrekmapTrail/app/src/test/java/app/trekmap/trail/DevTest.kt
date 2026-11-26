@@ -78,7 +78,7 @@ class DevTest {
         assertEquals(2600L, s.appCpuMs)
         val t = s.text()
         assertTrue(t, t.contains("Drain screen off, airplane on · music on · bt audio on: 100 mA"))
-        assertTrue(t, t.contains("Trekmap CPU time"))
+        assertTrue(t, t.contains("Plain Trekking CPU time"))
     }
 
     /**

@@ -134,9 +134,9 @@ object Dev {
     // ------------------------------------------------------------------ device & battery
     fun versionInfo(ctx: Context): String = try {
         val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
-        "Trekmap Trail ${pi.versionName} (${if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else 0})"
+        "Plain Trekking ${pi.versionName} (${if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else 0})"
     } catch (e: Exception) {
-        "Trekmap Trail"
+        "Plain Trekking"
     }
 
     /** currentRaw = BatteryManager CURRENT_NOW exactly as reported (unit and sign differ between vendors). */

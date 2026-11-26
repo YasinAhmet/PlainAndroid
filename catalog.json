@@ -20,7 +20,7 @@
       "summary": "Simple camera with an advanced mode. Offline. Keep your phone's own camera installed too."
     },
     {
-      "key": "trail", "name": "Trekmap Trail", "package": "app.trekmap.trail", "file": "TrekmapTrail.apk",
+      "key": "trail", "name": "Plain Trekking", "package": "app.trekmap.trail", "file": "TrekmapTrail.apk",
       "project": "Trekmap/mobile", "src": "TrekmapTrail", "buildFile": "app/build.gradle.kts",
       "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
       "summary": "Hiking: plan routes, download offline maps on Wi-Fi, record your trail with GPS."

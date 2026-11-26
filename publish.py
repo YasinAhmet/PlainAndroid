@@ -112,6 +112,22 @@ def build_app(app, live_by_key, force_bump, dry):
     }
 
 
+HIST_KEYS = ("versionCode", "versionName", "tag", "url", "size", "sha256", "minSdk")
+
+
+def with_history(new, old):
+    """Carries the previous release into new["history"] (newest first) so Setup can roll back."""
+    hist = list((old or {}).get("history", []))
+    if old and old.get("versionCode") != new["versionCode"]:
+        hist.insert(0, {k: old[k] for k in HIST_KEYS if k in old})
+    seen, out = {new["versionCode"]}, []
+    for h in hist:
+        if h["versionCode"] not in seen:
+            seen.add(h["versionCode"]); out.append(h)
+    new["history"] = out
+    return new
+
+
 def release(entry, notes, latest, dry):
     if dry:
         print(f"  (dry run) would release {entry['tag']}")
@@ -222,7 +238,7 @@ def main():
     for k in wanted:
         e = build_app(by_key[k], live_by_key, a.bump, a.dry_run)
         release(e, a.notes, latest=False, dry=a.dry_run)
-        live_by_key[k] = e
+        live_by_key[k] = with_history(e, live_by_key.get(k))
         done.append(f"{e['name']} {e['versionName']}")
 
     # Plain Setup: bundle every current app APK + the catalog, then release it as the latest.
@@ -237,12 +253,12 @@ def main():
         if x["key"] == "setup" or not e:
             continue
         shutil.copyfile(ensure_dist(e) if not a.dry_run else os.path.join(DIST, e["file"]), os.path.join(apk_dir, e["file"]))
-        bundled.append(e)
+        bundled.append({k: v for k, v in e.items() if k != "history"})  # rollback is online-only
     save(os.path.join(assets, "apps.json"), {"repo": CAT["repo"], "apps": bundled})
     s = build_app(setup, live_by_key, True, a.dry_run)  # a new Setup every time (it carries the APKs)
     release(s, "Install this on a new phone, then pick the Plain apps you want. Bundles: " +
             ", ".join(f"{e['name']} {e['versionName']}" for e in bundled), latest=True, dry=a.dry_run)
-    live_by_key["setup"] = s
+    live_by_key["setup"] = with_history(s, live_by_key.get("setup"))
     done.append(f"Plain Setup {s['versionName']}")
 
     if a.dry_run:

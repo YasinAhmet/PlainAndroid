@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
  * Installs a queue of offers one by one through PackageInstaller sessions.
  * Bundled APKs stream straight from assets; online ones are downloaded to the cache, checked
  * (SHA-256 from apps.json + signed with the same key as Setup) and then installed.
+ * Before replacing an installed app, its current APK is saved by [Backups] (one per app).
  * Android shows its own confirm dialog per app; on Android 12+ updates of apps Setup installed
  * itself go through without one.
  */
@@ -69,7 +70,18 @@ object Installer {
 
     private fun install(app: Context, o: Offer) {
         val e = o.entry
+        if (o.source != Source.LOCAL && e.pkg != app.packageName) {
+            status("Saving a copy of the installed ${e.name}…")
+            Backups.save(app, e.pkg, e.versionCode) // "I updated but didn't like it" → Older versions… → this copy
+        }
         when (o.source) {
+            Source.LOCAL -> {
+                val f = File(e.url)
+                if (!f.isFile) throw IOException("The saved copy is gone")
+                verify(app, f, e.pkg, deleteOnFail = false)
+                status("Installing ${e.name} ${e.versionName}…")
+                f.inputStream().use { commit(app, e, it, f.length()) }
+            }
             Source.BUNDLED -> {
                 status("Installing ${e.name} ${e.versionName}…")
                 app.assets.openFd("apks/${e.file}").use { fd -> fd.createInputStream().use { commit(app, e, it, fd.length) } }
@@ -90,7 +102,7 @@ object Installer {
     }
 
     /** The APK must be [pkg] and signed with Setup's own key; otherwise it isn't ours. */
-    private fun verify(app: Context, f: File, pkg: String) {
+    private fun verify(app: Context, f: File, pkg: String, deleteOnFail: Boolean = true) {
         val pm = app.packageManager
         @Suppress("DEPRECATION")
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
@@ -100,7 +112,7 @@ object Installer {
         val theirs = certs(info)
         // Some old Android versions can't read an archive's certificate; the checksum still covers it.
         if (theirs.isNotEmpty() && mine.isNotEmpty() && theirs != mine) {
-            f.delete(); throw IOException("Not signed by the Plain apps' key — refused")
+            if (deleteOnFail) f.delete(); throw IOException("Not signed by the Plain apps' key — refused")
         }
     }
 

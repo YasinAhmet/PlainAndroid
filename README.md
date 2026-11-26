@@ -17,7 +17,7 @@ To update: every app has **Check for updates** in its settings or menu. Plain Se
 | Plain Music | 11+ | Offline music player for the songs on your phone. No internet permission. |
 | Plain Gallery | 10+ | Photos and videos page by page, newest first. |
 | Plain Camera | 10+ | Simple camera with an advanced mode. |
-| Trekmap Trail | 8+ | Hiking: plan routes, offline maps (downloaded on Wi-Fi), GPS trail recording. |
+| Plain Trekking | 8+ | Hiking: plan routes, offline maps (downloaded on Wi-Fi), GPS trail recording. |
 | Plain Istanbul Map | 8+ | Offline Istanbul bus/metro/ferry line map with stops and timetables. |
 | Plain Youtube | 11+ | Search, watch and download YouTube videos and music (unofficial client). |
 | Plain Home | 10+ | Minimal home screen with app sections. |

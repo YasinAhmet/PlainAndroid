@@ -213,7 +213,7 @@ class MainActivity : Activity() {
     fun takePhoto() {
         if (!Trail.active) return
         val now = System.currentTimeMillis()
-        val name = "Trekmap_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(now)) + ".jpg"
+        val name = "PlainTrekking_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(now)) + ".jpg"
         val pos = Trail.photoPosition(this)
         prefs.edit().putString("photoName", name).putLong("photoTime", now).putString("photoPos", "${pos[0]},${pos[1]},${pos[2]}").apply()
         val out = ShareProvider.captureUri(name)
@@ -281,7 +281,7 @@ class MainActivity : Activity() {
     fun shareDebugZip(f: java.io.File) {
         val i = Intent(Intent.ACTION_SEND).setType("application/zip")
             .putExtra(Intent.EXTRA_STREAM, ShareProvider.debugUri(f))
-            .putExtra(Intent.EXTRA_SUBJECT, "Trekmap Trail debug logs")
+            .putExtra(Intent.EXTRA_SUBJECT, "Plain Trekking debug logs")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(i, "Share debug logs"))
     }
@@ -449,9 +449,9 @@ class MainActivity : Activity() {
             .setMessage(
                 "Tecno's HiOS can stop apps in the background, which leaves gaps in your track.\n\n" +
                     "1. Tap Continue and choose Allow (ignore battery optimisation).\n" +
-                    "2. In Settings › Battery / app launch management, let Trekmap Trail run in the background " +
+                    "2. In Settings › Battery / app launch management, let Plain Trekking run in the background " +
                     "(the menu names differ between HiOS versions).\n" +
-                    "3. In Recent apps, lock Trekmap Trail.\n\n" +
+                    "3. In Recent apps, lock Plain Trekking.\n\n" +
                     "The app still saves battery itself: GPS turns off while you rest and the map only draws while you look at it."
             )
             .setPositiveButton("Continue") { _, _ ->
@@ -470,7 +470,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Auto-resume recording")
             .setMessage(
-                "If HiOS ever closes Trekmap Trail mid-hike, Android can restart the recording by itself — " +
+                "If HiOS ever closes Plain Trekking mid-hike, Android can restart the recording by itself — " +
                     "but only with location set to “Allow all the time”.\n\n" +
                     "Location is still used only while a trail is recording. Without this, recording resumes when you reopen the app."
             )

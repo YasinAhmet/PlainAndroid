@@ -1,146 +1,346 @@
 {
   "repo": "YasinAhmet/PlainAndroid",
-  "updated": "2026-11-26T14:16:42Z",
+  "updated": "2026-11-26T14:32:37Z",
   "apps": [
     {
       "key": "music",
       "name": "Plain Music",
       "package": "app.localmusic",
-      "versionCode": 7,
-      "versionName": "1.6",
+      "versionCode": 8,
+      "versionName": "1.7",
       "file": "PlainMusic.apk",
-      "tag": "music-v1.6",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/music-v1.6/PlainMusic.apk",
+      "tag": "music-v1.7",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/music-v1.7/PlainMusic.apk",
       "size": 266236,
-      "sha256": "32fb37bd636a1b97a15a77dfae4d86318558a3490d04ea31c34f028bc3eba63c",
+      "sha256": "d7a64b44774ef4682f5ed02e8afb407f0c9fda6647eadf95e8c81e5951abdc77",
       "minSdk": 30,
-      "summary": "Offline music player for the songs on your phone. No internet at all; light on battery."
+      "summary": "Offline music player for the songs on your phone. No internet at all; light on battery.",
+      "history": [
+        {
+          "versionCode": 7,
+          "versionName": "1.6",
+          "tag": "music-v1.6",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/music-v1.6/PlainMusic.apk",
+          "size": 266236,
+          "sha256": "32fb37bd636a1b97a15a77dfae4d86318558a3490d04ea31c34f028bc3eba63c",
+          "minSdk": 30
+        },
+        {
+          "versionCode": 6,
+          "versionName": "1.5",
+          "tag": "music-v1.5",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/music-v1.5/PlainMusic.apk",
+          "size": 266236,
+          "sha256": "3313134ac35278f7df565e3d28183e47f8160780c19fc1b018a8a103e635b365",
+          "minSdk": 30
+        }
+      ]
     },
     {
       "key": "gallery",
       "name": "Plain Gallery",
       "package": "app.plain.gallery",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "PlainGallery.apk",
-      "tag": "gallery-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/gallery-v1.2/PlainGallery.apk",
+      "tag": "gallery-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/gallery-v1.3/PlainGallery.apk",
       "size": 110392,
-      "sha256": "c531b7834794fed05e496f699dcf2b58f59f39a8ba6beed52c38af9bf1fb2d48",
+      "sha256": "49ba33cea3a285d15a3d20fc991aeae8357a61d3530ebc5d473bb40683c39d47",
       "minSdk": 29,
-      "summary": "Photos and videos page by page, newest first. Offline."
+      "summary": "Photos and videos page by page, newest first. Offline.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "gallery-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/gallery-v1.2/PlainGallery.apk",
+          "size": 110392,
+          "sha256": "c531b7834794fed05e496f699dcf2b58f59f39a8ba6beed52c38af9bf1fb2d48",
+          "minSdk": 29
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "gallery-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/gallery-v1.1/PlainGallery.apk",
+          "size": 110392,
+          "sha256": "334b4469b24efd359924c5e925c600ce0266c06425ea0de38ac528c1ea7f5323",
+          "minSdk": 29
+        }
+      ]
     },
     {
       "key": "camera",
       "name": "Plain Camera",
       "package": "app.plain.camera",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "PlainCamera.apk",
-      "tag": "camera-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/camera-v1.2/PlainCamera.apk",
+      "tag": "camera-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/camera-v1.3/PlainCamera.apk",
       "size": 188164,
-      "sha256": "55b1c37788cfb252c17a763c78ba0e1cc0cc92361245ed7c27e025d672098a47",
+      "sha256": "b4f02f52bf8cc68a0d45eb50ef38a8445180733f870fdda01e6af225158ba51f",
       "minSdk": 29,
-      "summary": "Simple camera with an advanced mode. Offline. Keep your phone's own camera installed too."
+      "summary": "Simple camera with an advanced mode. Offline. Keep your phone's own camera installed too.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "camera-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/camera-v1.2/PlainCamera.apk",
+          "size": 188164,
+          "sha256": "55b1c37788cfb252c17a763c78ba0e1cc0cc92361245ed7c27e025d672098a47",
+          "minSdk": 29
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "camera-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/camera-v1.1/PlainCamera.apk",
+          "size": 188164,
+          "sha256": "578e1fe90704deca7e5ba52018fd3ceb124c196db02324f5141f01857060f8f7",
+          "minSdk": 29
+        }
+      ]
     },
     {
       "key": "trail",
-      "name": "Trekmap Trail",
+      "name": "Plain Trekking",
       "package": "app.trekmap.trail",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "TrekmapTrail.apk",
-      "tag": "trail-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/trail-v1.2/TrekmapTrail.apk",
-      "size": 176776,
-      "sha256": "5c5c369d357ee386d45c157c522195e917b82c6caaf7addaf4e8e6489bae1b00",
+      "tag": "trail-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/trail-v1.3/TrekmapTrail.apk",
+      "size": 176764,
+      "sha256": "8610c7746f6cc4dffbb2e3fc92356c23abb8091621d6d2cc6ec13ba1a391d2d2",
       "minSdk": 26,
-      "summary": "Hiking: plan routes, download offline maps on Wi-Fi, record your trail with GPS."
+      "summary": "Hiking: plan routes, download offline maps on Wi-Fi, record your trail with GPS.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "trail-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/trail-v1.2/TrekmapTrail.apk",
+          "size": 176776,
+          "sha256": "5c5c369d357ee386d45c157c522195e917b82c6caaf7addaf4e8e6489bae1b00",
+          "minSdk": 26
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "trail-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/trail-v1.1/TrekmapTrail.apk",
+          "size": 176772,
+          "sha256": "1a0075ef592205a55984eaf1244d578ab4369eac3cc5855ba234eeec9f76ee95",
+          "minSdk": 26
+        }
+      ]
     },
     {
       "key": "maps",
       "name": "Plain Istanbul Map",
       "package": "app.plain.maps",
-      "versionCode": 4,
-      "versionName": "2.2",
+      "versionCode": 5,
+      "versionName": "2.3",
       "file": "PlainMaps.apk",
-      "tag": "maps-v2.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/maps-v2.2/PlainMaps.apk",
+      "tag": "maps-v2.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/maps-v2.3/PlainMaps.apk",
       "size": 173148,
-      "sha256": "55af5c3ebf19ccb4a3cb1f21a72b68d839452c051708dae926b7b7fce2fd1db0",
+      "sha256": "3aa7451895dd30a2b06ee13c1f073075ce9558b5fff7653c7827d790dd3c3513",
       "minSdk": 26,
-      "summary": "Istanbul only: offline bus, metro and ferry line map with stops and timetables. First sync needs Wi-Fi (~350 MB)."
+      "summary": "Istanbul only: offline bus, metro and ferry line map with stops and timetables. First sync needs Wi-Fi (~350 MB).",
+      "history": [
+        {
+          "versionCode": 4,
+          "versionName": "2.2",
+          "tag": "maps-v2.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/maps-v2.2/PlainMaps.apk",
+          "size": 173148,
+          "sha256": "55af5c3ebf19ccb4a3cb1f21a72b68d839452c051708dae926b7b7fce2fd1db0",
+          "minSdk": 26
+        },
+        {
+          "versionCode": 3,
+          "versionName": "2.1",
+          "tag": "maps-v2.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/maps-v2.1/PlainMaps.apk",
+          "size": 171764,
+          "sha256": "f4b7176a1ca16ed9704c5d425db913c4b46a2d22fe1c336454e92b89626faa68",
+          "minSdk": 26
+        }
+      ]
     },
     {
       "key": "youtube",
       "name": "Plain Youtube",
       "package": "app.plain.download",
-      "versionCode": 18,
-      "versionName": "2.6",
+      "versionCode": 19,
+      "versionName": "2.7",
       "file": "PlainYoutube.apk",
-      "tag": "youtube-v2.6",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/youtube-v2.6/PlainYoutube.apk",
+      "tag": "youtube-v2.7",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/youtube-v2.7/PlainYoutube.apk",
       "size": 580159,
-      "sha256": "9cd0fafed35c2af6846d254c782153e32e17a478e4156a68c378a3203234a424",
+      "sha256": "85ba0a4e447ae84c92a9419ea0a3c864d0946622f746f79d2db7b1d9e670682e",
       "minSdk": 30,
-      "summary": "Search, watch and download YouTube videos and music. Unofficial: may need an update when YouTube changes."
+      "summary": "Search, watch and download YouTube videos and music. Unofficial: may need an update when YouTube changes.",
+      "history": [
+        {
+          "versionCode": 18,
+          "versionName": "2.6",
+          "tag": "youtube-v2.6",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/youtube-v2.6/PlainYoutube.apk",
+          "size": 580159,
+          "sha256": "9cd0fafed35c2af6846d254c782153e32e17a478e4156a68c378a3203234a424",
+          "minSdk": 30
+        },
+        {
+          "versionCode": 11,
+          "versionName": "1.10",
+          "tag": "youtube-v1.10",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/youtube-v1.10/PlainYoutube.apk",
+          "size": 404928,
+          "sha256": "055fa5ac6d12800041185140187b942814d32f3c07307de5b553030182c669d9",
+          "minSdk": 30
+        }
+      ]
     },
     {
       "key": "home",
       "name": "Plain Home",
       "package": "app.plain.home",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "PlainHome.apk",
-      "tag": "home-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/home-v1.2/PlainHome.apk",
-      "size": 67624,
-      "sha256": "a9c175325ef3a1d79d45bb15be60f617e218ad811d4e13facc8b0dae37fb80fb",
+      "tag": "home-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/home-v1.3/PlainHome.apk",
+      "size": 67620,
+      "sha256": "7bd0153eab073b6097399b7671def4545ba4fe598cce72685139b89c930853f5",
       "minSdk": 29,
-      "summary": "Minimal home screen with app sections. Optional; you can switch back to your old home screen any time."
+      "summary": "Minimal home screen with app sections. Optional; you can switch back to your old home screen any time.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "home-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/home-v1.2/PlainHome.apk",
+          "size": 67624,
+          "sha256": "a9c175325ef3a1d79d45bb15be60f617e218ad811d4e13facc8b0dae37fb80fb",
+          "minSdk": 29
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "home-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/home-v1.1/PlainHome.apk",
+          "size": 67620,
+          "sha256": "0c53e32a10306534d5df5103157a175b9e7a61193042e7a50919a555d355e216",
+          "minSdk": 29
+        }
+      ]
     },
     {
       "key": "battery",
       "name": "Plain Battery",
       "package": "app.plain.battery",
-      "versionCode": 4,
-      "versionName": "1.3",
+      "versionCode": 5,
+      "versionName": "1.4",
       "file": "PlainBattery.apk",
-      "tag": "battery-v1.3",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/battery-v1.3/PlainBattery.apk",
+      "tag": "battery-v1.4",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/battery-v1.4/PlainBattery.apk",
       "size": 110656,
-      "sha256": "564fe9367017e96211046952066fdeebb4860e8c07bce75bbc823c59155c6bc7",
+      "sha256": "02e8978d500f57ec8b92ec8c8d40cf3b2374b1601060249d3aeb3f59a5968af6",
       "minSdk": 29,
-      "summary": "Battery log. Per-app use needs a one-time adb command from a computer (the app shows it)."
+      "summary": "Battery log. Per-app use needs a one-time adb command from a computer (the app shows it).",
+      "history": [
+        {
+          "versionCode": 4,
+          "versionName": "1.3",
+          "tag": "battery-v1.3",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/battery-v1.3/PlainBattery.apk",
+          "size": 110656,
+          "sha256": "564fe9367017e96211046952066fdeebb4860e8c07bce75bbc823c59155c6bc7",
+          "minSdk": 29
+        },
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "battery-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/battery-v1.2/PlainBattery.apk",
+          "size": 110656,
+          "sha256": "3a8a1781da02d0e977ca4fe3c68bb7305606e1a1c0a0a03e870488d8d5ffbfe9",
+          "minSdk": 29
+        }
+      ]
     },
     {
       "key": "uninstaller",
       "name": "Plain Uninstaller",
       "package": "app.plain.uninstaller",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "PlainUninstaller.apk",
-      "tag": "uninstaller-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/uninstaller-v1.2/PlainUninstaller.apk",
-      "size": 76376,
-      "sha256": "9faac58d1b471cc239ca497be6bd0575734f703bd9f786e5f045f2cd85a62b2f",
+      "tag": "uninstaller-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/uninstaller-v1.3/PlainUninstaller.apk",
+      "size": 76372,
+      "sha256": "2a2b6461c98270da1222b5d9fbf679ed7a2f69cd9a8a0861c4799922005a3f01",
       "minSdk": 26,
-      "summary": "Declutter: remove apps in bulk, including preinstalled ones (with Shizuku). Use at your own risk; restorable."
+      "summary": "Declutter: remove apps in bulk, including preinstalled ones (with Shizuku). Use at your own risk; restorable.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "uninstaller-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/uninstaller-v1.2/PlainUninstaller.apk",
+          "size": 76376,
+          "sha256": "9faac58d1b471cc239ca497be6bd0575734f703bd9f786e5f045f2cd85a62b2f",
+          "minSdk": 26
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "uninstaller-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/uninstaller-v1.1/PlainUninstaller.apk",
+          "size": 76372,
+          "sha256": "4b848cd99958cfd624fcb17a1b7d0c942e191b1a402e20955e06f4e8315ef01d",
+          "minSdk": 26
+        }
+      ]
     },
     {
       "key": "setup",
       "name": "Plain Setup",
       "package": "app.plain.setup",
-      "versionCode": 3,
-      "versionName": "1.2",
+      "versionCode": 4,
+      "versionName": "1.3",
       "file": "PlainSetup.apk",
-      "tag": "setup-v1.2",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.2/PlainSetup.apk",
-      "size": 1798563,
-      "sha256": "5795c61d9d756da65345ec364a5a3e577a0a68cdc0714f75646977cfe40edee2",
+      "tag": "setup-v1.3",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.3/PlainSetup.apk",
+      "size": 1805043,
+      "sha256": "20fb31cabd45b24b7d101abd349889526c2309e840e1fee57dfb167ea332dd9b",
       "minSdk": 26,
-      "summary": "Installs and updates the Plain apps."
+      "summary": "Installs and updates the Plain apps.",
+      "history": [
+        {
+          "versionCode": 3,
+          "versionName": "1.2",
+          "tag": "setup-v1.2",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.2/PlainSetup.apk",
+          "size": 1798563,
+          "sha256": "5795c61d9d756da65345ec364a5a3e577a0a68cdc0714f75646977cfe40edee2",
+          "minSdk": 26
+        },
+        {
+          "versionCode": 2,
+          "versionName": "1.1",
+          "tag": "setup-v1.1",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v1.1/PlainSetup.apk",
+          "size": 1621931,
+          "sha256": "827c0b8f01f2bd0e879889d92308db576ebb39120ebbd3c62b1d477c6ecc292d",
+          "minSdk": 26
+        }
+      ]
     }
   ]
 }

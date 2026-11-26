@@ -18,10 +18,12 @@ data class Entry(
     val sha256: String,
     val minSdk: Int,
     val summary: String,
+    /** Earlier releases (newest first), online only — what "Older versions" offers. */
+    val history: List<Entry> = emptyList(),
 )
 
-/** Where an install would come from: the APK inside Setup, or a download from the releases. */
-enum class Source { BUNDLED, ONLINE }
+/** Where an install would come from: the APK inside Setup, a download from the releases, or a backup on the phone. */
+enum class Source { BUNDLED, ONLINE, LOCAL }
 
 data class Offer(val entry: Entry, val source: Source)
 
@@ -37,21 +39,34 @@ object Catalog {
             val pkg = o.optString("package")
             val code = o.optLong("versionCode", -1)
             if (pkg.isEmpty() || code < 0) continue
-            out += Entry(
-                key = o.optString("key", pkg),
-                name = o.optString("name", pkg),
-                pkg = pkg,
-                versionCode = code,
-                versionName = o.optString("versionName", code.toString()),
-                file = o.optString("file"),
-                url = o.optString("url"),
-                size = o.optLong("size", 0),
-                sha256 = o.optString("sha256").lowercase(),
-                minSdk = o.optInt("minSdk", 1),
-                summary = o.optString("summary"),
-            )
+            val e = entry(o, null) ?: continue
+            val hist = ArrayList<Entry>()
+            o.optJSONArray("history")?.let { h ->
+                for (j in 0 until h.length()) h.optJSONObject(j)?.let { entry(it, e) }?.let { if (it.url.isNotEmpty()) hist += it }
+            }
+            out += e.copy(history = hist.sortedByDescending { it.versionCode })
         }
         return out
+    }
+
+    /** One release; a history item inherits name, package, file and summary from [parent]. */
+    private fun entry(o: JSONObject, parent: Entry?): Entry? {
+        val pkg = parent?.pkg ?: o.optString("package")
+        val code = o.optLong("versionCode", -1)
+        if (pkg.isEmpty() || code < 0) return null
+        return Entry(
+            key = parent?.key ?: o.optString("key", pkg),
+            name = parent?.name ?: o.optString("name", pkg),
+            pkg = pkg,
+            versionCode = code,
+            versionName = o.optString("versionName", code.toString()),
+            file = parent?.file ?: o.optString("file"),
+            url = o.optString("url"),
+            size = o.optLong("size", 0),
+            sha256 = o.optString("sha256").lowercase(),
+            minSdk = o.optInt("minSdk", parent?.minSdk ?: 1),
+            summary = parent?.summary ?: o.optString("summary"),
+        )
     }
 
     /**
@@ -65,6 +80,7 @@ object Catalog {
         for (e in online.orEmpty()) {
             val cur = byPkg[e.pkg]
             if (cur == null || e.versionCode > cur.entry.versionCode) byPkg[e.pkg] = Offer(e, Source.ONLINE)
+            else byPkg[e.pkg] = cur.copy(entry = cur.entry.copy(history = e.history)) // keep the online release list
         }
         return byPkg.values.toList()
     }
@@ -78,6 +94,16 @@ object Catalog {
         installedCode < offer.entry.versionCode -> State.UPDATE
         installedCode == offer.entry.versionCode -> State.UP_TO_DATE
         else -> State.NEWER_INSTALLED
+    }
+
+    /** Every offer that updates an installed app — what "Update all" installs. [held] apps were rolled back on purpose. */
+    fun updates(offers: List<Offer>, installedCode: (String) -> Long?, sdk: Int, held: Set<String> = emptySet()): List<Offer> =
+        offers.filter { it.entry.pkg !in held && state(it, installedCode(it.entry.pkg), sdk) == State.UPDATE }
+
+    /** Releases older than what's installed that this phone can run, newest first. */
+    fun olderVersions(offer: Offer, installedCode: Long?, sdk: Int): List<Entry> {
+        val cur = installedCode ?: return emptyList()
+        return offer.entry.history.filter { it.versionCode < cur && sdk >= it.minSdk }.sortedByDescending { it.versionCode }
     }
 
     /** "Android 11" for API 30 etc. (minSdk is what the catalog stores). */

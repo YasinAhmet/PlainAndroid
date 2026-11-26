@@ -189,7 +189,7 @@ class DevSummary {
         if (onDrainH > 0) appendLine(String.format(Locale.US, "Drain with screen use: %.0f mA (%.1f h)", onDrainMah / onDrainH, onDrainH))
         for ((k, v) in offDrain) if (v[1] > 0.05) appendLine(String.format(Locale.US, "Drain screen off, %s: %.0f mA (%.1f h)", k, v[0] / v[1], v[1]))
         if (cellN > 0) appendLine(String.format(Locale.US, "Phone signal (airplane off) avg %.1f of 4 bars", cellSum.toDouble() / cellN))
-        if (appCpuMs > 0) appendLine(String.format(Locale.US, "Trekmap CPU time %.1f min (%.2f%% of the hike)", appCpuMs / 60000.0, appCpuMs * 100.0 / total))
+        if (appCpuMs > 0) appendLine(String.format(Locale.US, "Plain Trekking CPU time %.1f min (%.2f%% of the hike)", appCpuMs / 60000.0, appCpuMs * 100.0 / total))
     }.trimEnd()
 
     fun text(): String {

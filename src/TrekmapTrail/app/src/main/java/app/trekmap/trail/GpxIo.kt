@@ -164,7 +164,7 @@ object GpxIo {
     fun write(out: OutputStream, route: Route, name: String, desc: String? = null, wpts: List<Wpt> = emptyList()) {
         val w = BufferedWriter(OutputStreamWriter(out, Charsets.UTF_8), 65536)
         w.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-        w.write("<gpx version=\"1.1\" creator=\"Trekmap Trail\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+        w.write("<gpx version=\"1.1\" creator=\"Plain Trekking\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
         w.write("<metadata><name>${esc(name)}</name>")
         val t0 = route.firstTime()
         if (t0 > 0) w.write("<time>${iso(t0)}</time>")
