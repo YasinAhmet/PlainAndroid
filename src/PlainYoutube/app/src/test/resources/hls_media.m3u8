@@ -1,0 +1,17 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-TARGETDURATION:8
+#EXTINF:3.169833,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-251845/gosq/0/file/seg.ts
+#EXTINF:3.461791,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-738,251846-463760/gosq/1/file/seg.ts
+#EXTINF:5.964291,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-738,463761-660228/gosq/2/file/seg.ts
+#EXTINF:5.046708,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-738,660229-906226/gosq/3/file/seg.ts
+#EXTINF:6.297958,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-738,906227-1358066/gosq/4/file/seg.ts
+#EXTINF:6.923583,
+https://rr1---sn-xxxx.googlevideo.com/videoplayback/id/90940fee48b0e459/itag/230/source/X/expire/X/ei/X/ip/0.0.0.0/requiressl/X/ratebypass/X/pfa/X/sgovp/X/rqh/X/hls_chunk_host/X/xpc/X/cps/X/met/X/mh/X/mm/X/mn/X/ms/X/mv/X/mvi/X/pl/X/rms/X/pcm2/X/gcr/X/initcwndbps/X/bui/X/spc/X/vprv/X/playlist_type/X/txp/X/epbp/X/mt/X/fvip/X/keepalive/X/fexp/X/sparams/X/sig/X/lsparams/X/lsig/X/playlist/index.m3u8/govp/slices%3D0-738,1358067-1904543/gosq/5/file/seg.ts
+#EXT-X-ENDLIST

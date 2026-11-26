@@ -1,0 +1,115 @@
+{
+ "playabilityStatus": {
+  "status": "OK",
+  "playableInEmbed": true
+ },
+ "streamingData": {
+  "expiresInSeconds": "21540",
+  "formats": [],
+  "adaptiveFormats": [
+   {
+    "itag": 133,
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&itag=133&source=youtube",
+    "mimeType": "video/mp4; codecs=\"avc1.4D400C\"",
+    "bitrate": 183848,
+    "width": 320,
+    "height": 240,
+    "contentLength": "433081",
+    "quality": "small",
+    "fps": 15,
+    "qualityLabel": "240p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 182995,
+    "approxDurationMs": "18933",
+    "qualityOrdinal": "QUALITY_ORDINAL_240P"
+   },
+   {
+    "itag": 134,
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&itag=134&source=youtube",
+    "mimeType": "video/mp4; codecs=\"avc1.4D400C\"",
+    "bitrate": 150749,
+    "width": 320,
+    "height": 240,
+    "contentLength": "322379",
+    "quality": "small",
+    "fps": 15,
+    "qualityLabel": "240p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 136218,
+    "highReplication": true,
+    "approxDurationMs": "18933",
+    "qualityOrdinal": "QUALITY_ORDINAL_360P"
+   },
+   {
+    "itag": 160,
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&itag=160&source=youtube",
+    "mimeType": "video/mp4; codecs=\"avc1.4D400B\"",
+    "bitrate": 83327,
+    "width": 192,
+    "height": 144,
+    "contentLength": "195278",
+    "quality": "tiny",
+    "fps": 15,
+    "qualityLabel": "144p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 82513,
+    "approxDurationMs": "18933",
+    "qualityOrdinal": "QUALITY_ORDINAL_144P"
+   },
+   {
+    "itag": 139,
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&itag=139&source=youtube",
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "bitrate": 49594,
+    "contentLength": "117526",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 49140,
+    "audioQuality": "AUDIO_QUALITY_LOW",
+    "approxDurationMs": "19133",
+    "audioSampleRate": "22050",
+    "audioChannels": 2,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   },
+   {
+    "itag": 140,
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&itag=140&source=youtube",
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "bitrate": 130171,
+    "contentLength": "309288",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 129796,
+    "highReplication": true,
+    "audioQuality": "AUDIO_QUALITY_MEDIUM",
+    "approxDurationMs": "19063",
+    "audioSampleRate": "44100",
+    "audioChannels": 2,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   }
+  ]
+ },
+ "videoDetails": {
+  "videoId": "jNQXAC9IVRw",
+  "title": "Me at the zoo",
+  "lengthSeconds": "19",
+  "channelId": "UC4QobU6STFB0P71PMvOGN5A",
+  "author": "jawed",
+  "isLiveContent": false,
+  "isPrivate": false,
+  "thumbnail": {
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/jNQXAC9IVRw/mqdefault.jpg?sqp=-oaymwEmCMACELQB8quKqQMa8AEB-AG-AoAC8AGKAgwIABABGFUgWShlMA8=&rs=AOn4CLBRVpapZEM7Lkg18qfB9zqpZTRA8Q",
+     "width": 320,
+     "height": 180
+    },
+    {
+     "url": "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=-oaymwEmCOADEOgC8quKqQMa8AEB-AG-AoAC8AGKAgwIABABGFUgWShlMA8=&rs=AOn4CLA9eLBatYv9WbkD4BbZ2Im-biSPTw",
+     "width": 480,
+     "height": 360
+    }
+   ]
+  }
+ }
+}
