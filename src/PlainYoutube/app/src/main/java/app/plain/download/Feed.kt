@@ -183,6 +183,16 @@ class FeedCache(val items: List<Item>, val fetched: Map<String, Long>) {
         } catch (_: Exception) { EMPTY }
     }
 
+    /**
+     * Followed channels that were fetched but have nothing in the feed: usually a look-alike channel was followed
+     * (e.g. empty "@FosixErlik" instead of "Foşix Erlik"). Not judged once the cache is trimmed to [MAX_ITEMS].
+     */
+    fun emptyChannels(follows: List<Follow>): List<Follow> {
+        if (items.size >= MAX_ITEMS) return emptyList()
+        val withItems = items.mapNotNullTo(HashSet()) { it.channelId }
+        return follows.filter { (fetched[it.id] ?: 0L) > 0 && it.id !in withItems }
+    }
+
     /** Channels to (re)fetch: all when [force], else those never fetched or older than 30 min. */
     fun due(follows: List<Follow>, now: Long, force: Boolean): List<Follow> =
         if (force) follows else follows.filter { now - (fetched[it.id] ?: 0L) >= MAX_AGE || (fetched[it.id] ?: 0L) > now }

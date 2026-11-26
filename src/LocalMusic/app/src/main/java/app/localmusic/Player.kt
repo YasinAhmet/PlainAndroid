@@ -12,6 +12,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
@@ -22,6 +23,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.SurfaceHolder
+import app.plain.lang.tr
 
 /**
  * The playback engine (one per process). It owns the MediaPlayer(s), the queue and the MediaSession.
@@ -66,6 +68,10 @@ object Player {
     var sleepEndOfSong = false
         private set
 
+    /** Playback speed (0.5–2×, pitch kept), remembered. Not 1×: the next song isn't pre-started gaplessly (see prepareNext). */
+    var speed = 1f
+        private set
+
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
 
@@ -93,6 +99,7 @@ object Player {
         val p = Store.prefs
         queue.restore(listOf("items", "order", "pos", "shuffle", "repeat").associateWith { p.getString("q_$it", null) })
         restorePosition = p.getLong("position", 0)
+        speed = Speeds.valid(p.getFloat("speed", 1f))
     }
 
     fun openAppIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
@@ -199,6 +206,7 @@ object Player {
         if (!requestFocus()) return
         p.setVolume(1f, 1f)
         p.start()
+        applySpeed(p) // after start(): setting PlaybackParams on a paused player would start it
         playing = true
         listenStart()
         registerNoisy()
@@ -282,6 +290,24 @@ object Player {
         if (p != null) runCatching { p.seekTo(restorePosition.toInt()) }
         savePosition(ms)
         changed()
+    }
+
+    /** ±10 s (buttons, double-tap, notification, lock screen, headset fast-forward/rewind). */
+    fun seekBy(delta: Long) {
+        if (current == null) ensureLibrary() // a notification button after the process was reclaimed
+        if (current == null) return
+        seekTo(SeekStep.target(position(), delta, duration()))
+    }
+
+    fun setSpeed(s: Float) {
+        speed = Speeds.valid(s)
+        Store.prefs.edit().putFloat("speed", speed).apply()
+        if (playing) mp?.let { applySpeed(it) } // a paused player gets it in play()
+        prepareNext(); changed()
+    }
+
+    private fun applySpeed(p: MediaPlayer) {
+        runCatching { if (p.playbackParams.speed != speed) p.playbackParams = (p.playbackParams ?: PlaybackParams()).setSpeed(speed) }
     }
 
     fun stop() {
@@ -434,7 +460,9 @@ object Player {
         val ext = current?.externalUri != null
         val loop = !ext && !sleepEndOfSong && n != null && n == queue.pos
         runCatching { p.isLooping = loop }
-        if (ext || loop || n == null || sleepEndOfSong) { runCatching { p.setNextMediaPlayer(null) }; return }
+        // Not at 1×: a pre-started next player would begin at 1× (setting its speed would start it early), so the next
+        // song is prepared when it starts and gets the speed in play().
+        if (ext || loop || n == null || sleepEndOfSong || speed != 1f) { runCatching { p.setNextMediaPlayer(null) }; return }
         val s = songOf(queue.idAt(n)) ?: return
         // A video while its picture is on screen is prepared when it starts (with the surface), not gaplessly:
         // the prepared-next player never gets a surface.
@@ -607,9 +635,13 @@ object Player {
                 .setActions(
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
                         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_STOP,
+                        PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_STOP or
+                        PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND,
                 )
-                .setState(state, position(), if (playing) 1f else 0f, SystemClock.elapsedRealtime())
+                // Android 13+ media controls (lock screen, quick settings) show these next to prev/play/next
+                .addCustomAction(PlaybackState.CustomAction.Builder(CUSTOM_BACK, tr("Back 10 s", "10 sn geri"), R.drawable.ic_back10).build())
+                .addCustomAction(PlaybackState.CustomAction.Builder(CUSTOM_FWD, tr("Forward 10 s", "10 sn ileri"), R.drawable.ic_fwd10).build())
+                .setState(state, position(), if (playing) speed else 0f, SystemClock.elapsedRealtime())
                 .build(),
         )
         val id = s?.id ?: Long.MIN_VALUE + 1 // "no song" (external ids are negative)
@@ -651,8 +683,16 @@ object Player {
         override fun onSkipToNext() = next()
         override fun onSkipToPrevious() = prev()
         override fun onSeekTo(pos: Long) = seekTo(pos)
+        override fun onFastForward() = seekBy(SeekStep.MS)
+        override fun onRewind() = seekBy(-SeekStep.MS)
+        override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+            when (action) { CUSTOM_BACK -> seekBy(-SeekStep.MS); CUSTOM_FWD -> seekBy(SeekStep.MS) }
+        }
         override fun onStop() = stop()
     }
+    private const val CUSTOM_BACK = "back10"
+    private const val CUSTOM_FWD = "fwd10"
+
 
     /** Keys from MediaButtonReceiver (when no session was active). */
     fun handleKey(code: Int) {
@@ -663,6 +703,8 @@ object Player {
             KeyEvent.KEYCODE_MEDIA_NEXT -> next()
             KeyEvent.KEYCODE_MEDIA_PREVIOUS -> prev()
             KeyEvent.KEYCODE_MEDIA_STOP -> stop()
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> seekBy(SeekStep.MS)
+            KeyEvent.KEYCODE_MEDIA_REWIND -> seekBy(-SeekStep.MS)
         }
     }
 }

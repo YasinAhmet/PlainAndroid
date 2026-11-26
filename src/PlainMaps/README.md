@@ -17,7 +17,7 @@ Everything that differs between the cities is in `City.kt`. Each app shows:
 
 | Do this | Get this |
 |---|---|
-| **Tap anywhere on the map** | Every line that stops within about 400 m, drawn on the map in matching colours. Each row shows the nearest stop, its distance and the next departures. |
+| **Tap anywhere on the map** | Every line that stops within 100 m (press and hold to grow the circle up to 400 m, release to pick), drawn on the map in matching colours. Each row shows the nearest stop, its distance and the next departures. |
 | **Tap a stop** (zoom 15+) | The lines at that stop, sorted by next departure. |
 | **Tap a place dot** (zoom 16+) | Address, opening hours, phone (tap to dial), website, plus the lines within 400 m. |
 | **Tap a line in a list** | Its route and stops on the map, with the stop list and the next time at each stop. Also: **Other direction**, **Variants**, **Timetable** (weekdays / Saturday / Sunday, at the chosen stop). |
@@ -28,7 +28,8 @@ Everything that differs between the cities is in `City.kt`. Each app shows:
 | **Settings › Full sync** | Downloads everything again over Wi-Fi. |
 | **Settings › Situational sync** | Fetches the operator's current announcements (shown with ⚠ on lines, stops and in lists) and today's departure times for all bus lines, without downloading the map. Istanbul: İETT's web services, about 30 s. Ankara: EGO's announcement list and timetable pages, a few minutes. |
 | **Settings › Lines on the map** | Bus web thickness and brightness, metro/tram/ferry thickness, and the thickness of selected lines. |
-| **Search filters** | Toggle Lines, Stops, Places and Streets, and pick place types from a list. Results visible in the current view glow on the map and are marked "in view". |
+| **Search filters** | Toggle Lines, Stops, Places and Streets, and pick place types from a list. Filters start from "everything" for each new search. Every matching place in the current view glows on the map (not just the listed ones), and listed results on screen are marked "in view". |
+| **Query packs** (list icon in the search bar) | Saved groups of names searched together, e.g. "Shops - common": a101, migros, bim, şok. Whole-word matching, so "şok" doesn't find "sokak". Long-press a pack to edit or delete; "+ Pack" on a search adds that query to a pack. |
 
 ## Rules the app follows
 

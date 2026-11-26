@@ -826,3 +826,38 @@ class ArtAndTagsTest {
         assertTrue(ArtPick.changed(emptyList(), new).isEmpty())
     }
 }
+
+class ControlsTest {
+    @Test fun speeds() {
+        assertEquals("1×", Speeds.label(1f))
+        assertEquals("1.25×", Speeds.label(1.25f))
+        assertEquals("0.5×", Speeds.label(0.5f))
+        assertEquals(1.5f, Speeds.valid(1.5f), 0f)
+        assertEquals(1f, Speeds.valid(3f), 0f) // not offered: back to normal
+        assertEquals(1f, Speeds.valid(Float.NaN), 0f)
+    }
+
+    @Test fun seekStep() {
+        assertEquals(0L, SeekStep.target(4_000, -SeekStep.MS, 200_000)) // not before the start
+        assertEquals(60_000L, SeekStep.target(50_000, SeekStep.MS, 200_000))
+        assertEquals(199_000L, SeekStep.target(195_000, SeekStep.MS, 200_000)) // stops short of the end
+        assertEquals(15_000L, SeekStep.target(5_000, SeekStep.MS, 0)) // unknown length: no upper clamp
+    }
+
+    @Test fun volumeMuteRemembersLevel() {
+        val v = VolumeModel(15)
+        v.sync(9)
+        assertEquals(0, v.toggleMute()); assertTrue(v.muted)
+        assertEquals(9, v.toggleMute())
+        v.sync(0)
+        assertEquals(1, VolumeModel(15).apply { sync(0) }.toggleMute()) // muted from outside: comes back at 1 step
+        assertEquals(15, v.set(40))
+    }
+
+    @Test fun pipRatioIsClamped() {
+        assertEquals(1920 to 1080, PipRatio.of(1920, 1080))
+        assertEquals(239 to 100, PipRatio.of(3000, 1000))
+        assertEquals(100 to 239, PipRatio.of(100, 1000))
+        assertEquals(16 to 9, PipRatio.of(0, 0))
+    }
+}

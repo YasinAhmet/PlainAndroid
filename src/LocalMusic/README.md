@@ -86,6 +86,25 @@ The release APK (`app/build/outputs/apk/release/app-release.apk`) is minified an
 - Gapless playback (`MediaPlayer.setNextMediaPlayer`).
 - Seek slider with elapsed and remaining time (seeks on release); mini player; full now-playing screen with album art.
 - Sleep timer (minutes or end of song).
+- **Player controls on par with Plain Youtube (1.9)**:
+  - **Speed** 0.5–2× (pitch kept, `PlaybackParams`): pill between the −10 s / +10 s buttons in now playing, also in ⋮.
+    Remembered. A paused player gets the new speed when it next plays (setting it would start playback). At a speed other
+    than 1× the next song is not pre-started gaplessly (a pre-started player would begin at 1×); it starts right after.
+  - **−10 s / +10 s** everywhere: buttons in now playing; **double-tap** the left/right half of the art or video picture
+    (short "« 10 s" mark); notification ⏮ −10 s ▶/❚❚ +10 s ⏭ ✕ (compact: ⏮ ▶ ⏭); on Android 13+ the lock screen and quick
+    settings player show ±10 s as session custom actions next to prev/play/next; headset fast-forward / rewind keys.
+    +10 s stops 1 s short of the end. A notification button after the process was reclaimed works (the library is loaded first).
+  - **Close** (✕) in the notification stops playback and removes the notification (the queue stays).
+  - **Volume**: speaker icon + bar for the media stream in now playing (`setStreamVolume(…, 0)`, no system panel); the
+    speaker mutes and brings back the remembered level. The bar follows the hardware keys through a
+    `VOLUME_CHANGED_ACTION` receiver registered only while now playing is shown and the app is in front. The volume keys
+    change media volume anywhere in the app.
+  - **Picture-in-picture** for videos (only while the picture is on screen): PiP button in now playing's top bar; actions
+    −10 s, play/pause, +10 s (the notification's broadcasts). Closing the PiP window pauses (the queue stays); screen off in
+    PiP drops the picture and plays on as audio, like the background. **⋮ → Picture-in-picture on Home** (off by default):
+    `setAutoEnterEnabled` on 12+, `onUserLeaveHint` on 11, only while a video's picture plays. Overlays (queue) hide in PiP.
+  - **Fullscreen** of a landscape video turns the screen to landscape (sensor, either way round); leaving it restores.
+  - Fling down on the art closes now playing (the art now takes taps for the gestures above).
 - "Open with LocalMusic" for local audio files (File Manager, WhatsApp voice notes): `VIEW` filter for `audio/*`,
   `application/ogg`, `application/x-flac` with **only** `content://` and `file://` schemes (no http). An opened file that
   isn't in the library plays once and then returns to the previous song, paused, leaving the queue untouched; a library
@@ -122,6 +141,8 @@ The release APK (`app/build/outputs/apk/release/app-release.apk`) is minified an
 - OLED screen: pure black everywhere nothing needs to be seen. Cards, chips, tabs, the mini player and dialogs are
   black with a 1 dp outline (#222/#333) instead of a grey fill; the selected tab/sort is an amber outline, not a lit
   pill. Text #E4E4E4, secondary #A6A6A6, labels (durations, track numbers, icons) #747474. Colours live in `C` (`Ui.kt`).
+- The volume receiver exists only while now playing is on screen and the app is in front; PiP params are touched only in
+  PiP or with auto-enter on. Speed and ±10 s add no timers.
 - The noisy receiver is registered only while playing. The library is reloaded only when `MediaStore.getGeneration` changed.
 - The foreground service runs only while playing (or paused for a moment by a call, so playback can come back). On a real
   pause it leaves the foreground and stops itself; the paused notification stays (swipe-able; its buttons are broadcasts,
@@ -157,7 +178,8 @@ Empty source folders are left behind (MediaStore cannot remove directories).
 |---|---|
 | `Text.kt`, `Naming.kt`, `Plan.kt`, `PlayQueue.kt`, `Model.kt`, `Sections.kt` | Pure logic (unit-tested in `LogicTest.kt`): folder artist, video classification, packing, folder tree, new pieces, play history |
 | `Library.kt` | MediaStore query, album-art cache |
-| `Player.kt` | Engine: MediaPlayer, queue, session, focus, sleep timer |
+| `Player.kt` | Engine: MediaPlayer, queue, session, focus, sleep timer, speed, ±10 s |
+| `Controls.kt` | Pure logic for the player controls (unit-tested in `ControlsTest`): speeds, ±10 s target, volume/mute, PiP ratio |
 | `PlaybackService.kt` | App class, foreground service + notification, receivers |
 | `MainActivity.kt`, `NowPlaying.kt`, `Ui.kt` | UI |
 | `Organizer.kt`, `OrganizerView.kt` | Organizer engine, plan screen, trash screen |

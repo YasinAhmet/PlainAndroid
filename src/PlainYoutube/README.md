@@ -527,8 +527,8 @@ page: Feed | Search | Following | Channel | Playlist, each a list with "Load mor
   (progress + Stop), then asks the options once.
 - **Feed**: newest videos of the channels you follow, merged and sorted by date, from YouTube's public RSS
   (`/feeds/videos.xml?channel_id=UC…`, 15 newest per channel, parsed with `XmlPullParser`). Cached in `files/feed.json`
-  so it shows at once, also offline. Opening the Feed fetches only channels whose RSS is older than **30 min** (or
-  newly followed ones); **Refresh** fetches all. At most 4 RSS requests run at once. **Following (N)** lists the
+  so it shows at once, also offline. The Feed never fetches by itself (2.11, user's rule: nothing from the
+  internet unless asked): only **Refresh** fetches, all followed channels; new follows show "tap Refresh". At most 4 RSS requests run at once. **Following (N)** lists the
   followed channels (tap = open, long-press = unfollow).
 - **Follows, no Google login**: Google blocks sign-in inside embedded WebViews and the app doesn't pretend to be a
   browser, so subscriptions aren't read from the account. Instead channels are followed in the app
@@ -728,6 +728,20 @@ channel page the app shows YouTube's message and offers channels with a similar 
 alert like "not available / legal complaint", or an empty channel page is asked once more with the fallback region;
 a channel that then shows content is remembered and loaded with that region (and its continuations) from then on.
 
+**Page-based lists (2.11).** Every list (Feed, Search, Following, channel tabs, playlists, local lists) shows 20 rows
+per page with ‹ Previous · Page X of Y(+) · Next › at the bottom instead of a growing list with "Load more". Loaded
+rows stay in memory (selection and "All" still cover everything loaded); Next past the loaded rows asks YouTube for
+the next batch and the page fills in. "+" = YouTube has more. A new search, tab or filter goes back to page 1.
+
+**Blocked channels in Search and Feed (2.10).** Re-checked 2026-11-26 from the Turkish IP: the channel page of
+"Foşix Erlik" now says "This channel is not available." without `gl` (the region fallback opens it), and channel search
+still doesn't list it in any region (`gl` none/TR/US) — only its @handle finds it — while video search lists its videos
+with it as owner. So a **Channels** search also runs a video search for the same words and adds owners whose name
+matches the query and who are missing from the channel results (at most 3, marked "Missing from YouTube's channel
+search · found by its videos"; `Browse.missingChannels`). Its RSS still answers normally (15 entries). The Feed's info line
+now names followed channels that were fetched but gave no videos (`FeedCache.emptyChannels`), which catches following
+the empty look-alike `@FosixErlik` ("Foschix Erlik") instead of the real channel.
+
 **Player, when it breaks** ("No video stream", Listen failing, wrong default mode): `Clients.kt` →
 `PLAY_ORDER` / `HLS_ORDER` (clients whose answers carry `hlsManifestUrl` and full-range streams) and `REMIX_VERSION`
 (yt-dlp `'web_music'` clientVersion, only used for the `musicVideoType` hint).
@@ -743,7 +757,7 @@ client name, id, version, user agent and device fields of clients with `REQUIRE_
 - Nothing runs in the background unless a download is in progress. No polling, no timers, no alarms, no restart
   after the process dies (unfinished jobs show "Interrupted" with a Retry button).
 - Search tab: network only in response to the user: a search, opening a channel/playlist page or switching its
-  sub-tab, Load more, Download all, Refresh, or opening the Feed when its cache is older than 30 min. Every request
+  sub-tab, Load more, Download all, Refresh. Every request
   (and queued thumbnail) is cancelled, open sockets disconnected, when the page changes, the tab is left or the app
   goes to the background. Thumbnails load only for rows on screen. Answers come gzip-compressed (a 100-video
   playlist page is ~1.3 MB of JSON before compression). `visitorData` stays in memory only.

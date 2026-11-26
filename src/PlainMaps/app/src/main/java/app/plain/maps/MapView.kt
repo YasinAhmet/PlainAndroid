@@ -46,6 +46,10 @@ class MapView(ctx: Context) : View(ctx) {
         const val MAX_Z = 20.0
         const val MAX_TILE_Z = 19
         private const val GLIDE_TAU = 0.16
+        /** A tap picks this circle; holding grows it to [HOLD_MAX_M] over [HOLD_GROW_S]. */
+        const val HOLD_MIN_M = 100.0
+        const val HOLD_MAX_M = 400.0
+        private const val HOLD_GROW_S = 1.5
     }
 
     var cx = Geo.mx(28.98)
@@ -64,9 +68,9 @@ class MapView(ctx: Context) : View(ctx) {
         }
 
     var lines: List<Line> = emptyList()
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; overlayChanged() }
     var dots: List<Dot> = emptyList()
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; overlayChanged() }
     /** A dashed circle: x, y (normalised) and radius in metres. */
     var circle: DoubleArray? = null
         set(v) { field = v; invalidate() }
@@ -228,7 +232,45 @@ class MapView(ctx: Context) : View(ctx) {
             onTap?.invoke(Geo.lat(yToM(e.y)), Geo.lon(xToM(e.x)), e.x, e.y)
             return true
         }
+
+        override fun onLongPress(e: MotionEvent) {
+            if (onHold == null || scaledSinceDown || e.pointerCount > 1) return
+            holdX = xToM(e.x); holdY = yToM(e.y); holdT = System.nanoTime()
+            holdR = HOLD_MIN_M
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            removeCallbacks(grow); postOnAnimation(grow)
+            invalidate()
+        }
     })
+
+    // ------------------------------------------------------------------ press and hold: a circle that grows while held
+    /** A hold was released: lat, lon and the circle's radius in metres. */
+    var onHold: ((Double, Double, Double) -> Unit)? = null
+    private var holdX = 0.0
+    private var holdY = 0.0
+    private var holdT = 0L
+    /** Radius of the growing circle in metres; 0 = no hold in progress. */
+    private var holdR = 0.0
+    private val grow = object : Runnable {
+        override fun run() {
+            if (holdR <= 0.0) return
+            val f = ((System.nanoTime() - holdT) / 1e9 / HOLD_GROW_S).coerceIn(0.0, 1.0)
+            val r = HOLD_MIN_M + (HOLD_MAX_M - HOLD_MIN_M) * f
+            if (r >= HOLD_MAX_M && holdR < HOLD_MAX_M) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            holdR = r
+            invalidate()
+            if (f < 1.0) postOnAnimation(this)
+        }
+    }
+
+    private fun endHold(fire: Boolean) {
+        if (holdR <= 0.0) return
+        val r = holdR
+        holdR = 0.0
+        removeCallbacks(grow)
+        invalidate()
+        if (fire) onHold?.invoke(Geo.lat(holdY), Geo.lon(holdX), (r / 10).roundToInt() * 10.0)
+    }
 
     private fun panBy(dx: Double, dy: Double) {
         val w = world()
@@ -272,14 +314,21 @@ class MapView(ctx: Context) : View(ctx) {
 
     override fun onDetachedFromWindow() {
         stopGlide()
+        endHold(false)
         super.onDetachedFromWindow()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { stopGlide(); scaledSinceDown = false; twoFingerT = 0L }
-            MotionEvent.ACTION_POINTER_DOWN -> if (e.pointerCount == 2) {
+            MotionEvent.ACTION_DOWN -> { stopGlide(); endHold(false); scaledSinceDown = false; twoFingerT = 0L }
+            MotionEvent.ACTION_UP -> if (holdR > 0.0) {
+                endHold(true)
+                gestures.onTouchEvent(e) // lets the detector finish its long press
+                return true
+            } else sharpenAfterPinch()
+            MotionEvent.ACTION_CANCEL -> endHold(false)
+            MotionEvent.ACTION_POINTER_DOWN -> if (holdR > 0.0) endHold(false) else if (e.pointerCount == 2) {
                 twoFingerT = e.eventTime; twoFingerMove = 0.0; twoFingerScale = 0.0
             } else twoFingerT = -1L
             MotionEvent.ACTION_POINTER_UP -> if (e.pointerCount == 2 && twoFingerT > 0L) {
@@ -313,24 +362,17 @@ class MapView(ctx: Context) : View(ctx) {
             c.drawCircle((ci[0] * world - ox).toFloat(), (ci[1] * world - oy).toFloat(), r, fill)
             c.drawCircle((ci[0] * world - ox).toFloat(), (ci[1] * world - oy).toFloat(), r, circlePaint)
         }
-        for (l in lines) drawOverlay(c, l, world, ox, oy)
-        for (d in dots) {
-            val x = (d.x * world - ox).toFloat(); val y = (d.y * world - oy).toFloat()
-            if (x < -50 || y < -50 || x > w + 50 || y > h + 50) continue
-            if (d.glow) {
-                fill.color = (d.color and 0xFFFFFF) or 0x30000000; c.drawCircle(x, y, (d.rDp + 14f) * density, fill)
-                fill.color = (d.color and 0xFFFFFF) or 0x55000000; c.drawCircle(x, y, (d.rDp + 7f) * density, fill)
-            }
-            fill.color = d.ring; c.drawCircle(x, y, (d.rDp + 1.8f) * density, fill)
-            fill.color = d.color; c.drawCircle(x, y, d.rDp * density, fill)
+        if (holdR > 0.0) {
+            val r = (holdR / Geo.metersPerUnit(Geo.lat(holdY)) * world).toFloat()
+            val x = (holdX * world - ox).toFloat(); val y = (holdY * world - oy).toFloat()
+            fill.color = 0x2826C6DA
+            c.drawCircle(x, y, r, fill)
+            c.drawCircle(x, y, r, circlePaint)
+            val label = Fmt.dist(holdR)
+            c.drawText(label, x - labelPaint.measureText(label) / 2, y - r - density * 6, labelHalo)
+            c.drawText(label, x - labelPaint.measureText(label) / 2, y - r - density * 6, labelPaint)
         }
-        for (d in dots) {
-            val lbl = d.label ?: continue
-            val x = (d.x * world - ox).toFloat() + (d.rDp + 5) * density
-            val y = (d.y * world - oy).toFloat() + 4 * density
-            c.drawText(lbl, x, y, labelHalo)
-            c.drawText(lbl, x, y, labelPaint)
-        }
+        drawOverlayCache(c, world, ox, oy, w, h)
         drawMe(c)
         drawScale(c, world)
     }
@@ -379,6 +421,113 @@ class MapView(ctx: Context) : View(ctx) {
                 return
             }
             if (!requested) { p.want(k); requested = true }
+        }
+    }
+
+    // ------------------------------------------------------------------ overlay cache
+    // Selected lines and dots are drawn once, on a worker thread, into a bitmap a bit larger than
+    // the screen. Panning only moves that bitmap (pinching scales it until a sharp one is ready),
+    // so a selection with two dozen long routes pans as smoothly as the bare map. Everything the
+    // worker touches (the paints below and each Line's Path) is used by the worker only.
+    private val overlayExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var overlayVersion = 0
+    private var front: android.graphics.Bitmap? = null
+    private var frontVersion = -1
+    private var frontWorld = 1.0
+    private var frontOx = 0.0
+    private var frontOy = 0.0
+    private var spare: android.graphics.Bitmap? = null
+    private var overlayBusy = false
+    private var overlayAgain = false
+    private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val oFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val oLabel = Paint(labelPaint)
+    private val oHalo = Paint(labelHalo)
+
+    private fun overlayChanged() {
+        overlayVersion++
+        requestOverlay()
+        invalidate()
+    }
+
+    /** After a pinch the overlay is a scaled copy: redraw it sharp at the new zoom. */
+    private fun sharpenAfterPinch() {
+        if (front != null && abs(world() / frontWorld - 1.0) > 0.01) requestOverlay()
+    }
+
+    private fun marginX() = (width * 0.35).roundToInt()
+    private fun marginY() = (height * 0.2).roundToInt()
+
+    private fun requestOverlay() {
+        if (lines.isEmpty() && dots.isEmpty()) { front = null; spare = null; return }
+        if (width == 0 || height == 0) return
+        if (overlayBusy) { overlayAgain = true; return }
+        overlayBusy = true
+        val world = world()
+        val mx = marginX(); val my = marginY()
+        val bw = width + 2 * mx; val bh = height + 2 * my
+        val bOx = cx * world - width / 2.0 - mx
+        val bOy = cy * world - height / 2.0 - my
+        val ver = overlayVersion
+        val ls = lines; val ds = dots
+        val bmp = spare?.takeIf { it.width == bw && it.height == bh } ?: android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
+        spare = null
+        overlayExec.execute {
+            try {
+                bmp.eraseColor(0)
+                val c = Canvas(bmp)
+                for (l in ls) drawOverlay(c, l, world, bOx, bOy)
+                drawDots(c, ds, world, bOx, bOy, bw.toDouble(), bh.toDouble())
+            } catch (_: Exception) {
+            }
+            post {
+                overlayBusy = false
+                if (ver == overlayVersion) {
+                    val old = front
+                    front = bmp; frontVersion = ver; frontWorld = world; frontOx = bOx; frontOy = bOy
+                    spare = old
+                } else spare = bmp
+                invalidate()
+                if (overlayAgain) { overlayAgain = false; requestOverlay() }
+            }
+        }
+    }
+
+    private fun drawOverlayCache(c: Canvas, world: Double, ox: Double, oy: Double, w: Double, h: Double) {
+        if (lines.isEmpty() && dots.isEmpty()) return
+        val f = front
+        if (f == null || frontVersion != overlayVersion) { requestOverlay(); return }
+        val ratio = world / frontWorld
+        val left = (frontOx * ratio - ox).toFloat()
+        val top = (frontOy * ratio - oy).toFloat()
+        c.save()
+        c.translate(left, top)
+        c.scale(ratio.toFloat(), ratio.toFloat())
+        c.drawBitmap(f, 0f, 0f, bmpPaint)
+        c.restore()
+        // start the next one before the screen edge reaches the end of this one
+        val right = left + f.width * ratio; val bottom = top + f.height * ratio
+        val mx = marginX() / 2f; val my = marginY() / 2f
+        if (ratio < 0.8 || ratio > 1.25 || left > -mx || top > -my || right < w + mx || bottom < h + my) requestOverlay()
+    }
+
+    private fun drawDots(c: Canvas, ds: List<Dot>, world: Double, ox: Double, oy: Double, w: Double, h: Double) {
+        for (d in ds) {
+            val x = (d.x * world - ox).toFloat(); val y = (d.y * world - oy).toFloat()
+            if (x < -50 || y < -50 || x > w + 50 || y > h + 50) continue
+            if (d.glow) {
+                oFill.color = (d.color and 0xFFFFFF) or 0x30000000; c.drawCircle(x, y, (d.rDp + 14f) * density, oFill)
+                oFill.color = (d.color and 0xFFFFFF) or 0x55000000; c.drawCircle(x, y, (d.rDp + 7f) * density, oFill)
+            }
+            oFill.color = d.ring; c.drawCircle(x, y, (d.rDp + 1.8f) * density, oFill)
+            oFill.color = d.color; c.drawCircle(x, y, d.rDp * density, oFill)
+        }
+        for (d in ds) {
+            val lbl = d.label ?: continue
+            val x = (d.x * world - ox).toFloat() + (d.rDp + 5) * density
+            val y = (d.y * world - oy).toFloat() + 4 * density
+            c.drawText(lbl, x, y, oHalo)
+            c.drawText(lbl, x, y, oLabel)
         }
     }
 

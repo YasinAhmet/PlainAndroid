@@ -246,14 +246,48 @@ class Store(val file: File) {
         if (kinds and Kinds.STOPS != 0) out += q("SELECT id,code,name,lat,lon,mode FROM stop WHERE norm LIKE ? LIMIT 300", like) { stopOf(it) }
             .sortedBy { dist(it.lat, it.lon) }.distinctBy { it.name + "|" + (it.lat * 200).toInt() + "|" + (it.lon * 200).toInt() }.take(25)
             .map { Hit(HitKind.STOP, it.id.toLong(), it.name, tr(Mode.name(it.mode) + " stop", if (it.mode == Mode.FERRY) "İskele" else Mode.name(it.mode) + " durağı") + (if (it.code.isNotEmpty() && it.mode == Mode.BUS) " · ${it.code}" else ""), it.lat, it.lon, Mode.defaultColor(it.mode), null) }
-        val catSql = cats?.let { if (it.isEmpty()) " AND 0" else " AND cat IN (${it.joinToString(",")})" } ?: ""
-        if (kinds and Kinds.PLACES != 0) out += q("$PSQL WHERE norm LIKE ?$catSql LIMIT 400", like) { poiOf(it) }
-            .sortedWith(compareBy({ if (it.cat == Poi.PLACE) it.rank - 10 else 0 }, { dist(it.lat, it.lon) })).take(30)
-            .map { Hit(HitKind.PLACE, it.id, it.name.ifEmpty { it.label }, it.label, it.lat, it.lon, Poi.color(it.cat), null) }
+        if (kinds and Kinds.PLACES != 0) out += placeHits(placesMatching(listOf(n), false, near, cats, 400), near).take(30)
         if (kinds and Kinds.STREETS != 0) out += q("SELECT name,lat,lon FROM street WHERE norm LIKE ? LIMIT 300", like) { Triple(it.getString(0) ?: "", it.getDouble(1), it.getDouble(2)) }
             .sortedBy { dist(it.second, it.third) }.distinctBy { it.first }.take(20)
             .map { Hit(HitKind.STREET, 0, it.first, tr("Street", "Sokak"), it.second, it.third, 0xFF9E9E9E.toInt(), null) }
         return out
+    }
+
+    /**
+     * Places whose name matches any of [terms] (already [Text.norm]ed), nearest to [near] first.
+     * The ordering happens in SQL: a chain like A101 has thousands of branches, and taking an
+     * arbitrary few hundred before sorting used to miss the ones on screen. [words] matches whole
+     * words only ("şok" must not match "sokak", "bim" not "ibrahim"). [box] (lat0, lon0, lat1, lon1)
+     * limits the search to an area.
+     */
+    fun placesMatching(terms: List<String>, words: Boolean, near: Pair<Double, Double>?, cats: Set<Int>?, limit: Int, box: DoubleArray? = null): List<PoiR> {
+        val conds = ArrayList<String>(); val args = ArrayList<Any>()
+        for (t0 in terms) {
+            val t = t0.replace("%", "").replace("_", "")
+            if (t.isEmpty()) continue
+            if (words) {
+                conds += "(norm=? OR norm LIKE ? OR norm LIKE ? OR norm LIKE ?)"
+                args += t; args += "$t %"; args += "% $t"; args += "% $t %"
+            } else { conds += "norm LIKE ?"; args += "%$t%" }
+        }
+        if (conds.isEmpty()) return emptyList()
+        var sql = "$PSQL WHERE (${conds.joinToString(" OR ")})"
+        cats?.let { sql += if (it.isEmpty()) " AND 0" else " AND cat IN (${it.joinToString(",")})" }
+        box?.let { sql += " AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"; args += it[0]; args += it[2]; args += it[1]; args += it[3] }
+        if (near != null) {
+            val k = kotlin.math.cos(Math.toRadians(near.first)).let { it * it }
+            sql += " ORDER BY (lat-?)*(lat-?)+(lon-?)*(lon-?)*?"
+            args += near.first; args += near.first; args += near.second; args += near.second; args += k
+        }
+        sql += " LIMIT $limit"
+        return q(sql, *args.toTypedArray()) { poiOf(it) }
+    }
+
+    /** Search hits for [places]: neighbourhoods and towns first, then by distance. */
+    fun placeHits(places: List<PoiR>, near: Pair<Double, Double>?): List<Hit> {
+        fun dist(lat: Double, lon: Double) = near?.let { Geo.dist(it.first, it.second, lat, lon) } ?: 0.0
+        return places.sortedWith(compareBy({ if (it.cat == Poi.PLACE) it.rank - 10 else 0 }, { dist(it.lat, it.lon) }))
+            .map { Hit(HitKind.PLACE, it.id, it.name.ifEmpty { it.label }, it.label, it.lat, it.lon, Poi.color(it.cat), null) }
     }
 
     // ------------------------------------------------------------ route finding

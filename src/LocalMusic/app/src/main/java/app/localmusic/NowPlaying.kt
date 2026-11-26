@@ -1,6 +1,15 @@
 package app.localmusic
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ActivityInfo
+import android.content.res.ColorStateList
+import android.media.AudioManager
+import android.view.GestureDetector
+import android.widget.SeekBar
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.Gravity
@@ -18,7 +27,10 @@ import android.widget.TextView
 import app.plain.lang.tr
 import kotlin.math.min
 
-/** Full-screen now-playing: big art, seek slider with elapsed/remaining, transport, shuffle/repeat, queue, sleep. */
+/**
+ * Full-screen now-playing: big art, seek slider with elapsed/remaining, transport, shuffle/repeat, ±10 s, speed, volume,
+ * queue, sleep. Double-tap the left/right half of the art (or picture) to seek ∓10 s; fling down to close.
+ */
 @SuppressLint("ViewConstructor")
 class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     private val art = ArtView(act, act.dpf(10))
@@ -35,7 +47,16 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     private val col: LinearLayout
     private val artBox: FrameLayout
     private val bottom: LinearLayout
-    private val chrome = ArrayList<View>() // everything but the picture (hidden in fullscreen)
+    private val chrome = ArrayList<View>() // everything but the picture (hidden in fullscreen and PiP)
+    private val speedBtn: TextView
+    private val pipBtn: ImageView
+    private val seekHint: TextView
+    private val volIcon: ImageView
+    private val volBar: SeekBar
+    private val audio = act.getSystemService(AudioManager::class.java)
+    private val vol = VolumeModel(audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+    var inPip = false
+        private set
 
     // Video: created only once a video item is current; the picture only while the toggle is on and we are visible.
     private var videoBtn: TextView? = null
@@ -52,6 +73,8 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         val top = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(act.icon(R.drawable.ic_down, desc = tr("Close", "Kapat")) { act.closeNowPlaying() })
         top.addView(from, lpL(0, WRAP, 1f))
+        pipBtn = act.icon(R.drawable.ic_pip, desc = tr("Picture-in-picture", "Pencere içinde pencere")) { act.enterPip() }.apply { visibility = View.GONE }
+        top.addView(pipBtn)
         top.addView(act.icon(R.drawable.ic_more, desc = tr("More", "Diğer")) { Player.current?.let { act.songMenu(it) } })
         col.addView(top, lpL(MATCH, WRAP))
         chrome += top
@@ -65,6 +88,26 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
             }
         }
         artBox.addView(art, LayoutParams(WRAP, WRAP, Gravity.CENTER))
+        seekHint = act.text("", 18f, C.TEXT, bold = true).apply {
+            background = oval(0x99000000.toInt()); gravity = Gravity.CENTER; visibility = View.GONE
+            setPadding(act.dp(18), act.dp(18), act.dp(18), act.dp(18))
+        }
+        artBox.addView(seekHint, LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL or Gravity.START).apply { setMargins(act.dp(24), 0, act.dp(24), 0) })
+        val gd = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean { if (picture != null) setFullscreen(!fullscreen); return true }
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val left = e.x < artBox.width / 2f
+                Player.seekBy(if (left) -SeekStep.MS else SeekStep.MS)
+                flashSeek(left)
+                return true
+            }
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (vy > 1500 && Math.abs(vy) > Math.abs(vx) * 1.5f && !fullscreen && !inPip) { act.closeNowPlaying(); return true }
+                return false
+            }
+        })
+        artBox.setOnTouchListener { _, e -> if (inPip) false else gd.onTouchEvent(e) }
         col.addView(artBox, lpL(MATCH, 0, 1f).apply { topMargin = act.dp(12); bottomMargin = act.dp(20) })
 
         val titleRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -96,6 +139,38 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         controls.addView(repeatBtn)
         col.addView(controls, lpL(MATCH, WRAP).apply { topMargin = act.dp(4) })
         chrome += controls
+
+        // −10 s · speed · +10 s
+        val steps = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        steps.addView(act.icon(R.drawable.ic_back10, 48, 11, desc = tr("Back 10 s", "10 sn geri")) { Player.seekBy(-SeekStep.MS) })
+        speedBtn = act.pill(Speeds.label(Player.speed), C.BG) { act.speedMenu() }.apply {
+            contentDescription = tr("Playback speed", "Oynatma hızı")
+            setPadding(act.dp(14), act.dp(5), act.dp(14), act.dp(5))
+            minWidth = act.dp(64)
+        }
+        steps.addView(speedBtn, lpL(WRAP, WRAP).apply { leftMargin = act.dp(18); rightMargin = act.dp(18) })
+        steps.addView(act.icon(R.drawable.ic_fwd10, 48, 11, desc = tr("Forward 10 s", "10 sn ileri")) { Player.seekBy(SeekStep.MS) })
+        col.addView(steps, lpL(MATCH, WRAP))
+        chrome += steps
+
+        // volume: the media stream, like the hardware keys (no system panel); the speaker mutes / restores
+        val volRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        volIcon = act.icon(R.drawable.ic_volume, 40, 10, desc = tr("Mute", "Sesi kapat")) { setVolume(vol.toggleMute()); syncVolumeBar() }
+        volBar = SeekBar(act).apply {
+            max = vol.max
+            progressTintList = ColorStateList.valueOf(C.TEXT)
+            thumbTintList = ColorStateList.valueOf(C.TEXT)
+            progressBackgroundTintList = ColorStateList.valueOf(C.LINE)
+            contentDescription = tr("Volume", "Ses düzeyi")
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { if (fromUser) setVolume(p) }
+                override fun onStartTrackingTouch(sb: SeekBar) { sb.parent?.requestDisallowInterceptTouchEvent(true) }
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }
+        volRow.addView(volIcon); volRow.addView(volBar, lpL(0, WRAP, 1f))
+        col.addView(volRow, lpL(MATCH, WRAP))
+        chrome += volRow
 
         bottom = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         sleepBtn = act.icon(R.drawable.ic_timer, 48, 12, desc = tr("Sleep timer", "Uyku zamanlayıcısı")) { act.sleepMenu() }
@@ -133,7 +208,50 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
             Repeat.ALL -> { repeatBtn.setImageResource(R.drawable.ic_repeat); repeatBtn.tint(C.ACCENT) }
             Repeat.ONE -> { repeatBtn.setImageResource(R.drawable.ic_repeat_one); repeatBtn.tint(C.ACCENT) }
         }
+        speedBtn.text = Speeds.label(Player.speed)
+        speedBtn.setTextColor(if (Player.speed != 1f) C.ACCENT else C.TEXT)
+        pipBtn.visibility = if (picture != null && act.pipSupported) View.VISIBLE else View.GONE
         updateSleep()
+    }
+
+    private val hideHint = Runnable { seekHint.visibility = View.GONE }
+
+    private fun flashSeek(left: Boolean) {
+        seekHint.text = if (left) tr("« 10 s", "« 10 sn") else tr("10 s »", "10 sn »")
+        (seekHint.layoutParams as LayoutParams).gravity = Gravity.CENTER_VERTICAL or (if (left) Gravity.START else Gravity.END)
+        seekHint.requestLayout()
+        seekHint.visibility = View.VISIBLE
+        seekHint.bringToFront()
+        removeCallbacks(hideHint); postDelayed(hideHint, 650)
+    }
+
+    // --- volume (receiver only while this screen is shown and the app is in front) ---------------
+
+    private var volReceiver: BroadcastReceiver? = null
+
+    fun watchVolume(on: Boolean) {
+        if (on && volReceiver == null) {
+            val r = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { syncVolume() } }
+            val f = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+            if (android.os.Build.VERSION.SDK_INT >= 33) act.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED) else act.registerReceiver(r, f)
+            volReceiver = r
+            syncVolume()
+        } else if (!on) volReceiver?.let { runCatching { act.unregisterReceiver(it) }; volReceiver = null }
+    }
+
+    private fun syncVolume() {
+        vol.sync(audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+        syncVolumeBar()
+    }
+
+    private fun syncVolumeBar() {
+        if (volBar.progress != vol.level) volBar.progress = vol.level
+        volIcon.setImageResource(if (vol.muted) R.drawable.ic_volume_off else R.drawable.ic_volume)
+    }
+
+    private fun setVolume(v: Int) {
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, vol.set(v), 0) } // no system volume panel
+        volIcon.setImageResource(if (vol.muted) R.drawable.ic_volume_off else R.drawable.ic_volume)
     }
 
     // --- video ---------------------------------------------------------------------------------
@@ -159,13 +277,37 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
             background = ripple(act.outline(act.dpf(16), if (on) C.ACCENT else C.OUTLINE_BTN))
         }
         if (s.isVideo && on && act.started) {
-            val pic = picture ?: PictureView(act) { setFullscreen(!fullscreen) }.also {
+            val pic = picture ?: PictureView(act).also {
                 picture = it
-                artBox.addView(it, lpF(MATCH, MATCH))
+                artBox.addView(it, 0, lpF(MATCH, MATCH))
                 art.visibility = View.INVISIBLE
             }
             pic.setVideoSize(s.videoW, s.videoH)
         } else dropVideo()
+        pipBtn.visibility = if (picture != null && act.pipSupported) View.VISIBLE else View.GONE
+    }
+
+    /** The picture is on screen (PiP and auto-enter need it). */
+    val hasPicture get() = picture != null
+
+    /** Where the picture is on screen (PiP's enter animation starts there). */
+    fun pictureRect(): android.graphics.Rect? {
+        val r = android.graphics.Rect()
+        return picture?.takeIf { it.getGlobalVisibleRect(r) && !r.isEmpty }?.let { r }
+    }
+
+    /** In picture-in-picture only the picture is shown. */
+    fun setPip(on: Boolean) {
+        if (on == inPip) return
+        inPip = on
+        if (on || !fullscreen) layoutChrome(!on)
+    }
+
+    private fun layoutChrome(show: Boolean) {
+        for (v in chrome) v.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) col.setPadding(act.dp(20), act.dp(4), act.dp(20), act.dp(12)) else col.setPadding(0, 0, 0, 0)
+        (artBox.layoutParams as LinearLayout.LayoutParams).apply { topMargin = if (show) act.dp(12) else 0; bottomMargin = if (show) act.dp(20) else 0 }
+        artBox.requestLayout()
     }
 
     /** Remove the picture: the surface goes away and the player keeps playing as audio (video decoder shut down). */
@@ -182,10 +324,11 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     fun setFullscreen(on: Boolean) {
         if (on == fullscreen || (on && picture == null)) return
         fullscreen = on
-        for (v in chrome) v.visibility = if (on) View.GONE else View.VISIBLE
-        if (on) col.setPadding(0, 0, 0, 0) else col.setPadding(act.dp(20), act.dp(4), act.dp(20), act.dp(12))
-        (artBox.layoutParams as LinearLayout.LayoutParams).apply { topMargin = if (on) 0 else act.dp(12); bottomMargin = if (on) 0 else act.dp(20) }
-        artBox.requestLayout()
+        if (!inPip) layoutChrome(!on)
+        // a landscape video turns the screen to landscape (either way round, by the sensor) while fullscreen
+        val s = Player.current
+        val wide = s == null || s.videoW <= 0 || s.videoH <= 0 || s.videoW >= s.videoH
+        act.requestedOrientation = if (on && wide) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         act.window.insetsController?.let { c ->
             if (on) { c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; c.hide(WindowInsets.Type.systemBars()) }
             else c.show(WindowInsets.Type.systemBars())
@@ -254,7 +397,7 @@ class QueueView(private val act: MainActivity) : LinearLayout(act) {
 
 /** The video picture: a SurfaceView fitted to the video's aspect ratio. Exists only while it is on screen. */
 @SuppressLint("ViewConstructor")
-private class PictureView(act: MainActivity, onTap: () -> Unit) : FrameLayout(act), SurfaceHolder.Callback {
+private class PictureView(act: MainActivity) : FrameLayout(act), SurfaceHolder.Callback {
     private val surface = SurfaceView(act)
     private var vw = 16
     private var vh = 9
@@ -262,8 +405,7 @@ private class PictureView(act: MainActivity, onTap: () -> Unit) : FrameLayout(ac
     init {
         setBackgroundColor(C.BG)
         addView(surface)
-        surface.holder.addCallback(this)
-        setOnClickListener { onTap() }
+        surface.holder.addCallback(this) // taps go to the art box (single = fullscreen, double = ∓10 s)
     }
 
     fun setVideoSize(w: Int, h: Int) {

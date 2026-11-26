@@ -126,6 +126,7 @@ class MainActivity : Activity() {
         PlainLang.init(this)
         super.onCreate(savedInstanceState)
         Player.init(this)
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC // hardware keys = media volume anywhere in the app
         tab = Store.prefs.getInt("tab4", 0).coerceIn(0, TABS.size - 1)
         seg = Store.prefs.getInt("libSeg", 0).coerceIn(0, SEGMENTS.size - 1)
         buildUi()
@@ -178,6 +179,9 @@ class MainActivity : Activity() {
                     cmd == "pause" -> Player.pause()
                     cmd == "next" -> Player.next()
                     cmd == "shuffle" -> Player.toggleShuffle()
+                    cmd == "fwd" -> Player.seekBy(SeekStep.MS)
+                    cmd == "back" -> Player.seekBy(-SeekStep.MS)
+                    cmd.startsWith("speed:") -> Player.setSpeed(cmd.substring(6).toFloatOrNull() ?: 1f)
                     cmd.startsWith("seek:") -> Player.seekTo(cmd.substring(5).toLong())
                     cmd == "stats" -> Library.index.let { lib ->
                         android.util.Log.i("LocalMusic", "stats artists=${lib.artists.size} albums=${lib.albums.size}")
@@ -198,7 +202,7 @@ class MainActivity : Activity() {
                         android.util.Log.i("LocalMusic", "plan written: ${p.moves.size} moves, ${p.removals.size} removals")
                     }.start()
                 }
-                android.util.Log.i("LocalMusic", "cmd=$cmd songs=${Library.index.songs.size} playing=${Player.playing} pos=${Player.position()} dur=${Player.duration()} " +
+                android.util.Log.i("LocalMusic", "cmd=$cmd songs=${Library.index.songs.size} playing=${Player.playing} pos=${Player.position()} dur=${Player.duration()} speed=${Player.speed} " +
                     "queue=${Player.queue.pos + 1}/${Player.queue.size} song=${Player.current?.path}")
             }
         }.start()
@@ -216,6 +220,7 @@ class MainActivity : Activity() {
         Player.addListener(onPlayer)
         if (Library.stale(this) || Library.index.byId.isEmpty()) loadLibrary() else render()
         watchMedia(true)
+        nowPlaying?.watchVolume(true)
         onPlayerChanged()
     }
 
@@ -245,6 +250,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        leftPip = false // PiP was expanded back into the app
         checkSpace()
         if (!loading && Library.stale(this)) loadLibrary()
         tick()
@@ -263,6 +269,8 @@ class MainActivity : Activity() {
         spaceChecked = false
         handler.removeCallbacks(hideUndo); undoBar.visibility = View.GONE; undoAction = null
         nowPlaying?.dropVideo() // no surface in the background or with the screen off: the video plays as audio
+        nowPlaying?.watchVolume(false)
+        if (leftPip) { leftPip = false; Player.pause() } // the PiP window was closed with its ✕: pause (the queue stays)
         watchMedia(false)
         Player.removeListener(onPlayer)
         Player.savePosition()
@@ -1108,6 +1116,16 @@ class MainActivity : Activity() {
             tr("Organize library…", "Kitaplığı düzenle…") to { openOrganizer() },
             tr("Trash", "Çöp kutusu") to { openTrash() },
             tr("Sleep timer", "Uyku zamanlayıcısı") to { sleepMenu() },
+            tr("Playback speed: ", "Oynatma hızı: ") + Speeds.label(Player.speed) to { speedMenu() },
+        ) + (if (pipSupported) listOf(
+            (if (pipAuto) tr("Picture-in-picture on Home: on", "Ana ekranda pencere içinde pencere: açık")
+            else tr("Picture-in-picture on Home: off", "Ana ekranda pencere içinde pencere: kapalı")) to {
+                Store.prefs.edit().putBoolean("pip_auto", !pipAuto).apply()
+                updatePip()
+                toast(if (pipAuto) tr("A playing video goes into a small window when you leave the app", "Uygulamadan çıkınca oynayan video küçük pencerede devam eder")
+                else tr("Videos play as audio when you leave the app", "Uygulamadan çıkınca videolar ses olarak devam eder"))
+            },
+        ) else emptyList()) + listOf(
             tr("Rescan music", "Müziği yeniden tara") to { loadLibrary(); toast(tr("Rescanning…", "Yeniden taranıyor…")) },
             tr("Clear listening history", "Dinleme geçmişini temizle") to {
                 confirm(tr("Clear listening history?", "Dinleme geçmişi temizlensin mi?"),
@@ -1162,12 +1180,75 @@ class MainActivity : Activity() {
         nowPlaying = v
         applyInsets(v)
         root.addView(v, lpF(MATCH, MATCH))
+        if (started) v.watchVolume(true)
         v.update(); tick()
     }
 
     fun closeNowPlaying() {
-        nowPlaying?.let { it.dropVideo(); root.removeView(it) }
+        nowPlaying?.let { it.dropVideo(); it.watchVolume(false); root.removeView(it) }
         nowPlaying = null
+        updatePip()
+    }
+
+    // --- playback speed ------------------------------------------------------------------------
+
+    fun speedMenu() {
+        menu(tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { sp ->
+            (if (sp == Player.speed) "✓ " else "    ") + Speeds.label(sp) + (if (sp == 1f) tr("  (normal)", "  (normal)") else "") to { Player.setSpeed(sp) }
+        })
+    }
+
+    // --- picture-in-picture (videos with the picture on screen) ----------------------------------
+
+    val pipSupported by lazy { packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) }
+    private var leftPip = false // PiP just ended: expanded (onResume follows) or closed (onStop follows)
+    private val pipAuto get() = Store.prefs.getBoolean("pip_auto", false)
+
+    /** Only the picture of a video in now playing goes into PiP; audio never does. */
+    private fun pipWanted() = pipSupported && nowPlaying?.hasPicture == true
+
+    fun enterPip() {
+        if (!pipWanted()) return
+        runCatching { enterPictureInPictureMode(pipParams()) }
+    }
+
+    private fun pipParams(): android.app.PictureInPictureParams {
+        val s = Player.current
+        val (w, h) = PipRatio.of(s?.videoW ?: 0, s?.videoH ?: 0)
+        fun action(icon: Int, label: String, cmd: String) = android.app.RemoteAction(
+            android.graphics.drawable.Icon.createWithResource(this, icon), label, label, ControlReceiver.intent(this, cmd))
+        val b = android.app.PictureInPictureParams.Builder()
+            .setAspectRatio(android.util.Rational(w, h))
+            .setActions(listOf(
+                action(R.drawable.ic_back10, tr("Back 10 s", "10 sn geri"), ControlReceiver.BACK),
+                if (Player.playing) action(R.drawable.ic_pause, tr("Pause", "Duraklat"), ControlReceiver.TOGGLE)
+                else action(R.drawable.ic_play, tr("Play", "Oynat"), ControlReceiver.TOGGLE),
+                action(R.drawable.ic_fwd10, tr("Forward 10 s", "10 sn ileri"), ControlReceiver.FWD),
+            ))
+        nowPlaying?.pictureRect()?.let { b.setSourceRectHint(it) }
+        if (Build.VERSION.SDK_INT >= 31) b.setAutoEnterEnabled(pipAuto && pipWanted() && Player.playing)
+        return b.build()
+    }
+
+    /** Keeps PiP's play/pause icon and auto-enter in step with playback. Nothing to do for audio without auto-enter. */
+    private fun updatePip() {
+        if (!pipSupported) return
+        if (!isInPictureInPictureMode && !(pipAuto && Build.VERSION.SDK_INT >= 31)) return
+        runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    @Deprecated("Android 11 has no auto-enter; 12+ uses setAutoEnterEnabled")
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < 31 && pipAuto && Player.playing) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        if (!inPip) leftPip = true
+        nowPlaying?.setPip(inPip)
+        // only the picture in the small window: hide whatever lies over now playing (queue, menus' overlays)
+        overlays.forEach { it.visibility = if (inPip) View.GONE else View.VISIBLE }
     }
 
     fun showOverlay(v: View) {
@@ -1213,6 +1294,7 @@ class MainActivity : Activity() {
         }
         if (nowPlaying != null && s == null) closeNowPlaying()
         nowPlaying?.update()
+        updatePip()
         overlays.forEach { (it as? QueueView)?.refresh() }
         if (tab == HOME && drill.isEmpty() && query.isEmpty() && shownHistory != Store.historyVersion) render()
         adapter.notifyDataSetChanged() // current-song highlight

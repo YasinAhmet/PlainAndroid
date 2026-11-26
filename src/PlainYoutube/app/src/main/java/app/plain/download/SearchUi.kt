@@ -25,9 +25,12 @@ import app.plain.lang.tr
 
 /**
  * The Search tab: Feed (followed channels' RSS) | Search (InnerTube WEB), plus a back stack of channel / playlist
- * pages. Network only on user actions (opening a page, Search, Load more, Refresh, a stale Feed being opened); every
+ * pages. Network only on user actions (opening a page, Search, Next page, Refresh; the Feed never fetches by itself); every
  * request is cancelled when the tab or screen goes away or the page changes.
  */
+/** Rows per list page (Feed, Search, channel, playlist, …): page-based lists instead of endless scrolling. */
+private const val PAGE = 20
+
 class SearchScreen(private val act: MainActivity) {
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newFixedThreadPool(4) // also the RSS parallelism limit
@@ -449,7 +452,22 @@ class SearchScreen(private val act: MainActivity) {
         val head = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(16), 0, act.dp(16), act.dp(4)) }
         private val status = act.text("", 13f, C.DIM, lines = 4).apply { setPadding(act.dp(16), act.dp(4), act.dp(16), act.dp(4)); visibility = View.GONE }
         val list = ListView(act)
-        private val more = act.pill(tr("Load more", "Daha fazla yükle")) { if (loadedOnce) loadMore() else retry() }
+        private val more = act.pill(tr("Retry", "Yeniden dene")) { retry() }
+        /** Rows are shown [PAGE] at a time; [pg] may point past the end and is clamped by [shownPage]. */
+        var pg = 0
+        val pageCount get() = maxOf(1, (items.size + PAGE - 1) / PAGE)
+        val shownPage get() = pg.coerceIn(0, pageCount - 1)
+        private val prevBtn = act.pill("‹ " + tr("Previous", "Önceki")) { goPage(shownPage - 1) }
+        private val nextBtn = act.pill(tr("Next", "Sonraki") + " ›") { goPage(shownPage + 1) }
+        private val pageLabel = act.text("", 13f, C.LABEL).apply { gravity = Gravity.CENTER }
+        private val nav = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(prevBtn, lpL(WRAP, WRAP))
+            addView(pageLabel, lpL(0, WRAP, 1f))
+            addView(nextBtn, lpL(WRAP, WRAP))
+        }
+        private var footReady = false
         private val footNote = act.text("", 13f, C.LABEL).apply { gravity = Gravity.CENTER }
         val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
 
@@ -458,6 +476,7 @@ class SearchScreen(private val act: MainActivity) {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(act.dp(16), act.dp(12), act.dp(16), act.dp(24))
+                addView(nav, lpL(MATCH, WRAP))
                 addView(more, lpL(WRAP, WRAP))
                 addView(footNote, lpL(MATCH, WRAP))
             }
@@ -472,6 +491,7 @@ class SearchScreen(private val act: MainActivity) {
             root.addView(list, lpL(MATCH, 0, 1f))
             more.visibility = View.GONE // refreshFooter() runs in onShow (subclass state isn't ready here)
             footNote.visibility = View.GONE
+            nav.visibility = View.GONE
         }
 
         open val canRetry get() = !loadedOnce
@@ -483,6 +503,7 @@ class SearchScreen(private val act: MainActivity) {
         open val musicDefault: Boolean get() = false
 
         open fun onShow() {
+            footReady = true
             if (!loadedOnce && !loading) firstLoad()
             adapter.notifyDataSetChanged()
             refreshFooter()
@@ -498,13 +519,35 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         fun refreshFooter() {
+            if (!footReady) return
             when {
                 loading -> { more.visibility = View.GONE; footNote.text = tr("Loading…", "Yükleniyor…"); footNote.visibility = View.VISIBLE }
-                loadedOnce && token != null -> { more.text = tr("Load more", "Daha fazla yükle"); more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
-                !loadedOnce && canRetry -> { more.text = tr("Retry", "Yeniden dene"); more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
+                !loadedOnce && canRetry -> { more.visibility = View.VISIBLE; footNote.visibility = View.GONE }
                 else -> { more.visibility = View.GONE; footNote.visibility = View.GONE }
             }
+            val p = shownPage
+            val hasNext = (p + 1) * PAGE < items.size || token != null && loadedOnce
+            nav.visibility = if (items.isNotEmpty() && (p > 0 || hasNext)) View.VISIBLE else View.GONE
+            pageLabel.text = tr("Page ${p + 1} of $pageCount${if (token != null) "+" else ""}", "Sayfa ${p + 1} / $pageCount${if (token != null) "+" else ""}")
+            fun en(v: View, on: Boolean) { v.isEnabled = on; v.alpha = if (on) 1f else 0.35f }
+            en(prevBtn, p > 0 && !loading)
+            en(nextBtn, hasNext && !loading)
         }
+
+        /** Show page [k] (0-based); past the loaded rows it asks YouTube for the next batch. */
+        fun goPage(k: Int) {
+            if (k < 0 || loading) return
+            pg = k
+            adapter.notifyDataSetChanged()
+            list.setSelection(0)
+            refreshFooter()
+            if (items.size < (k + 1) * PAGE && token != null && loadedOnce) {
+                loadMore() // the page shows the new rows once they're in
+            }
+        }
+
+        /** Back to page 1 (a new search, tab or filter). */
+        fun firstPage() { pg = 0; list.setSelection(0) }
 
         /** Run [call] on the pool; [done]/[fail] on the main thread unless cancelled meanwhile. */
         fun run(firstPage: Boolean, call: (Int) -> JSONObject, fail: (() -> Unit)? = null, done: (JSONObject) -> Unit) {
@@ -645,7 +688,7 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(View(act), lpL(act.dp(8), 1))
             row.addView(act.pill(tr("Import…", "İçe aktar…")) { importDialog() })
             row.addView(View(act), lpL(0, 1, 1f))
-            row.addView(act.pill(tr("Refresh", "Yenile")) { refresh(true) })
+            row.addView(act.pill(tr("Refresh", "Yenile")) { refresh() })
             head.addView(row, lpL(MATCH, WRAP))
             head.addView(info, lpL(MATCH, WRAP))
             head.addView(filterFlow, lpL(MATCH, WRAP))
@@ -682,17 +725,16 @@ class SearchScreen(private val act: MainActivity) {
             note.visibility = if (ff.membersOnly) View.VISIBLE else View.GONE
         }
 
-        private fun setFF(n: FeedFilters) { ff = n; Store.feedFilters = n; renderFilters(); showCache() }
+        private fun setFF(n: FeedFilters) { firstPage(); ff = n; Store.feedFilters = n; renderFilters(); showCache() }
 
         override val canRetry get() = false
 
         override fun firstLoad() { loadedOnce = true; onShow() }
 
-        /** Show the cached feed at once; fetch only channels whose RSS is older than 30 min (or newly followed). */
+        /** Show the saved feed. Nothing is fetched until Refresh is tapped (the user's rule: no network unasked). */
         override fun onShow() {
             loadedOnce = true
             showCache()
-            refresh(false)
             refreshFooter()
         }
 
@@ -716,19 +758,25 @@ class SearchScreen(private val act: MainActivity) {
                 refreshing -> tr("Refreshing… $doneN of $totalN channels", "Yenileniyor… $doneN / $totalN kanal")
                 else -> {
                     val last = Store.loadFeed().lastRefresh
-                    (if (last > 0) tr("Updated ${Ago.text(last, System.currentTimeMillis())}", "Güncellendi: ${Ago.text(last, System.currentTimeMillis())}") else tr("Not loaded yet", "Henüz yüklenmedi")) +
+                    (if (last > 0) tr("Updated ${Ago.text(last, System.currentTimeMillis())}", "Güncellendi: ${Ago.text(last, System.currentTimeMillis())}") else tr("Not loaded yet · tap Refresh", "Henüz yüklenmedi · Yenile'ye dokunun")) +
+                        Store.loadFeed().fetched.let { fe -> Store.follows().count { (fe[it.id] ?: 0L) == 0L } }.let { k ->
+                            if (k == 0 || last == 0L) "" else tr(" · $k new channel${if (k == 1) "" else "s"}: tap Refresh", " · $k yeni kanal: Yenile'ye dokunun")
+                        } +
                         (if (noWifi) tr(" · not on Wi-Fi, showing the saved feed", " · Wi-Fi bağlı değil, kayıtlı akış gösteriliyor") else "") +
-                        (if (failedN > 0) tr(" · $failedN channels failed", " · $failedN kanal başarısız") else "")
+                        (if (failedN > 0) tr(" · $failedN channels failed", " · $failedN kanal başarısız") else "") +
+                        Store.loadFeed().emptyChannels(Store.follows()).let { e ->
+                            if (e.isEmpty()) "" else { val names = e.take(3).joinToString(", ") { it.title.ifEmpty { it.id } } + if (e.size > 3) "…" else ""
+                                tr(" · no videos from: $names (wrong channel followed? unfollow it and follow the one you reach from its videos)",
+                                    " · video gelmeyen: $names (yanlış kanal mı takip edildi? takibi bırakıp videolarından ulaştığınız kanalı takip edin)") }
+                        }
                 }
             }
         }
 
-        private var again = false
-
-        fun refresh(force: Boolean) {
-            if (refreshing) { again = true; return } // e.g. an import finished meanwhile: fetch the new ones after this round
-            val follows = Store.follows()
-            val due = Store.loadFeed().due(follows, System.currentTimeMillis(), force)
+        /** Refresh button only: fetches every followed channel. */
+        fun refresh() {
+            if (refreshing) return
+            val due = Store.follows()
             if (due.isEmpty()) { updateInfo(); return }
             noWifi = false
             try { Net.network(act, Store.wifiOnly) } catch (e: Exception) {
@@ -749,7 +797,7 @@ class SearchScreen(private val act: MainActivity) {
                     // manual Refresh: also the channel's members-only uploads (public UUMO feed; 404 = no memberships, skipped a week)
                     var members: List<Item>? = null
                     val now0 = System.currentTimeMillis()
-                    if (force && Store.noMembersUntil(f.id) < now0) members = try {
+                    if (Store.noMembersUntil(f.id) < now0) members = try {
                         WebApi.rssMembers(act, calls, g, f.id) ?: emptyList<Item>().also { Store.setNoMembers(f.id, now0 + 7 * 86_400_000L) }
                     } catch (e: Cancelled) { throw e } catch (e: NoWifi) { throw e } catch (_: Exception) { null }
                     Result.success(fresh to members)
@@ -764,7 +812,6 @@ class SearchScreen(private val act: MainActivity) {
                     doneN++
                     if (doneN >= totalN) {
                         refreshing = false; persist(); render()
-                        if (again) { again = false; refresh(false) }
                     } else scheduleRender()
                 }
             }
@@ -783,7 +830,6 @@ class SearchScreen(private val act: MainActivity) {
 
         override fun onCancelled() {
             super.onCancelled()
-            again = false
             if (refreshing) { refreshing = false; persist(); updateInfo() }
         }
 
@@ -942,6 +988,7 @@ class SearchScreen(private val act: MainActivity) {
             chips.forEachIndexed { k, c -> c.select(k == n.type) }
             renderFilters()
             if (query.isEmpty()) return
+            firstPage()
             if (server) { cancelNet(); doSearch() } else { reapply(); scanIfNeeded(newRound = true) }
         }
 
@@ -970,7 +1017,7 @@ class SearchScreen(private val act: MainActivity) {
             setStatus(when {
                 !loadedOnce -> null
                 raw.isEmpty() -> tr("No results", "Sonuç yok")
-                items.isEmpty() -> tr("None of the ${raw.size} loaded results pass the filters", "Yüklenen ${raw.size} sonucun hiçbiri filtrelere uymuyor") + (if (token != null) tr(" · Load more scans further", " · Daha fazla yükle ile daha ileri taranır") else "")
+                items.isEmpty() -> tr("None of the ${raw.size} loaded results pass the filters", "Yüklenen ${raw.size} sonucun hiçbiri filtrelere uymuyor") + (if (token != null) tr(" · Next scans further", " · Sonraki ile daha ileri taranır") else "")
                 else -> null
             })
         }
@@ -1002,15 +1049,26 @@ class SearchScreen(private val act: MainActivity) {
         private fun doSearch() {
             endSelection()
             items.clear(); raw.clear(); token = null; loadedOnce = false
+            firstPage()
             adapter.notifyDataSetChanged()
-            list.setSelection(0)
             val q = query
             val params = f.sp()
             pagesThisRound = 1; passedThisRound = 0
-            run(true, { g -> WebApi.search(act, calls, g, q, params) }) { o ->
+            val channels = f.type == 1
+            var extra = emptyList<Item>()
+            run(true, { g ->
+                WebApi.search(act, calls, g, q, params).also { o ->
+                    // blocked channels are left out of channel search: add them from the owners of video results
+                    if (channels) extra = try {
+                        val have = Browse.page(o).items.filter { it.kind == IKind.CHANNEL }.map { it.id }
+                        Browse.missingChannels(q, Browse.page(WebApi.search(act, calls, g, q, Clients.SEARCH_VIDEOS)).items, have)
+                    } catch (e: Cancelled) { throw e } catch (_: Exception) { emptyList() }
+                }
+            }) { o ->
                 loadedOnce = true
                 region = o.optString("_gl").ifEmpty { null }
-                addPage(Browse.page(o))
+                val p = Browse.page(o)
+                addPage(if (extra.isEmpty()) p else Page(extra + p.items, p.continuation))
             }
         }
     }
@@ -1079,7 +1137,7 @@ class SearchScreen(private val act: MainActivity) {
 
         private fun toggleFollow() {
             if (Store.isFollowed(channelId)) { UnfollowUi.unfollow(act, listOf(channelId to name)) { updateHead(); feedPage.updateInfo() }; return }
-            else { Store.follow(channelId, name); act.toast(tr("Following ${name.ifEmpty { "channel" }}: its new videos show up in Feed", "Takip ediliyor: ${name.ifEmpty { "kanal" }} · yeni videoları Akış'ta görünür")) }
+            else { Store.follow(channelId, name); act.toast(tr("Following ${name.ifEmpty { "channel" }}: its videos show up in Feed after Refresh", "Takip ediliyor: ${name.ifEmpty { "kanal" }} · videoları Yenile'den sonra Akış'ta görünür")) }
             updateHead()
             feedPage.updateInfo()
         }
@@ -1324,8 +1382,8 @@ class SearchScreen(private val act: MainActivity) {
             items.clear()
             val s = saved[k]
             if (s != null) { items += s.first; token = s.second; loadedOnce = s.third } else { token = null; loadedOnce = false }
+            firstPage()
             adapter.notifyDataSetChanged()
-            list.setSelection(0)
             setStatus(null)
             updateHead()
             if (!loadedOnce) firstLoad() else refreshFooter()
@@ -1528,14 +1586,17 @@ class SearchScreen(private val act: MainActivity) {
     // rows
 
     inner class ItemAdapter(private val page: ListPage) : BaseAdapter() {
-        override fun getCount() = page.items.size
-        override fun getItem(p: Int): Any = page.items[p]
-        override fun getItemId(p: Int) = p.toLong()
+        private val start get() = page.shownPage * PAGE
+        private fun at(p: Int) = page.items[start + p]
+        override fun getCount() = (page.items.size - start).coerceIn(0, PAGE)
+        override fun getItem(p: Int): Any = at(p)
+        override fun getItemId(p: Int) = (start + p).toLong()
         override fun getViewTypeCount() = 2
-        override fun getItemViewType(p: Int) = if (page.items[p].kind == IKind.CHANNEL) 1 else 0
+        override fun getItemViewType(p: Int) = if (at(p).kind == IKind.CHANNEL) 1 else 0
+        override fun notifyDataSetChanged() { super.notifyDataSetChanged(); page.refreshFooter() }
 
         override fun getView(p: Int, cv: View?, parent: ViewGroup): View {
-            val i = page.items[p]
+            val i = at(p)
             val h = (cv?.tag as? Row) ?: Row(i.kind == IKind.CHANNEL)
             h.bind(i, page)
             return h.view

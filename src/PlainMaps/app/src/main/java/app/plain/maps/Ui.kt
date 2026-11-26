@@ -86,6 +86,7 @@ class Icon(ctx: Context, val kind: Int) : View(ctx) {
         const val BACK = 3
         const val SEARCH = 4
         const val ROUTE = 5
+        const val LIST = 6
     }
 
     var color = C.TEXT
@@ -141,6 +142,11 @@ class Icon(ctx: Context, val kind: Int) : View(ctx) {
                 p.style = Paint.Style.FILL
                 c.drawCircle(cx - 6 * d, cy + 6 * d, 2.8f * d, p)
                 c.drawCircle(cx + 6 * d, cy - 6 * d, 2.8f * d, p)
+            }
+            LIST -> {
+                for (k in -1..1) c.drawLine(cx - 3 * d, cy + k * 5.5f * d, cx + 8 * d, cy + k * 5.5f * d, p)
+                p.style = Paint.Style.FILL
+                for (k in -1..1) c.drawCircle(cx - 7.5f * d, cy + k * 5.5f * d, 1.6f * d, p)
             }
             SEARCH -> {
                 c.drawCircle(cx - 2 * d, cy - 2 * d, 6 * d, p)

@@ -134,10 +134,15 @@ class PlaybackService : Service() {
                 .setOnlyAlertOnce(true)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setCategory(Notification.CATEGORY_TRANSPORT)
+                // ⏮ −10 s ▶/❚❚ +10 s ⏭ ✕ (Plain Youtube's set); compact: ⏮ ▶ ⏭. Android 13+ draws its own controls
+                // from the session instead (prev/play/next + the ±10 s custom actions).
                 .addAction(action(c, R.drawable.ic_prev, tr("Previous", "Önceki"), ControlReceiver.PREV))
+                .addAction(action(c, R.drawable.ic_back10, tr("Back 10 s", "10 sn geri"), ControlReceiver.BACK))
                 .addAction(if (playing) action(c, R.drawable.ic_pause, tr("Pause", "Duraklat"), ControlReceiver.TOGGLE) else action(c, R.drawable.ic_play, tr("Play", "Oynat"), ControlReceiver.TOGGLE))
+                .addAction(action(c, R.drawable.ic_fwd10, tr("Forward 10 s", "10 sn ileri"), ControlReceiver.FWD))
                 .addAction(action(c, R.drawable.ic_next, tr("Next", "Sonraki"), ControlReceiver.NEXT))
-                .setStyle(Notification.MediaStyle().setMediaSession(Player.session.sessionToken).setShowActionsInCompactView(0, 1, 2))
+                .addAction(action(c, R.drawable.ic_close, tr("Close", "Kapat"), ControlReceiver.CLOSE))
+                .setStyle(Notification.MediaStyle().setMediaSession(Player.session.sessionToken).setShowActionsInCompactView(0, 2, 4))
                 .build()
         }
     }
@@ -153,6 +158,9 @@ class ControlReceiver : BroadcastReceiver() {
             NEXT -> Player.next()
             PREV -> Player.prev()
             STOP -> if (!Player.playing) Player.stop()
+            BACK -> Player.seekBy(-SeekStep.MS)
+            FWD -> Player.seekBy(SeekStep.MS)
+            CLOSE -> Player.stop()
         }
     }
 
@@ -161,6 +169,9 @@ class ControlReceiver : BroadcastReceiver() {
         const val NEXT = "next"
         const val PREV = "prev"
         const val STOP = "stop"
+        const val BACK = "back"
+        const val FWD = "fwd"
+        const val CLOSE = "close"
 
         fun intent(c: Context, action: String): PendingIntent = PendingIntent.getBroadcast(
             c, action.hashCode(), Intent(c, ControlReceiver::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE,

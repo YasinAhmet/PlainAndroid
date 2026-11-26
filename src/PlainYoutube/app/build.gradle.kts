@@ -13,8 +13,8 @@ android {
         applicationId = "app.plain.download"
         minSdk = 30 // MediaStore RELATIVE_PATH/IS_PENDING without storage permission, MediaMuxer OGG output
         targetSdk = 35
-        versionCode = 21
-        versionName = "2.9"
+        versionCode = 23
+        versionName = "2.11"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

@@ -37,7 +37,8 @@ class MainActivity : Activity() {
         class StopS(val id: Int) : Screen()
         class LineS(var variant: Int, var focus: Int, var timetable: Boolean = false, var day: Int = 0) : Screen()
         class PlaceS(val id: Long) : Screen()
-        class Search(val q: String) : Screen()
+        /** A typed search, or a saved query pack ([pack] = its name, [q] unused). */
+        class Search(val q: String, val pack: String? = null) : Screen()
         object Settings : Screen()
         object Welcome : Screen()
         /** The route finder: from/to and, once both are set, the best options. */
@@ -79,6 +80,10 @@ class MainActivity : Activity() {
     private lateinit var topBar: LinearLayout
     private lateinit var search: EditText
     private lateinit var clearSearch: Icon
+    private lateinit var packsBtn: Icon
+    /** Search filters. They last for one search session and start from "everything" each time. */
+    private var searchKinds = Store.Kinds.ALL
+    private var searchCats: Set<Int>? = null
     private lateinit var gpsBtn: Icon
     private lateinit var sheet: CappedLinear
     private lateinit var sheetHead: LinearLayout
@@ -247,6 +252,12 @@ class MainActivity : Activity() {
             setOnClickListener { search.setText(""); if (stack.lastOrNull() is Screen.Search) back() }
         }
         box.addView(clearSearch, lpL(dp(40), dp(40)))
+        packsBtn = Icon(this, Icon.LIST).apply {
+            color = C.DIM
+            background = ripple(null)
+            setOnClickListener { hideKeyboard(); search.clearFocus(); packsDialog() }
+        }
+        box.addView(packsBtn, lpL(dp(40), dp(40)))
         topBar.addView(box, lpL(0, WRAP, 1f))
         val routeBtn = Icon(this, Icon.ROUTE).apply {
             color = C.ACCENT
@@ -267,6 +278,7 @@ class MainActivity : Activity() {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 clearSearch.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                packsBtn.visibility = if (s.isNullOrEmpty()) View.VISIBLE else View.GONE
                 main.removeCallbacks(run)
                 if (!s.isNullOrBlank()) main.postDelayed(run, 220)
             }
@@ -354,6 +366,7 @@ class MainActivity : Activity() {
         setContentView(root)
 
         map.onTap = { lat, lon, _, _ -> mapTap(lat, lon) }
+        map.onHold = { lat, lon, r -> mapHold(lat, lon, r) }
         map.onUserMove = { updateGpsBtn() }
     }
 
@@ -541,12 +554,17 @@ class MainActivity : Activity() {
             when {
                 stop != null && (poi == null || stop.second <= poi.second) -> show(Screen.StopS(stop.first.id), replaceAll = true)
                 poi != null -> show(Screen.PlaceS(poi.first.id), replaceAll = true)
-                else -> {
-                    val r = (dpf(70) * mpp).coerceIn(400.0, 1500.0)
-                    show(Screen.Area(lat, lon, r), replaceAll = true)
-                }
+                else -> show(Screen.Area(lat, lon, MapView.HOLD_MIN_M), replaceAll = true)
             }
         }
+    }
+
+    /** Press and hold: lines within the circle that grew while the finger was down (100–400 m). */
+    private fun mapHold(lat: Double, lon: Double, r: Double) {
+        if (search.hasFocus()) { search.clearFocus(); hideKeyboard() }
+        if (!store.ready) { show(Screen.Welcome, replaceAll = true); return }
+        if (picking != 0 && stack.lastOrNull() is Screen.Route) { mapTap(lat, lon); return }
+        show(Screen.Area(lat, lon, r), replaceAll = true)
     }
 
     // ------------------------------------------------------------------ nearby lines (area & place)
@@ -581,8 +599,8 @@ class MainActivity : Activity() {
     private fun lineColor(v: Store.Variant, i: Int) = if (v.mode == Mode.BUS) C.PALETTE[i % C.PALETTE.size] else v.color
 
     private fun nearRows(rows: List<Near>, now: Int, fromLat: Double, fromLon: Double): List<View> {
-        if (rows.isEmpty()) return listOf(note(tr("No lines stop within this circle. Tap closer to a street, or zoom out and tap again.",
-            "Bu dairede duran hat yok. Bir sokağa daha yakın dokunun ya da uzaklaştırıp yeniden dokunun.")))
+        if (rows.isEmpty()) return listOf(note(tr("No lines stop within this circle. Press and hold the map for a bigger circle (up to 400 m), or tap closer to a street.",
+            "Bu dairede duran hat yok. Daha büyük daire için haritaya basılı tutun (400 m'ye kadar) ya da bir sokağa daha yakın dokunun.")))
         return rows.mapIndexed { i, r ->
             val col = lineColor(r.v, i)
             row(badge(r.v.ref, col), "→ " + r.v.headsign.ifEmpty { r.v.lineName },
@@ -871,35 +889,50 @@ class MainActivity : Activity() {
         val q = search.text.toString().trim()
         if (q.isEmpty()) return
         if (!store.ready) { show(Screen.Welcome, replaceAll = true); return }
-        if (stack.lastOrNull() is Screen.Search) { stack[stack.size - 1] = Screen.Search(q); render() } else show(Screen.Search(q))
+        val cur = stack.lastOrNull()
+        if (cur is Screen.Search && cur.pack == null) { stack[stack.size - 1] = Screen.Search(q); render() }
+        else { resetSearchFilters(); show(Screen.Search(q)) }
     }
 
+    private fun resetSearchFilters() { searchKinds = Store.Kinds.ALL; searchCats = null }
+
     private fun renderSearch(s: Screen.Search, t: Int) {
-        header("“${s.q}”", null)
+        val pack = s.pack?.let { n -> packs().firstOrNull { it.name == n } }
+        if (s.pack != null && pack == null) { back(); return } // deleted meanwhile
+        val title = pack?.name ?: "“${s.q}”"
+        header(title, null)
         loading()
         map.circle = null; map.lines = emptyList(); map.dots = emptyList()
         val near = Geo.lat(map.cy) to Geo.lon(map.cx)
         val view = map.visibleNorm()
-        val prefs = getSharedPreferences("app", MODE_PRIVATE)
-        val kinds = prefs.getInt("sk", Store.Kinds.ALL)
-        val cats = prefs.getString("sc", null)?.let { s -> if (s == "*") null else s.split(',').mapNotNull { it.toIntOrNull() }.toSet() }
+        // the visible part as lat0, lon0, lat1, lon1
+        val box = doubleArrayOf(Geo.lat(view[3]), Geo.lon(view[0]), Geo.lat(view[1]), Geo.lon(view[2]))
+        val kinds = if (pack != null) Store.Kinds.PLACES else searchKinds
+        val cats = searchCats
         fun inView(x: Double, y: Double) = x in view[0]..view[2] && y in view[1]..view[3]
-        class Found(val hits: List<Store.Hit>, val glowLines: Map<Long, List<List<DoubleArray>>>)
+        class Found(val hits: List<Store.Hit>, val glowLines: Map<Long, List<List<DoubleArray>>>, val glowPlaces: List<Store.PoiR>)
         load(t, {
-            val hits = store.search(s.q, near, kinds, cats)
+            val terms = pack?.terms?.map { Text.norm(it) }?.filter { it.isNotEmpty() } ?: listOf(Text.norm(s.q))
+            val hits = if (pack != null) store.placeHits(store.placesMatching(terms, true, near, cats, 400), near).take(60)
+            else store.search(s.q, near, kinds, cats)
+            // every matching place on screen glows, not just the ones listed
+            val glowPlaces = if (kinds and Store.Kinds.PLACES != 0) store.placesMatching(terms, pack != null, near, cats, 600, box) else emptyList()
             // lines with a stretch inside the visible map glow too
             val gl = LinkedHashMap<Long, List<List<DoubleArray>>>()
             for (h in hits.filter { it.kind == Store.HitKind.LINE }.take(8)) {
                 val geoms = store.variantsOfLine(h.id.toInt()).take(2).map { v -> store.geometry(v).map { Pieces.merc(it) } }
                 if (geoms.any { g -> g.any { p -> (0 until p.size / 2).any { inView(p[2 * it], p[2 * it + 1]) } } }) gl[h.id] = geoms
             }
-            Found(hits, gl)
+            Found(hits, gl, glowPlaces)
         }) { f ->
             val hits = f.hits
-            header("“${s.q}”", if (hits.isEmpty()) tr("Nothing found", "Sonuç yok") else tr("${hits.size} results", "${hits.size} sonuç") +
-                (if (kinds != Store.Kinds.ALL || cats != null) tr(" · filtered", " · filtreli") else ""))
+            val onScreen = f.glowPlaces.size
+            header(title, (if (hits.isEmpty()) tr("Nothing found", "Sonuç yok") else tr("${hits.size} results", "${hits.size} sonuç")) +
+                (if (onScreen > 0) tr(" · $onScreen places on screen", " · ekranda $onScreen yer") else "") +
+                (if (kinds != Store.Kinds.ALL && pack == null || cats != null) tr(" · filtered", " · filtreli") else ""))
             val views = ArrayList<View>()
-            views.add(searchFilters(kinds, cats))
+            views.add(searchFilters(kinds, cats, pack, s.q))
+            if (pack != null && pack.terms.isNotEmpty()) views.add(note(pack.terms.joinToString(" · ")))
             var lastKind = -1
             val glowDots = ArrayList<MapView.Dot>()
             val glowLines = ArrayList<MapView.Line>()
@@ -924,10 +957,126 @@ class MainActivity : Activity() {
                     pick(h)
                 })
             }
+            val listed = hits.filter { it.kind == Store.HitKind.PLACE }.mapTo(HashSet()) { it.id }
+            for (p in f.glowPlaces) if (p.id !in listed) glowDots.add(MapView.Dot(Geo.mx(p.lon), Geo.my(p.lat), Poi.color(p.cat), 4.5f, 0xFF000000.toInt(), glow = true))
+            if (hits.isEmpty() && pack != null) views.add(note(tr("No place matches this pack. Edit it to change the names.",
+                "Bu pakete uyan yer yok. Adları değiştirmek için paketi düzenleyin.")))
             body(*views.toTypedArray())
             map.lines = glowLines
             map.dots = glowDots
         }
+    }
+
+    // ------------------------------------------------------------------ query packs ("Shops - common": a101, migros, bim, şok)
+    private class Pack(val name: String, val terms: List<String>)
+
+    private fun packs(): List<Pack> {
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        val raw = prefs.getString("packs", null)
+            ?: return listOf(Pack(tr("Shops - common", "Marketler - yaygın"), listOf("a101", "migros", "bim", "şok")))
+        val out = ArrayList<Pack>()
+        try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val t = o.getJSONArray("terms")
+                out.add(Pack(o.getString("name"), List(t.length()) { t.getString(it) }))
+            }
+        } catch (_: Exception) {
+        }
+        return out
+    }
+
+    private fun savePacks(l: List<Pack>) {
+        val arr = org.json.JSONArray()
+        for (p in l) arr.put(org.json.JSONObject().put("name", p.name).put("terms", org.json.JSONArray(p.terms)))
+        getSharedPreferences("app", MODE_PRIVATE).edit().putString("packs", arr.toString()).apply()
+    }
+
+    private fun runPack(p: Pack) {
+        if (!store.ready) { show(Screen.Welcome, replaceAll = true); return }
+        resetSearchFilters()
+        if (stack.lastOrNull() is Screen.Search) stack.removeAt(stack.size - 1)
+        show(Screen.Search("", p.name))
+    }
+
+    /** The list of packs: tap one to search it, long-press to edit or delete. */
+    private fun packsDialog() {
+        val l = packs()
+        val items = l.map { it.name + "\n   " + it.terms.joinToString(", ") } + tr("+ New pack…", "+ Yeni paket…")
+        val dlg = android.app.AlertDialog.Builder(this).setTitle(tr("Query packs", "Arama paketleri"))
+            .setItems(items.toTypedArray()) { _, i -> if (i < l.size) runPack(l[i]) else editPack(null) }
+            .setNegativeButton(tr("Close", "Kapat"), null)
+            .create()
+        dlg.listView.setOnItemLongClickListener { _, _, i, _ ->
+            if (i < l.size) { dlg.dismiss(); packMenu(l[i]) }
+            true
+        }
+        dlg.show()
+        if (l.isNotEmpty()) android.widget.Toast.makeText(this, tr("Long-press a pack to edit it", "Düzenlemek için pakete basılı tutun"), android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun packMenu(p: Pack) {
+        android.app.AlertDialog.Builder(this).setTitle(p.name)
+            .setItems(arrayOf(tr("Search", "Ara"), tr("Edit", "Düzenle"), tr("Delete", "Sil"))) { _, k ->
+                when (k) {
+                    0 -> runPack(p)
+                    1 -> editPack(p)
+                    else -> android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"))
+                        .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
+                            savePacks(packs().filterNot { it.name == p.name })
+                            if ((stack.lastOrNull() as? Screen.Search)?.pack == p.name) back()
+                        }
+                        .setNegativeButton(tr("Cancel", "İptal"), null).show()
+                }
+            }.show()
+    }
+
+    /** Create ([old] = null) or change a pack. [add] pre-fills one more name (from "Add to pack"). */
+    private fun editPack(old: Pack?, add: String? = null) {
+        val name = EditText(this).apply {
+            setSingleLine(); hint = tr("Pack name, e.g. Shops - common", "Paket adı, ör. Marketler - yaygın")
+            setText(old?.name ?: "")
+        }
+        val terms = EditText(this).apply {
+            hint = tr("One name per line or comma-separated:\na101, migros, bim, şok", "Her satıra bir ad ya da virgülle ayırın:\na101, migros, bim, şok")
+            minLines = 3; gravity = Gravity.TOP
+            setText(((old?.terms ?: emptyList()) + listOfNotNull(add)).distinct().joinToString("\n"))
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
+            addView(name); addView(terms)
+            addView(text(tr("Matches whole words in place names and brands, so “şok” won't find “sokak”.",
+                "Yer adlarında ve markalarda tam kelime arar; “şok” “sokak”ı bulmaz."), 12f, C.DIM).apply { setPadding(dp(4), dp(6), dp(4), 0) })
+        }
+        android.app.AlertDialog.Builder(this).setTitle(if (old == null) tr("New pack", "Yeni paket") else tr("Edit pack", "Paketi düzenle")).setView(box)
+            .setPositiveButton(tr("Save", "Kaydet")) { _, _ ->
+                val t = terms.text.toString().split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                val n = name.text.toString().trim().ifEmpty { t.take(3).joinToString(", ") }
+                if (t.isEmpty()) return@setPositiveButton
+                val l = packs().toMutableList()
+                val at = l.indexOfFirst { it.name == (old?.name ?: n) }.takeIf { it >= 0 }
+                l.removeAll { it.name == n || it.name == old?.name }
+                l.add((at ?: 0).coerceAtMost(l.size), Pack(n, t))
+                savePacks(l)
+                runPack(Pack(n, t))
+            }
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
+        name.requestFocus()
+    }
+
+    /** Adds a typed search to a pack (or a new one). */
+    private fun addToPack(q: String) {
+        val l = packs()
+        val items = l.map { it.name } + tr("+ New pack…", "+ Yeni paket…")
+        android.app.AlertDialog.Builder(this).setTitle(tr("Add “$q” to…", "“$q” şuna ekle…"))
+            .setItems(items.toTypedArray()) { _, i ->
+                if (i >= l.size) { editPack(null, q); return@setItems }
+                val p = l[i]
+                savePacks(l.map { if (it === p) Pack(p.name, (p.terms + q).distinct()) else it })
+                android.widget.Toast.makeText(this, tr("Added to ${p.name}", "${p.name} paketine eklendi"), android.widget.Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(tr("Cancel", "İptal"), null).show()
     }
 
     // a getter, so the names follow the language chosen after the activity was created
@@ -942,17 +1091,20 @@ class MainActivity : Activity() {
     )
 
     /** Toggle chips for what the search looks for, plus a list to pick place types. */
-    private fun searchFilters(kinds: Int, cats: Set<Int>?): View {
-        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+    private fun searchFilters(kinds: Int, cats: Set<Int>?, pack: Pack?, q: String): View {
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(2), 0, dp(4)) }
-        for ((label, bit) in listOf(tr("Lines", "Hatlar") to Store.Kinds.LINES, tr("Stops", "Duraklar") to Store.Kinds.STOPS,
-            tr("Places", "Yerler") to Store.Kinds.PLACES, tr("Streets", "Sokaklar") to Store.Kinds.STREETS)) {
-            val on = kinds and bit != 0
-            bar.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.DIM) {
-                val k = kinds xor bit
-                prefs.edit().putInt("sk", if (k == 0) Store.Kinds.ALL else k).apply()
-                render()
-            }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
+        if (pack != null) {
+            bar.addView(button(tr("Edit pack", "Paketi düzenle"), C.CARD, C.TEXT) { editPack(pack) }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
+        } else {
+            for ((label, bit) in listOf(tr("Lines", "Hatlar") to Store.Kinds.LINES, tr("Stops", "Duraklar") to Store.Kinds.STOPS,
+                tr("Places", "Yerler") to Store.Kinds.PLACES, tr("Streets", "Sokaklar") to Store.Kinds.STREETS)) {
+                val on = kinds and bit != 0
+                bar.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.DIM) {
+                    val k = kinds xor bit
+                    searchKinds = if (k == 0) Store.Kinds.ALL else k
+                    render()
+                }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
+            }
         }
         val placeCats = placeCats
         val n = cats?.size ?: placeCats.size
@@ -962,12 +1114,13 @@ class MainActivity : Activity() {
                 .setMultiChoiceItems(placeCats.map { it.second }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
                 .setPositiveButton(tr("Apply", "Uygula")) { _, _ ->
                     val sel = placeCats.indices.filter { checked[it] }.map { placeCats[it].first }
-                    prefs.edit().putString("sc", if (sel.size == placeCats.size) "*" else sel.joinToString(",")).apply()
+                    searchCats = if (sel.size == placeCats.size) null else sel.toSet()
                     render()
                 }
-                .setNeutralButton(tr("All", "Tümü")) { _, _ -> prefs.edit().putString("sc", "*").apply(); render() }
+                .setNeutralButton(tr("All", "Tümü")) { _, _ -> searchCats = null; render() }
                 .setNegativeButton(tr("Cancel", "İptal"), null).show()
-        })
+        }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
+        if (pack == null && q.isNotBlank()) bar.addView(button(tr("+ Pack", "+ Paket"), C.CARD, C.TEXT) { addToPack(q.trim()) })
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
     }
 

@@ -13,8 +13,8 @@ android {
         applicationId = "app.localmusic"
         minSdk = 30 // MediaStore write/trash consent requests (Android 11+)
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = "1.9"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

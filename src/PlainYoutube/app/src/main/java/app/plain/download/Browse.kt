@@ -417,6 +417,22 @@ object Browse {
         return d[y.length] <= maxOf(2, minOf(x.length, y.length) / 5)
     }
 
+    /**
+     * Channels YouTube's channel search leaves out: from a Turkish IP a legally blocked channel ("Foşix Erlik") is
+     * missing from channel results in every `gl` region (verified 2026-11-26), while its videos are still found and
+     * name it as their owner. Owners of [videos] whose name matches [query] (and aren't in [have]) become channel rows.
+     */
+    fun missingChannels(query: String, videos: List<Item>, have: Collection<String>): List<Item> {
+        val q = fold(query)
+        return videos.asSequence()
+            .filter { it.isVideo && it.channelId != null && it.channelId !in have && it.channel.isNotEmpty() }
+            // a short query inside a long name ("music" in "XYZ Music") isn't the channel someone asked for
+            .filter { similarName(query, it.channel) && q.length * 2 >= fold(it.channel).length }
+            .distinctBy { it.channelId }.take(3)
+            .map { Item(IKind.CHANNEL, it.channelId!!, it.channel, count = tr("Missing from YouTube's channel search · found by its videos", "YouTube kanal aramasında yok · videolarından bulundu")) }
+            .toList()
+    }
+
     /** YouTube's own message for a missing/unavailable page (alerts), or null. */
     fun alert(o: JSONObject): String? {
         val a = o.optJSONArray("alerts") ?: return null
