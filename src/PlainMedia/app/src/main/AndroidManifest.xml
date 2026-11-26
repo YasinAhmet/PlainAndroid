@@ -25,6 +25,7 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -36,7 +37,47 @@
             android:name=".SpotifyActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="false"
-            android:label="Plain Spotify"
-            android:taskAffinity="${applicationId}.spotify" />
+            android:launchMode="singleTop" />
+        <!-- intents from other apps: handed to the tab inside the app's one task (app.plain.hub.ForwardActivity) -->
+        <activity
+            android:name="app.plain.hub.ForwardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+        <!-- "Open with" for local audio files (content:// and file:// only) and "open the music app": the Music tab -->
+        <activity-alias
+            android:name="app.plain.hub.OpenMusic"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="music" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.APP_MUSIC" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="application/ogg" />
+                <data android:mimeType="application/x-flac" />
+            </intent-filter>
+        </activity-alias>
+        <!-- YouTube app / browser: Share -> the Youtube tab -->
+        <activity-alias
+            android:name="app.plain.hub.ShareToYoutube"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="youtube" />
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

@@ -31,18 +31,11 @@
     <application>
 
         <activity
-            android:label="@string/setup_app_name"
-            android:taskAffinity="${applicationId}.setup"
             android:theme="@style/setup_SetupTheme"
             android:name=".SetupActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode">
-            <!-- "Check for updates" in any Plain app (see app.plain.update.PlainUpdate). -->
-            <intent-filter>
-                <action android:name="app.plain.setup.UPDATE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
         </activity>
 
         <receiver

@@ -18,13 +18,11 @@
     <application>
 
         <activity
-            android:label="@string/map_app_name"
-            android:taskAffinity="${applicationId}.istanbul"
             android:theme="@style/map_AppTheme"
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize" />
 
         <service
@@ -38,10 +36,8 @@
             android:name=".AnkaraActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="false"
-            android:label="Plain Ankara"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:process=":ankara"
-            android:taskAffinity="${applicationId}.ankara"
             android:theme="@style/map_AppTheme"
             android:windowSoftInputMode="adjustResize" />
 

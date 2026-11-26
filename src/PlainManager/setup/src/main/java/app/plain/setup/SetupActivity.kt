@@ -84,6 +84,8 @@ class SetupActivity : Activity(), Installer.Listener {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Switching to the Setup tab brings this screen back with a plain MAIN intent: nothing to do (no online check).
+        if (intent.action != PlainUpdate.ACTION) return
         setIntent(intent)
         handle(intent)
         rebuild()

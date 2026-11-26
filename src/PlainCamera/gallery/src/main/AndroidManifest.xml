@@ -18,18 +18,10 @@
     <application>
 
         <activity
-            android:label="@string/gal_app_name"
-            android:taskAffinity="${applicationId}.gallery"
             android:theme="@style/gal_AppTheme"
             android:name=".GalleryActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="true">
-            <!-- "open the gallery app" from other apps -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.APP_GALLERY" />
-            </intent-filter>
         </activity>
 
         <activity

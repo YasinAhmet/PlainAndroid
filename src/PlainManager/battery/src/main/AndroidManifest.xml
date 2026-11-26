@@ -16,8 +16,6 @@
     <application>
 
         <activity
-            android:label="@string/bat_app_name"
-            android:taskAffinity="${applicationId}.battery"
             android:theme="@style/bat_AppTheme"
             android:name=".MainActivity"
             android:exported="true"

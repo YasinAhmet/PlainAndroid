@@ -30,10 +30,11 @@ import java.io.File
 /**
  * One app made of several former apps ("tabs"): Plain Maps = Istanbul / Ankara / Trekking, and so on.
  *
- * Every tab is its own Activity in its own task (its own `taskAffinity`), so each keeps the life it had as a
- * separate app: its state, background playback, picture-in-picture, "Open with" intents. The dropdown header on
- * top ([wrap]) switches between them by bringing the other tab's task to the front. Nothing of a tab runs while
- * it is not open, except what the former app already ran in the background (a recording, playback, a sync).
+ * Every tab is its own Activity, all in the app's one task (one entry in Recents). The dropdown header on top
+ * ([wrap]) switches tabs by bringing the other tab's existing Activity to the front (FLAG_ACTIVITY_REORDER_TO_FRONT),
+ * so a tab is never started twice and keeps its state. Intents from other apps come in through [ForwardActivity]
+ * aliases, which do the same. Nothing of a tab runs while it is not open, except what the former app already ran in
+ * the background (a recording, playback, a sync). Back from a tab returns to the tab used before it.
  *
  * The launcher icon opens [HubActivity], which forwards to the last used tab (the first tab the first time).
  * State lives in small files under files/hub/, not SharedPreferences: some apps run tabs in separate processes,
@@ -102,24 +103,44 @@ object Hub {
     fun open(from: Context, key: String, forward: Intent? = null) {
         val t = tab(key) ?: return
         setLast(from, key)
+        val first = read(from, TASKS_DONE) == null
+        if (first) { write(from, TASKS_DONE, "1"); closeOtherTasks(from, (from as? Activity)?.taskId ?: -1) }
         val i = if (Migrate.needsDecision(from, t)) {
             Intent(from, ImportActivity::class.java).putExtra(ImportActivity.EXTRA_TAB, key).apply {
                 if (forward != null) putExtra(ImportActivity.EXTRA_FORWARD, forward)
             }
         } else tabIntent(from, t, forward)
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         from.startActivity(i)
         if (from is Activity) {
             @Suppress("DEPRECATION")
             from.overridePendingTransition(0, 0)
+            // a tab still in an old per-tab task leaves it, so every tab ends up in the one task
+            if (first && from !is HubActivity && from !is ForwardActivity) from.finishAndRemoveTask()
         }
+    }
+
+    /**
+     * Plain Manager 2.0, Plain Maps 3.0, Plain Camera 2.0 and Plain Media 3.0 gave every tab its own task. Their
+     * tasks survive an update, so the first switch after it closes all of the app's other tasks (once).
+     */
+    private const val TASKS_DONE = "one-task"
+
+    private fun closeOtherTasks(ctx: Context, keep: Int) {
+        val am = ctx.getSystemService(android.app.ActivityManager::class.java) ?: return
+        for (task in try { am.appTasks } catch (_: Exception) { emptyList() }) try {
+            val info = task.taskInfo
+            @Suppress("DEPRECATION")
+            val id = if (Build.VERSION.SDK_INT >= 29) info.taskId else info.persistentId
+            if (id != keep) task.finishAndRemoveTask()
+        } catch (_: Exception) {}
     }
 
     /** The tab's Activity, or [forward] as it was (an Activity of the tab reached directly, e.g. "Open with"). */
     internal fun tabIntent(ctx: Context, t: Tab, forward: Intent?): Intent {
         val i = if (forward != null) Intent(forward) else Intent(Intent.ACTION_MAIN)
         if (i.component == null) i.setClassName(ctx.packageName, t.cls)
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         return i
     }
 

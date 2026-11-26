@@ -22,11 +22,46 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- intents from other apps: handed to the tab inside the app's one task (app.plain.hub.ForwardActivity) -->
+        <activity
+            android:name="app.plain.hub.ForwardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+        <!-- "Open with" / "Share to" for GPX, KML and KMZ files: the Trekking tab -->
+        <activity-alias
+            android:name="app.plain.hub.OpenTrack"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="trekking" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/gpx+xml" />
+                <data android:mimeType="application/gpx" />
+                <data android:mimeType="application/vnd.google-earth.kml+xml" />
+                <data android:mimeType="application/vnd.google-earth.kmz" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/gpx+xml" />
+                <data android:mimeType="application/gpx" />
+                <data android:mimeType="application/vnd.google-earth.kml+xml" />
+                <data android:mimeType="application/vnd.google-earth.kmz" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

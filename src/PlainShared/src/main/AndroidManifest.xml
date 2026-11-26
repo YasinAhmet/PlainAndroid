@@ -7,9 +7,16 @@
         <activity
             android:name="app.plain.migrate.ImportActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <!-- Intents from other apps, handed to a tab in the app's one task. Each app's manifest declares
+             activity-aliases of it with <meta-data android:name="app.plain.hub.TAB" android:value="<tab key>" />. -->
+        <activity
+            android:name="app.plain.hub.ForwardActivity"
             android:excludeFromRecents="true"
             android:exported="false"
-            android:taskAffinity="${applicationId}.import"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
     </application>
 </manifest>

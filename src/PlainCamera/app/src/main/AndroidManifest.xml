@@ -18,11 +18,47 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- intents from other apps: handed to the tab inside the app's one task (app.plain.hub.ForwardActivity) -->
+        <activity
+            android:name="app.plain.hub.ForwardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+        <!-- "open the camera app" (captures for other apps stay on CameraActivity itself) -->
+        <activity-alias
+            android:name="app.plain.hub.OpenCamera"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="camera" />
+            <intent-filter>
+                <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.VIDEO_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+        <!-- "open the gallery app" -->
+        <activity-alias
+            android:name="app.plain.hub.OpenGallery"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="gallery" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.APP_GALLERY" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

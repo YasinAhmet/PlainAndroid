@@ -24,22 +24,14 @@
     <application>
 
         <activity
-            android:label="@string/yt_app_name"
-            android:taskAffinity="${applicationId}.youtube"
             android:theme="@style/yt_AppTheme"
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- YouTube app / browser: Share -> Plain Youtube -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
         </activity>
 
 

@@ -17,11 +17,31 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- intents from other apps: handed to the tab inside the app's one task (app.plain.hub.ForwardActivity) -->
+        <activity
+            android:name="app.plain.hub.ForwardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+        <!-- "Check for updates" in any Plain app (see app.plain.update.PlainUpdate) -->
+        <activity-alias
+            android:name="app.plain.hub.UpdateRequest"
+            android:exported="true"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="setup" />
+            <intent-filter>
+                <action android:name="app.plain.setup.UPDATE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

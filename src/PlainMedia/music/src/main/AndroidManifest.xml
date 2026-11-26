@@ -21,31 +21,14 @@
     <application>
 
         <activity
-            android:label="@string/mus_app_name"
-            android:taskAffinity="${applicationId}.music"
             android:theme="@style/mus_AppTheme"
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.APP_MUSIC" />
-            </intent-filter>
-            <!-- "Open with LocalMusic" for local audio files (File Manager, WhatsApp voice notes...).
-                 Only content:// and file:// — no http(s): the app stays offline. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:mimeType="audio/*" />
-                <data android:mimeType="application/ogg" />
-                <data android:mimeType="application/x-flac" />
-            </intent-filter>
         </activity>
 
         <service
