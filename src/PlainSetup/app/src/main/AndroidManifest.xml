@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Online only when the user taps Check / Install (or another Plain app asks for its update). -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -22,8 +21,6 @@
         <package android:name="app.plain.home" />
         <package android:name="app.plain.battery" />
         <package android:name="app.plain.uninstaller" />
-        <!-- Shizuku, for quiet installs (Shiz.kt). -->
-        <package android:name="moe.shizuku.privileged.api" />
         <!-- Future Plain apps: every one has a launcher icon. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -57,15 +54,5 @@
         <receiver
             android:name=".InstallReceiver"
             android:exported="false" />
-
-        <!-- Shizuku hands its binder to the app through this provider (as documented by Shizuku). -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
-            tools:ignore="ExportedContentProvider" />
     </application>
 </manifest>
