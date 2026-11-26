@@ -18,6 +18,11 @@
     <!-- held by MediaPlayer only while audio is actually playing -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- "Plain Music moved": opens Plain Media when installed -->
+    <queries>
+        <package android:name="app.plain.download" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="false"
@@ -70,5 +75,11 @@
         <receiver
             android:name=".ControlReceiver"
             android:exported="false" />
+        <!-- Plain Media copies this app's data through this provider (same signing key only, read only).
+             See app.plain.migrate.MigrateProvider. -->
+        <provider
+            android:name="app.plain.migrate.MigrateProvider"
+            android:authorities="${applicationId}.migrate"
+            android:exported="true" />
     </application>
 </manifest>

@@ -1,0 +1,23 @@
+<resources>
+    <style name="yt_AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">#000000</item>
+        <item name="android:colorAccent">#E6B422</item>
+        <item name="android:colorPrimary">#000000</item>
+        <item name="android:textColorPrimary">#E4E4E4</item>
+        <item name="android:textColorSecondary">#A6A6A6</item>
+        <item name="android:textColorHint">#747474</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:alertDialogTheme">@style/yt_Dialog</item>
+    </style>
+
+    <style name="yt_Dialog" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/yt_dialog_bg</item>
+        <item name="android:colorBackground">#000000</item>
+        <item name="android:colorAccent">#E6B422</item>
+        <item name="android:textColorPrimary">#E4E4E4</item>
+        <item name="android:textColorSecondary">#A6A6A6</item>
+    </style>
+</resources>

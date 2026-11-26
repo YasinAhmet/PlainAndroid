@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Only the Sync button uses the network, and only over Wi-Fi (see Net.kt). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Only while the location button is on and the app is on screen. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- A sync keeps running with the screen off; nothing runs in the background otherwise. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
+    <application>
+
+        <activity
+            android:label="@string/map_app_name"
+            android:taskAffinity="${applicationId}.istanbul"
+            android:theme="@style/map_AppTheme"
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".SyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- The Ankara tab: the same map code in its own process, so its City, data and caches never mix with
+             Istanbul's (City.id is set per process, see MapsApp). Data in files/ankara/, settings in "app_ankara". -->
+        <activity
+            android:name=".AnkaraActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:label="Plain Ankara"
+            android:launchMode="singleTask"
+            android:process=":ankara"
+            android:taskAffinity="${applicationId}.ankara"
+            android:theme="@style/map_AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".AnkaraSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:process=":ankara" />
+    </application>
+</manifest>

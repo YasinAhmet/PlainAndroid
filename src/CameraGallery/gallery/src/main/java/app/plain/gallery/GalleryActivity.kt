@@ -194,6 +194,7 @@ class GalleryActivity : Activity() {
             ins
         }
         setContentView(root)
+        app.plain.migrate.PlainMoved.notice(this, "Plain Gallery", "Plain Camera", "app.plain.camera", "gallery", "Gallery", "Galeri")
         updateBars()
         contentResolver.registerContentObserver(Library.watch, true, observer)
         if (!hasRead()) requestPermissions(readPerms(), 1)

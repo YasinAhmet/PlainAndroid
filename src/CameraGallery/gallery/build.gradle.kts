@@ -13,8 +13,8 @@ android {
         applicationId = "app.plain.gallery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

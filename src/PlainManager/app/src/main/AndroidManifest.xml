@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain Manager: Setup, Battery and Uninstaller tabs (the tab modules bring their activities and permissions). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The Battery tab needs Android 10; on older phones it is hidden (Hub tab minSdk) and the rest still works. -->
+    <uses-sdk tools:overrideLibrary="app.plain.battery" />
+    <application
+        android:name=".ManagerApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <!-- the launcher icon: opens the last used tab -->
+        <activity
+            android:name="app.plain.hub.HubActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

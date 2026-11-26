@@ -1,0 +1,4 @@
+<resources>
+    <string name="map_app_name">Plain Istanbul</string>
+    <color name="map_ic_bg">#0E2A33</color>
+</resources>

@@ -6,4 +6,5 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "PlainMaps"
-include(":app")
+include(":app", ":citymap", ":trekking", ":shared")
+project(":shared").projectDir = file("../PlainShared")

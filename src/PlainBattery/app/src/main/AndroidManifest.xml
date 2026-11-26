@@ -13,6 +13,11 @@
     <!-- Only to turn UIDs into app names in the ranking. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- "Plain Battery moved": opens Plain Manager when installed -->
+    <queries>
+        <package android:name="app.plain.setup" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -43,5 +48,11 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- Plain Manager copies this app's data through this provider (same signing key only, read only).
+             See app.plain.migrate.MigrateProvider. -->
+        <provider
+            android:name="app.plain.migrate.MigrateProvider"
+            android:authorities="${applicationId}.migrate"
+            android:exported="true" />
     </application>
 </manifest>

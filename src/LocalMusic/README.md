@@ -1,5 +1,9 @@
 # LocalMusic
 
+> **Frozen (2026-11-26).** This app is now part of Plain Media (Music tab, A:\Projects\PlainMedia\music). Work happens there. This project only
+> builds the last release of the old app, which hands its data to the new one (`app/plain/migrate/MigrateProvider.kt`,
+> copied from A:\Projects\PlainShared\bridge) and tells the user it moved (`PlainMoved.kt`).
+
 Offline music player for Android that plays **only local files**. Built for hiking with Bluetooth headphones
 and airplane mode on: no network code, no `INTERNET` permission, no polling.
 
@@ -183,3 +187,7 @@ Empty source folders are left behind (MediaStore cannot remove directories).
 | `PlaybackService.kt` | App class, foreground service + notification, receivers |
 | `MainActivity.kt`, `NowPlaying.kt`, `Ui.kt` | UI |
 | `Organizer.kt`, `OrganizerView.kt` | Organizer engine, plan screen, trash screen |
+
+## Share (1.10)
+
+The song menu (long-press a song, or its menu in Now playing) has **Share file…** / **Share video…**: Android's share sheet gets the file itself (its MediaStore `content://` URI with read access granted to the chosen app). LocalMusic still has no internet permission; the app you pick does the sending. Files another app handed over as `file://` can't be shared this way and don't get the entry.

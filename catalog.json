@@ -2,81 +2,170 @@
   "repo": "YasinAhmet/PlainAndroid",
   "apps": [
     {
-      "key": "music", "name": "Plain Music", "package": "app.localmusic", "file": "PlainMusic.apk",
-      "project": "LocalMusic", "src": "LocalMusic", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Offline music player for the songs on your phone. No internet at all; light on battery.",
-      "summary_tr": "İnternetsiz müzik çalar: telefonunuzdaki şarkılar için. Hiç internet kullanmaz; pili az yorar."
+      "key": "setup",
+      "name": "Plain Manager",
+      "package": "app.plain.setup",
+      "file": "PlainSetup.apk",
+      "project": "PlainManager",
+      "src": "PlainManager",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Installs and updates the Plain apps, plus Battery (battery log) and Uninstaller (bulk removal, also of preinstalled apps with Shizuku) tabs. Formerly Plain Setup.",
+      "summary_tr": "Plain uygulamalarını yükler ve günceller; ayrıca Pil (pil günlüğü) ve Kaldırıcı (toplu kaldırma, Shizuku ile hazır yüklü uygulamalar da) sekmeleri. Eski adı Plain Setup.",
+      "assets": "setup/src/main/assets"
     },
     {
-      "key": "gallery", "name": "Plain Gallery", "package": "app.plain.gallery", "file": "PlainGallery.apk",
-      "project": "CameraGallery", "src": "CameraGallery", "buildFile": "gallery/build.gradle.kts",
-      "tasks": [":gallery:testDebugUnitTest", ":gallery:assembleRelease"], "apk": "gallery/build/outputs/apk/release/gallery-release.apk",
-      "summary": "Photos and videos page by page, newest first. Offline.",
-      "summary_tr": "Fotoğraflar ve videolar sayfa sayfa, en yeniler önce. İnternetsiz."
+      "key": "maps",
+      "name": "Plain Maps",
+      "package": "app.plain.maps",
+      "file": "PlainMaps.apk",
+      "project": "PlainMaps",
+      "src": "PlainMaps",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Offline maps in three tabs: Istanbul and Ankara bus, metro and ferry lines with stops and timetables, and Trekking (plan hikes, offline maps, GPS trail recording). Each city's first sync needs Wi-Fi.",
+      "summary_tr": "Üç sekmede çevrimdışı haritalar: İstanbul ve Ankara otobüs, metro ve vapur hatları duraklar ve saatlerle, ve Trekking (yürüyüş planı, çevrimdışı harita, GPS ile rota kaydı). Her şehrin ilk eşitlemesi Wi-Fi ister."
     },
     {
-      "key": "camera", "name": "Plain Camera", "package": "app.plain.camera", "file": "PlainCamera.apk",
-      "project": "CameraGallery", "src": "CameraGallery", "buildFile": "camera/build.gradle.kts",
-      "tasks": [":camera:testDebugUnitTest", ":camera:assembleRelease"], "apk": "camera/build/outputs/apk/release/camera-release.apk",
-      "summary": "Simple camera with an advanced mode. Offline. Keep your phone's own camera installed too.",
-      "summary_tr": "Gelişmiş modu olan sade kamera. İnternetsiz. Telefonunuzun kendi kamerasını da silmeyin."
+      "key": "camera",
+      "name": "Plain Camera",
+      "package": "app.plain.camera",
+      "file": "PlainCamera.apk",
+      "project": "PlainCamera",
+      "src": "PlainCamera",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Camera and gallery in one app (tabs on top): a simple camera with an advanced mode, and your photos and videos page by page. Offline. Keep your phone's own camera installed too.",
+      "summary_tr": "Kamera ve galeri tek uygulamada (üstte sekmeler): gelişmiş modu olan sade kamera ve fotoğraflarınız, videolarınız sayfa sayfa. İnternetsiz. Telefonunuzun kendi kamerasını da silmeyin."
     },
     {
-      "key": "trail", "name": "Plain Trekking", "package": "app.trekmap.trail", "file": "TrekmapTrail.apk",
-      "project": "Trekmap/mobile", "src": "TrekmapTrail", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Hiking: plan routes, download offline maps on Wi-Fi, record your trail with GPS.",
-      "summary_tr": "Doğa yürüyüşü: rota planlayın, Wi-Fi'da çevrimdışı harita indirin, izinizi GPS ile kaydedin."
+      "key": "media",
+      "name": "Plain Media",
+      "package": "app.plain.download",
+      "file": "PlainMedia.apk",
+      "project": "PlainMedia",
+      "src": "PlainMedia",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Music, Youtube and (later) Spotify in tabs: an offline player for the songs on your phone, and YouTube search, watch and download (unofficial: may need an update when YouTube changes).",
+      "summary_tr": "Sekmelerde Müzik, Youtube ve (ileride) Spotify: telefonunuzdaki şarkılar için internetsiz çalar ve YouTube'da arama, izleme, indirme (resmî değil: YouTube değişince güncelleme gerekebilir)."
     },
     {
-      "key": "maps", "name": "Plain Istanbul Map", "package": "app.plain.maps", "file": "PlainMaps.apk",
-      "project": "PlainMaps", "src": "PlainMaps", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testIstanbulDebugUnitTest", ":app:assembleIstanbulRelease"], "apk": "app/build/outputs/apk/istanbul/release/app-istanbul-release.apk",
-      "summary": "Istanbul only: offline bus, metro and ferry line map with stops and timetables. First sync needs Wi-Fi (~350 MB).",
-      "summary_tr": "Yalnızca İstanbul: otobüs, metro ve vapur hatlarının duraklı, saatli çevrimdışı haritası. İlk eşitleme Wi-Fi ister (~350 MB)."
-    },
-    {
-      "key": "ankara", "name": "Plain Ankara Map", "package": "app.plain.maps.ankara", "file": "PlainAnkaraMap.apk", "enabled": false,
-      "project": "PlainMaps", "src": "PlainMaps", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testAnkaraDebugUnitTest", ":app:assembleAnkaraRelease"], "apk": "app/build/outputs/apk/ankara/release/app-ankara-release.apk",
-      "summary": "Ankara only: offline EGO bus and rail line map with stops and timetables. First sync needs Wi-Fi.",
-      "summary_tr": "Yalnızca Ankara: EGO otobüs ve raylı sistem hatlarının duraklı, saatli çevrimdışı haritası. İlk eşitleme Wi-Fi ister."
-    },
-    {
-      "key": "youtube", "name": "Plain Youtube", "package": "app.plain.download", "file": "PlainYoutube.apk",
-      "project": "PlainDownload", "src": "PlainYoutube", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Search, watch and download YouTube videos and music. Unofficial: may need an update when YouTube changes.",
-      "summary_tr": "YouTube videolarını ve müziklerini arayın, izleyin, indirin. Resmî değil: YouTube değişince güncelleme gerekebilir."
-    },
-    {
-      "key": "home", "name": "Plain Home", "package": "app.plain.home", "file": "PlainHome.apk",
-      "project": "PlainHome", "src": "PlainHome", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
+      "key": "home",
+      "name": "Plain Home",
+      "package": "app.plain.home",
+      "file": "PlainHome.apk",
+      "project": "PlainHome",
+      "src": "PlainHome",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
       "summary": "Minimal home screen with app sections. Optional; you can switch back to your old home screen any time.",
       "summary_tr": "Bölümlü, sade ana ekran. İsteğe bağlı; eski ana ekranınıza her an dönebilirsiniz."
     },
     {
-      "key": "battery", "name": "Plain Battery", "package": "app.plain.battery", "file": "PlainBattery.apk",
-      "project": "PlainBattery", "src": "PlainBattery", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Battery log. Per-app use needs a one-time adb command from a computer (the app shows it).",
-      "summary_tr": "Pil günlüğü. Uygulama başına kullanım için bilgisayardan bir kez adb komutu gerekir (uygulama gösterir)."
+      "key": "music",
+      "name": "Plain Music",
+      "package": "app.localmusic",
+      "file": "PlainMusic.apk",
+      "project": "LocalMusic",
+      "src": "LocalMusic",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Now part of Plain Media (Music tab). Its last version hands your playlists and settings to Plain Media.",
+      "summary_tr": "Artık Plain Media'nın Müzik sekmesi. Son sürümü çalma listelerinizi ve ayarlarınızı Plain Media'ya aktarır.",
+      "mergedInto": "media"
     },
     {
-      "key": "uninstaller", "name": "Plain Uninstaller", "package": "app.plain.uninstaller", "file": "PlainUninstaller.apk",
-      "project": "PlainUninstaller", "src": "PlainUninstaller", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Declutter: remove apps in bulk, including preinstalled ones (with Shizuku). Use at your own risk; restorable.",
-      "summary_tr": "Toplu temizlik: uygulamaları, hazır yüklü gelenler dahil (Shizuku ile), toplu kaldırın. Sorumluluk sizde; geri alınabilir."
+      "key": "gallery",
+      "name": "Plain Gallery",
+      "package": "app.plain.gallery",
+      "file": "PlainGallery.apk",
+      "project": "CameraGallery",
+      "src": "CameraGallery",
+      "buildFile": "gallery/build.gradle.kts",
+      "tasks": [
+        ":gallery:testDebugUnitTest",
+        ":gallery:assembleRelease"
+      ],
+      "apk": "gallery/build/outputs/apk/release/gallery-release.apk",
+      "summary": "Now part of Plain Camera (Gallery tab). Its last version hands its categories and settings to Plain Camera.",
+      "summary_tr": "Artık Plain Camera'nın Galeri sekmesi. Son sürümü kategorilerini ve ayarlarını Plain Camera'ya aktarır.",
+      "mergedInto": "camera"
     },
     {
-      "key": "setup", "name": "Plain Setup", "package": "app.plain.setup", "file": "PlainSetup.apk",
-      "project": "PlainSetup", "src": "PlainSetup", "buildFile": "app/build.gradle.kts",
-      "tasks": [":app:testDebugUnitTest", ":app:assembleRelease"], "apk": "app/build/outputs/apk/release/app-release.apk",
-      "summary": "Installs and updates the Plain apps.",
-      "summary_tr": "Plain uygulamalarını yükler ve günceller."
+      "key": "trail",
+      "name": "Plain Trekking",
+      "package": "app.trekmap.trail",
+      "file": "TrekmapTrail.apk",
+      "project": "Trekmap/mobile",
+      "src": "TrekmapTrail",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Now part of Plain Maps (Trekking tab). Its last version hands your plans, trails and offline maps to Plain Maps.",
+      "summary_tr": "Artık Plain Maps'in Trekking sekmesi. Son sürümü planlarınızı, rotalarınızı ve çevrimdışı haritalarınızı Plain Maps'e aktarır.",
+      "mergedInto": "maps"
+    },
+    {
+      "key": "battery",
+      "name": "Plain Battery",
+      "package": "app.plain.battery",
+      "file": "PlainBattery.apk",
+      "project": "PlainBattery",
+      "src": "PlainBattery",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Now part of Plain Manager (Battery tab). Its last version hands its battery history to Plain Manager.",
+      "summary_tr": "Artık Plain Manager'ın Pil sekmesi. Son sürümü pil geçmişini Plain Manager'a aktarır.",
+      "mergedInto": "setup"
+    },
+    {
+      "key": "uninstaller",
+      "name": "Plain Uninstaller",
+      "package": "app.plain.uninstaller",
+      "file": "PlainUninstaller.apk",
+      "project": "PlainUninstaller",
+      "src": "PlainUninstaller",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Now part of Plain Manager (Uninstaller tab). Its last version hands its list of removed apps to Plain Manager.",
+      "summary_tr": "Artık Plain Manager'ın Kaldırıcı sekmesi. Son sürümü kaldırılan uygulamalar listesini Plain Manager'a aktarır.",
+      "mergedInto": "setup"
     }
   ]
 }

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain Media: Music, Youtube and Spotify tabs (the tab modules bring their activities, services and permissions).
+  The Music tab itself never goes online; the network is used only by the Youtube tab, when the user fetches,
+  plays or downloads something.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- the former LocalMusic / Plain Music, to copy its playlists once (package visibility, Android 11+) -->
+    <queries>
+        <package android:name="app.localmusic" />
+    </queries>
+    <application
+        android:name=".MediaApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/yt_data_extraction"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/yt_network_security"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <!-- the launcher icon: opens the last used tab -->
+        <activity
+            android:name="app.plain.hub.HubActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- placeholder tab (Plain Spotify comes later) -->
+        <activity
+            android:name=".SpotifyActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:label="Plain Spotify"
+            android:taskAffinity="${applicationId}.spotify" />
+    </application>
+</manifest>

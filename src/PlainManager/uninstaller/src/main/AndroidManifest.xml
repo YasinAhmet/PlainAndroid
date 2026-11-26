@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- No INTERNET: this app never goes online. Updates go through Plain Setup (PlainUpdate.kt). -->
+    <!-- See every installed app, so they can be listed and removed (sideloaded app, no Play policy). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- Android's own uninstall dialog (ACTION_UNINSTALL_PACKAGE) for user apps without Shizuku. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Only to tell the user in Setup whether Wi-Fi is connected (wireless debugging needs it). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application>
+
+        <activity
+            android:label="@string/uni_app_name"
+            android:taskAffinity="${applicationId}.uninstaller"
+            android:theme="@style/uni_AppTheme"
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density">
+        </activity>
+
+        <!-- Shizuku hands its binder to the app through this provider (as documented by Shizuku). -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    </application>
+</manifest>

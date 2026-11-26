@@ -1,0 +1,65 @@
+{
+  "repo": "YasinAhmet/PlainAndroid",
+  "apps": [
+    {
+      "key": "maps",
+      "name": "Plain Maps",
+      "package": "app.plain.maps",
+      "versionCode": 8,
+      "versionName": "3.0",
+      "file": "PlainMaps.apk",
+      "tag": "maps-v3.0",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/maps-v3.0/PlainMaps.apk",
+      "size": 352296,
+      "sha256": "759fc891e0e840b4ab39c8070a499d2733449adf9f30e9f12d25e998fee9acfb",
+      "minSdk": 26,
+      "summary": "Offline maps in three tabs: Istanbul and Ankara bus, metro and ferry lines with stops and timetables, and Trekking (plan hikes, offline maps, GPS trail recording). Each city's first sync needs Wi-Fi.",
+      "summary_tr": "Üç sekmede çevrimdışı haritalar: İstanbul ve Ankara otobüs, metro ve vapur hatları duraklar ve saatlerle, ve Trekking (yürüyüş planı, çevrimdışı harita, GPS ile rota kaydı). Her şehrin ilk eşitlemesi Wi-Fi ister."
+    },
+    {
+      "key": "camera",
+      "name": "Plain Camera",
+      "package": "app.plain.camera",
+      "versionCode": 6,
+      "versionName": "2.0",
+      "file": "PlainCamera.apk",
+      "tag": "camera-v2.0",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/camera-v2.0/PlainCamera.apk",
+      "size": 290420,
+      "sha256": "4109022b4c1b242c64532ed483e45e51cc763b894faf4d1cceadf60e4523d99a",
+      "minSdk": 29,
+      "summary": "Camera and gallery in one app (tabs on top): a simple camera with an advanced mode, and your photos and videos page by page. Offline. Keep your phone's own camera installed too.",
+      "summary_tr": "Kamera ve galeri tek uygulamada (üstte sekmeler): gelişmiş modu olan sade kamera ve fotoğraflarınız, videolarınız sayfa sayfa. İnternetsiz. Telefonunuzun kendi kamerasını da silmeyin."
+    },
+    {
+      "key": "media",
+      "name": "Plain Media",
+      "package": "app.plain.download",
+      "versionCode": 25,
+      "versionName": "3.0",
+      "file": "PlainMedia.apk",
+      "tag": "media-v3.0",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/media-v3.0/PlainMedia.apk",
+      "size": 872296,
+      "sha256": "c64612832b6f7950acabfdeb6b927a632b860cb9048038adb56f9326ddb086ab",
+      "minSdk": 30,
+      "summary": "Music, Youtube and (later) Spotify in tabs: an offline player for the songs on your phone, and YouTube search, watch and download (unofficial: may need an update when YouTube changes).",
+      "summary_tr": "Sekmelerde Müzik, Youtube ve (ileride) Spotify: telefonunuzdaki şarkılar için internetsiz çalar ve YouTube'da arama, izleme, indirme (resmî değil: YouTube değişince güncelleme gerekebilir)."
+    },
+    {
+      "key": "home",
+      "name": "Plain Home",
+      "package": "app.plain.home",
+      "versionCode": 5,
+      "versionName": "1.4",
+      "file": "PlainHome.apk",
+      "tag": "home-v1.4",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/home-v1.4/PlainHome.apk",
+      "size": 73556,
+      "sha256": "4096c3777df9f1c7865bc778d09368f97f35590af8c06eb067fefe8199a78df6",
+      "minSdk": 29,
+      "summary": "Minimal home screen with app sections. Optional; you can switch back to your old home screen any time.",
+      "summary_tr": "Bölümlü, sade ana ekran. İsteğe bağlı; eski ana ekranınıza her an dönebilirsiniz."
+    }
+  ]
+}

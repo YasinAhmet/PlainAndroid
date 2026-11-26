@@ -488,6 +488,8 @@ class MainActivity : Activity() {
         col.addView(mini, lpL(MATCH, WRAP).apply { leftMargin = dp(6); rightMargin = dp(6); bottomMargin = dp(6) })
 
         setContentView(root)
+
+        app.plain.migrate.PlainMoved.notice(this, "Plain Music", "Plain Media", "app.plain.download", "music", "Music", "Müzik")
         // edge-to-edge safe padding for status/navigation bars
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
@@ -1064,6 +1066,8 @@ class MainActivity : Activity() {
         }
         items += tr("Go to album", "Albüme git") to { closeNowPlaying(); Library.index.albumOf(s)?.let { openAlbum(it) } }
         items += tr("Go to artist", "Sanatçıya git") to { closeNowPlaying(); Library.index.artistOf(s)?.let { openArtist(it) } }
+        if (s.externalUri == null && s.id >= 0 || s.externalUri?.startsWith("content://") == true)
+            items += (if (s.isVideo) tr("Share video…", "Videoyu paylaş…") else tr("Share file…", "Dosyayı paylaş…")) to { shareFile(s) }
         items += tr("Details", "Ayrıntılar") to {
             confirm(s.title, listOf(
                 tr("Artist: ", "Sanatçı: ") + (s.inferredArtist?.let { tr("$it (from the folder)", "$it (klasörden)") } ?: s.artist.ifBlank { "—" }),
@@ -1076,6 +1080,24 @@ class MainActivity : Activity() {
             eraser.confirm(EraseSet.of(listOf(s)), if (s.isVideo) tr("video “${s.title}”", "video “${s.title}”") else "“${s.title}”")
         }
         menu(s.title, items)
+    }
+
+    /**
+     * Android share sheet with the file itself (its MediaStore content URI, read access granted to the receiving app).
+     * The app has no internet: whichever app the user picks does the sending.
+     */
+    private fun shareFile(s: Song) {
+        val uri = s.externalUri?.let { android.net.Uri.parse(it) } ?: Library.uri(s)
+        val type = runCatching { contentResolver.getType(uri) }.getOrNull() ?: if (s.isVideo) "video/*" else "audio/*"
+        val send = Intent(Intent.ACTION_SEND).apply {
+            this.type = type
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, s.title)
+            clipData = android.content.ClipData.newUri(contentResolver, s.title, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try { startActivity(Intent.createChooser(send, tr("Share “${s.title}”", "Paylaş: “${s.title}”"))) }
+        catch (_: Exception) { toast(tr("No app to share with", "Paylaşacak uygulama yok")) }
     }
 
     fun addToPlaylist(songs: List<Song>) {

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- "Remove the old app" after its data was copied (Android shows its own confirm dialog). -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <application>
+        <!-- Copy a former app's data before its tab opens the first time (see app.plain.migrate). -->
+        <activity
+            android:name="app.plain.migrate.ImportActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="${applicationId}.import"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+    </application>
+</manifest>

@@ -1,16 +1,21 @@
-"""Publish Plain apps: bump version, build, GitHub release, rebuild Plain Setup, sync source, push.
+"""Publish Plain apps: bump version, build, GitHub release, rebuild Plain Manager, sync source, push.
 
-    python publish.py music maps        # release these apps (+ a new Plain Setup that bundles them)
-    python publish.py all               # every enabled app
+    python publish.py maps media        # release these apps (+ a new Plain Manager that bundles them)
+    python publish.py all               # every enabled app (former apps only until their hand-over release is out)
     python publish.py all --bump        # force a new version even if the code didn't change
-    python publish.py setup             # only rebuild/release Plain Setup
+    python publish.py setup             # only rebuild/release Plain Manager (key "setup", package app.plain.setup)
     python publish.py --sync-only       # copy source into src/ and push, no releases
     options: --notes "text"  --no-push  --dry-run (build + copy only; no releases, no git)
 
 Each app's project lives next to this repo (A:/Projects/<project>, see catalog.json).
 Releases are tagged <key>-v<versionName> with one asset (<file>.apk). apps.json is the live
-catalog Plain Setup reads; Plain Setup is always released last so /releases/latest is Setup.
+catalog Plain Manager reads; it is always released last so /releases/latest is Manager (still PlainSetup.apk).
 Signing: every release build signs with A:/Projects/PlainSigning (never commit that folder).
+
+Merged apps (Plain Manager, Plain Maps, Plain Camera, Plain Media) are multi-module projects sharing
+A:/Projects/PlainShared. A former app has "mergedInto" (the key of its new home) in catalog.json: its last
+release carries the MigrateProvider bridge, apps.json marks it "merged_into", Manager lists it only while it is
+installed, and it is no longer bundled.
 """
 import argparse, datetime, hashlib, json, os, re, shutil, subprocess, sys
 
@@ -91,7 +96,7 @@ def build_app(app, live_by_key, force_bump, dry):
     bf = os.path.join(proj, app["buildFile"])
     code, name, min_sdk = read_versions(bf)
     published = live_by_key.get(app["key"], {}).get("versionCode", 0)
-    if code <= published or force_bump:
+    if code <= published:  # a version above the published one (set by hand) is already new: keep it
         new_code = max(code, published) + 1
         new_name = bump_name(name) if (published or force_bump) else name
         print(f"  version {name} ({code}) -> {new_name} ({new_code})")
@@ -104,7 +109,8 @@ def build_app(app, live_by_key, force_bump, dry):
     out = os.path.join(DIST, app["file"])
     shutil.copyfile(os.path.join(proj, app["apk"]), out)
     tag = f"{app['key']}-v{name}"
-    return {
+    extra = {"merged_into": app["mergedInto"]} if app.get("mergedInto") else {}
+    return {**extra,
         "key": app["key"], "name": app["name"], "package": app["package"],
         "versionCode": code, "versionName": name, "file": app["file"], "tag": tag,
         "url": f"https://github.com/{CAT['repo']}/releases/download/{tag}/{app['file']}",
@@ -179,7 +185,8 @@ def mirror(src, dst):
 
 
 def sync_sources(apps):
-    done = set()
+    done = {"PlainShared"}
+    mirror(os.path.join(PROJECTS, "PlainShared"), os.path.join(REPO_DIR, "src", "PlainShared"))
     for a in apps:
         if a["src"] in done:
             continue
@@ -188,7 +195,7 @@ def sync_sources(apps):
         if os.path.isdir(src):
             mirror(src, os.path.join(REPO_DIR, "src", a["src"]))
     for pkg, name in (("update", "PlainUpdate.kt"), ("lang", "PlainLang.kt")):
-        shutil.copyfile(os.path.join(PROJECTS, "PlainSetup", "app", "src", "main", "java", "app", "plain", pkg, name),
+        shutil.copyfile(os.path.join(PROJECTS, "PlainShared", "src", "main", "java", "app", "plain", pkg, name),
                         os.path.join(REPO_DIR, "shared", name))
 
 
@@ -221,6 +228,7 @@ def main():
     live_by_key = {x["key"]: x for x in live["apps"]}
     for k, e in live_by_key.items():  # catalog texts win, also for apps not rebuilt this time
         if k in by_key:
+            e["name"] = by_key[k]["name"]
             e["summary"] = by_key[k]["summary"]
             e["summary_tr"] = by_key[k].get("summary_tr", "")
 
@@ -229,7 +237,9 @@ def main():
         git_push("Sync source", a.no_push)
         return
 
-    wanted = [k for k in by_key if k != "setup"] if "all" in a.apps else [k for k in a.apps if k != "setup"]
+    # "all" skips former apps whose hand-over release is already out (nothing more to ship for them)
+    wanted = ([k for k in by_key if k != "setup" and not (by_key[k].get("mergedInto") and live_by_key.get(k, {}).get("merged_into"))]
+              if "all" in a.apps else [k for k in a.apps if k != "setup"])
     unknown = [k for k in wanted if k not in by_key]
     if unknown:
         sys.exit(f"Unknown or disabled app(s): {unknown}. Known: {list(by_key)}")
@@ -246,25 +256,25 @@ def main():
         live_by_key[k] = with_history(e, live_by_key.get(k))
         done.append(f"{e['name']} {e['versionName']}")
 
-    # Plain Setup: bundle every current app APK + the catalog, then release it as the latest.
+    # Plain Manager: bundle every current app APK + the catalog, then release it as the latest.
     setup = by_key["setup"]
-    assets = os.path.join(PROJECTS, setup["project"], "app", "src", "main", "assets")
+    assets = os.path.join(PROJECTS, setup["project"], *setup.get("assets", "app/src/main/assets").split("/"))
     apk_dir = os.path.join(assets, "apks")
     shutil.rmtree(apk_dir, ignore_errors=True)
     os.makedirs(apk_dir)
     bundled = []
     for x in apps:
         e = live_by_key.get(x["key"])
-        if x["key"] == "setup" or not e:
+        if x["key"] == "setup" or not e or x.get("mergedInto"):  # former apps are only updated online, never installed new
             continue
         shutil.copyfile(ensure_dist(e) if not a.dry_run else os.path.join(DIST, e["file"]), os.path.join(apk_dir, e["file"]))
         bundled.append({k: v for k, v in e.items() if k != "history"})  # rollback is online-only
     save(os.path.join(assets, "apps.json"), {"repo": CAT["repo"], "apps": bundled})
     s = build_app(setup, live_by_key, True, a.dry_run)  # a new Setup every time (it carries the APKs)
-    release(s, "Install this on a new phone, then pick the Plain apps you want. Bundles: " +
+    release(s, "Plain Manager (formerly Plain Setup). Install this on a new phone, then pick the Plain apps you want. Bundles: " +
             ", ".join(f"{e['name']} {e['versionName']}" for e in bundled), latest=True, dry=a.dry_run)
     live_by_key["setup"] = with_history(s, live_by_key.get("setup"))
-    done.append(f"Plain Setup {s['versionName']}")
+    done.append(f"{setup['name']} {s['versionName']}")
 
     if a.dry_run:
         print("Dry run done:", ", ".join(done))

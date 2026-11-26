@@ -18,6 +18,7 @@
 
     <!-- trail photos go to the user's Plain Camera when it's installed (see MainActivity.takePhoto) -->
     <queries>
+        <package android:name="app.plain.maps" />
         <package android:name="app.plain.camera" />
     </queries>
 
@@ -76,5 +77,11 @@
             android:authorities="${applicationId}.share"
             android:exported="false"
             android:grantUriPermissions="true" />
+        <!-- Plain Maps copies this app's data through this provider (same signing key only, read only).
+             See app.plain.migrate.MigrateProvider. -->
+        <provider
+            android:name="app.plain.migrate.MigrateProvider"
+            android:authorities="${applicationId}.migrate"
+            android:exported="true" />
     </application>
 </manifest>

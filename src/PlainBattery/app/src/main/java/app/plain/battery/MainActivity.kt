@@ -86,6 +86,7 @@ class MainActivity : Activity() {
         scroll = ScrollView(this).apply { addView(body); isVerticalScrollBarEnabled = false }
         root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(root)
+        app.plain.migrate.PlainMoved.notice(this, "Plain Battery", "Plain Manager", "app.plain.setup", "battery", "Battery", "Pil")
     }
 
     override fun onResume() {

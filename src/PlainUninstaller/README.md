@@ -1,5 +1,9 @@
 # Plain Uninstaller
 
+> **Frozen (2026-11-26).** This app is now part of Plain Manager (Uninstaller tab, A:\Projects\PlainManager\uninstaller). Work happens there. This project only
+> builds the last release of the old app, which hands its data to the new one (`app/plain/migrate/MigrateProvider.kt`,
+> copied from A:\Projects\PlainShared\bridge) and tells the user it moved (`PlainMoved.kt`).
+
 A minimal, offline Android app (package `app.plain.uninstaller`) for decluttering a phone: pick apps from a list
 and remove them in one go. Part of the Plain family: Kotlin, plain Android framework, no AndroidX, pure-black
 OLED look. No INTERNET permission and nothing runs in the background.

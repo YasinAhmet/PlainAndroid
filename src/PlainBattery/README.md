@@ -1,5 +1,9 @@
 # Plain Battery
 
+> **Frozen (2026-11-26).** This app is now part of Plain Manager (Battery tab, A:\Projects\PlainManager\battery). Work happens there. This project only
+> builds the last release of the old app, which hands its data to the new one (`app/plain/migrate/MigrateProvider.kt`,
+> copied from A:\Projects\PlainShared\bridge) and tells the user it moved (`PlainMoved.kt`).
+
 Battery tracker for the TECNO SPARK 20 Pro+ (Android 14). It logs the battery over time and
 shows which app or process burned how much, using Android's own per-app power estimates.
 Package `app.plain.battery`, no INTERNET, no libraries, ~105 KB.

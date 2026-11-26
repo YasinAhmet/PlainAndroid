@@ -246,6 +246,7 @@ class MainActivity : Activity() {
             insets
         }
         setContentView(root)
+        app.plain.migrate.PlainMoved.notice(this, "Plain Uninstaller", "Plain Manager", "app.plain.setup", "uninstaller", "Uninstaller", "Kaldırıcı")
         showTab(Tab.APPS)
     }
 

@@ -65,6 +65,7 @@ class MainActivity : Activity() {
         tabs.addView(tabTrail, lpL(0, dp(44), 1f))
         root.addView(tabs, lpL(MATCH, WRAP))
         setContentView(root)
+        app.plain.migrate.PlainMoved.notice(this, "Plain Trekking", "Plain Maps", "app.plain.maps", "trekking", "Trekking", "Trekking")
         root.setOnApplyWindowInsetsListener { v, ins ->
             if (Build.VERSION.SDK_INT >= 30) {
                 val i = ins.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())

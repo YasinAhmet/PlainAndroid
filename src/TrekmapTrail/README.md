@@ -1,5 +1,9 @@
 # Trekmap Trail (Android)
 
+> **Frozen (2026-11-26).** This app is now part of Plain Maps (Trekking tab, A:\Projects\PlainMaps\trekking). Work happens there. This project only
+> builds the last release of the old app, which hands its data to the new one (`app/plain/migrate/MigrateProvider.kt`,
+> copied from A:\Projects\PlainShared\bridge) and tells the user it moved (`PlainMoved.kt`).
+
 The mobile companion to desktop Trekmap. It is built for a Tecno 20 Pro (HiOS, Android 13/14), but runs on any phone with Android 8 or newer.
 
 The app has two tabs and no other screens.

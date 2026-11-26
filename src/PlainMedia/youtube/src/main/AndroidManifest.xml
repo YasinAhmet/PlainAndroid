@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain Youtube: network is used only while the user fetches a link or a download is running.
+  No storage permission: files are written through MediaStore into the app's own entries (Android 10+).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "Wi-Fi only": tell Wi-Fi from mobile data and bind sockets to the Wi-Fi network -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 2.4: audio keeps playing in the background (Watch and Listen) through a mediaPlayback service, only while playing -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- partial wake lock + Wi-Fi lock, held only while a download is actually transferring/muxing -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- "Show in Music" opens LocalMusic if it is installed (package visibility, not a permission) -->
+    <queries>
+        <package android:name="app.localmusic" />
+    </queries>
+
+    <application>
+
+        <activity
+            android:label="@string/yt_app_name"
+            android:taskAffinity="${applicationId}.youtube"
+            android:theme="@style/yt_AppTheme"
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- YouTube app / browser: Share -> Plain Youtube -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+
+        <!-- 2.0 "Sign in to YouTube": Android's WebView as it comes (no user-agent or header changes). Not exported. -->
+        <activity
+            android:theme="@style/yt_AppTheme"
+            android:name=".SignInActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 2.4 background playback: foreground only while playing; no work of its own (the player is in MainActivity) -->
+        <service
+            android:name=".PlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- media notification buttons (explicit broadcasts from this app's own PendingIntents) -->
+        <receiver
+            android:name=".PlayControl"
+            android:exported="false" />
+
+        <service
+            android:name=".DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>

@@ -1,5 +1,9 @@
 # Plain Camera + Plain Gallery
 
+> **Frozen (2026-11-26).** This app is now part of Plain Camera (A:\Projects\PlainCamera). Work happens there. This project only
+> builds the last release of the old app, which hands its data to the new one (`app/plain/migrate/MigrateProvider.kt`,
+> copied from A:\Projects\PlainShared\bridge) and tells the user it moved (`PlainMoved.kt`).
+
 Two small, fully offline Android apps that replace the stock camera and gallery on the TECNO
 SPARK 20 Pro+. Kotlin, no AndroidX or other libraries, plain Views and Canvas. No INTERNET
 permission, no analytics. Release APKs are about 185 KB and 110 KB.

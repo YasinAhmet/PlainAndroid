@@ -54,5 +54,11 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
+        <!-- Plain Camera copies this app's data through this provider (same signing key only, read only).
+             See app.plain.migrate.MigrateProvider. -->
+        <provider
+            android:name="app.plain.migrate.MigrateProvider"
+            android:authorities="${applicationId}.migrate"
+            android:exported="true" />
     </application>
 </manifest>
