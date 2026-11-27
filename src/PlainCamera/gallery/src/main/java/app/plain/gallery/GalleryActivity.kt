@@ -155,6 +155,9 @@ class GalleryActivity : Activity() {
             isSelected = { it.id in selected }
             onTap = { i -> onCell(i) }
             onHold = { i -> onHoldCell(i) }
+            onDragSelect = { a, b -> dragSelect(a, b) }
+            onDragEnd = { dragBase = null }
+            onPinch = { d -> pinchColumns(d) }
             onFling = { d -> go(page + d) }
             onSize = { w, h -> relayout(w, h) }
         }
@@ -343,12 +346,24 @@ class GalleryActivity : Activity() {
             grid.cols = if (gw > gh) 5 else 3
             grid.rows = (gh / (gw / grid.cols + grid.labelH)).coerceAtLeast(1)
         } else {
-            grid.cols = if (gw > gh) 6 else 4
+            grid.cols = photoCols + if (gw > gh) 2 else 0
             grid.rows = (gh / (gw / grid.cols)).coerceAtLeast(1)
         }
         val per = grid.cols * grid.rows
         if (perPage > 0 && per != perPage) page = Paging.pageOf(first, per)
         perPage = per
+    }
+
+    /** Photo columns in portrait (landscape shows 2 more): pinch the grid to change, 3–6, remembered. */
+    private val photoCols get() = prefs.getInt("cols", 4).coerceIn(3, 6)
+
+    private fun pinchColumns(d: Int) {
+        if (screen == Screen.FOLDERS) return
+        val n = (photoCols - d).coerceIn(3, 6)
+        if (n == photoCols) return
+        prefs.edit().putInt("cols", n).apply()
+        layoutGrid()
+        show()
     }
 
     private fun switchTo(s: Screen, cat: String?, p: Int) {
@@ -480,7 +495,7 @@ class GalleryActivity : Activity() {
             .toggle(Ic.FOLDER, tr("Categories", "Kategoriler"), catsOn, sub = tr("Your own categories, shown as folders", "Kendi kategorileriniz, klasör olarak")) { on -> setCats(on) }
             .toggle(Ic.DELETE, tr("Hold to delete", "Basılı tutarak sil"), holdDelete, sub = tr("A long press moves the photo to the trash", "Uzun basış fotoğrafı çöpe taşır")) { on -> setHoldDelete(on) }
             .section(tr("App", "Uygulama"))
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, ACCENT) }
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this)) { Sheet.language(this, ACCENT) }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .show()
     }
@@ -533,6 +548,26 @@ class GalleryActivity : Activity() {
 
     private fun toggle(it: Item) {
         if (!selected.remove(it.id)) selected += it.id
+        updateBars()
+        grid.invalidate()
+    }
+
+    /** Selection before a hold-and-slide began, and whether the slide selects (or unselects, when it began on a selected photo). */
+    private var dragBase: Set<Long>? = null
+    private var dragSelects = true
+
+    /** Hold a photo and slide: everything from it to the finger takes the held photo's new state; sliding back gives cells back. */
+    private fun dragSelect(anchor: Int, to: Int) {
+        if (!selecting || screen == Screen.FOLDERS) return
+        val base = dragBase ?: selected.toSet().also {
+            dragBase = it
+            dragSelects = shown.getOrNull(page * perPage + anchor)?.id?.let { id -> id in selected } ?: true
+        }
+        selected.clear(); selected.addAll(base)
+        for (i in minOf(anchor, to)..maxOf(anchor, to)) {
+            val id = shown.getOrNull(page * perPage + i)?.id ?: continue
+            if (dragSelects) selected += id else selected -= id
+        }
         updateBars()
         grid.invalidate()
     }

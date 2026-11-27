@@ -70,6 +70,16 @@ object Trail {
     var lastCourse = Float.NaN
         private set
     val ascentM: Double get() = asc.total
+    /** Paused by the user (tap the power button): GPS off, no points; the paused time doesn't count as trail time. */
+    var paused = false
+        private set
+    private var pausedTotal = 0L
+    private var pausedAt = 0L
+    /** Recording time without the pauses (ms). */
+    val movingMs: Long get() {
+        val now = System.currentTimeMillis()
+        return (now - startTime - pausedTotal - (if (paused) now - pausedAt else 0L)).coerceAtLeast(0L)
+    }
     val segs = ArrayList<MLine>()
     var listener: (() -> Unit)? = null
     val attached get() = svc != null
@@ -170,9 +180,7 @@ object Trail {
         val now = System.currentTimeMillis()
         resetState(now, pid, pname)
         try {
-            File(dir, "current.json").writeText(
-                JSONObject().put("start", now).put("planId", pid ?: "").put("planName", pname ?: "").toString()
-            )
+            writeMeta(ctx)
         } catch (e: Exception) {
             Dev.event("trail", "cannot start: $e")
             throw IllegalStateException(tr("Phone storage is full — free some space to record.", "Telefon hafızası dolu — kayıt için yer açın."))
@@ -185,6 +193,31 @@ object Trail {
         devEvent("start", "plan=${pname ?: "-"}", alsoApp = true)
         battRow()
         ensureService(ctx)
+    }
+
+    private fun writeMeta(ctx: Context) {
+        File(recDir(ctx), "current.json").writeText(
+            JSONObject().put("start", startTime).put("planId", planId ?: "").put("planName", planName ?: "")
+                .put("pausedTotal", pausedTotal).put("pausedAt", if (paused) pausedAt else 0L).toString()
+        )
+    }
+
+    /** Pause / resume (tap the power button). Paused: GPS off and nothing recorded; resuming starts a new segment (no straight line across). */
+    fun setPaused(ctx: Context, on: Boolean) {
+        if (!active || on == paused) return
+        val now = System.currentTimeMillis()
+        if (on) { paused = true; pausedAt = now }
+        else {
+            pausedTotal += now - pausedAt
+            paused = false; pausedAt = 0L
+            resting = false; filter.reset(); still.reset()
+        }
+        newSeg = true
+        try { writeMeta(ctx) } catch (_: Exception) {}
+        devEvent(if (on) "pause" else "resume", alsoApp = true)
+        applyMode()
+        ensureService(ctx) // the notification shows the new state
+        notifyUi()
     }
 
     /** Where a photo taken now belongs: the latest fix if fresh, else the last track point. [lat, lon, ele] (NaN if unknown). */
@@ -263,6 +296,9 @@ object Trail {
         return try {
             val j = JSONObject(meta.readText())
             resetState(j.getLong("start"), j.optString("planId").ifEmpty { null }, j.optString("planName").ifEmpty { null })
+            pausedTotal = j.optLong("pausedTotal", 0L)
+            pausedAt = j.optLong("pausedAt", 0L)
+            paused = pausedAt > 0L
             for (s in readCsv(File(dir, "current.csv"))) {
                 val line = MLine(s.size + 64)
                 segs.add(line)
@@ -365,7 +401,7 @@ object Trail {
                 val photos = Photos.moveRecToTrack(ctx, id) // before the GPX is written, so photos become waypoints
                 entry = Store.save(
                     Kind.TRACK, Route(n, data), n, startTime,
-                    (System.currentTimeMillis() - startTime) / 1000, asc.total, id,
+                    movingMs / 1000, asc.total, id, // pauses don't count
                 )
                 if (photos > 0) Dev.event("trail", "saved with $photos photos")
             }
@@ -393,6 +429,7 @@ object Trail {
         distM = 0.0; eleNow = Double.NaN; asc.reset(); segs.clear()
         filter.fullReset(); still.reset()
         resting = false; useDem = null; newSeg = true
+        paused = false; pausedTotal = 0L; pausedAt = 0L
         sLat = Double.NaN; sLon = Double.NaN
         lastLat = Double.NaN; lastLon = Double.NaN; lastAcc = 0f
         lastSats = -1; lastCn0 = Double.NaN; lastSpeed = Float.NaN; lastCourse = Float.NaN
@@ -405,6 +442,13 @@ object Trail {
         try { lm.removeUpdates(loc) } catch (_: Exception) {}
         sigMotion?.let { sm?.cancelTriggerSensor(trigger, it) }
 
+        if (paused) {
+            gps = Gps.RESTING
+            modeCode = 'Z'
+            devEvent("mode", "paused gps=off")
+            notifyUi()
+            return
+        }
         if (resting && !uiVisible) {
             gps = Gps.RESTING
             val sensor = sigMotion
@@ -522,7 +566,7 @@ object Trail {
 
     // ------------------------------------------------------------------ fixes
     private fun onFix(l: Location, batch: Int) {
-        if (!active) return
+        if (!active || paused) return
         val acc = if (l.hasAccuracy()) l.accuracy else 999f
         lastLat = l.latitude
         lastLon = l.longitude

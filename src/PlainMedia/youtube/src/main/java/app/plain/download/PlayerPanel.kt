@@ -89,7 +89,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (ui !== a) return
         uiMain.removeCallbacks(hideCtl)
         registerVolume(false)
-        if (fullscreen) { fullscreen = false; full.setPadding(0, insetTop, 0, insetBottom) }
+        if (fullscreen) { fullscreen = false; full.setPadding(0, insetTop, 0, insetBottom); restoreBrightness() }
         (root.parent as? android.view.ViewGroup)?.removeView(root) // the old window's views no longer reach us
         holder = null
         try { mp?.setDisplay(null) } catch (_: Exception) {}
@@ -798,8 +798,30 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 if (vy > 1500 && Math.abs(vy) > Math.abs(vx) * 1.5f && !fullscreen) { minimize(); return true }
                 return false
             }
+            // hold: 2× while the finger stays down
+            override fun onLongPress(e: MotionEvent) { if (adjust == 0) boost(true) }
+            // fullscreen: slide up/down on the left half = brightness, right half = volume
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+                if (!fullscreen || e1 == null || e2.pointerCount > 1 || boosted) return false
+                if (adjust == 0) {
+                    val mx = Math.abs(e2.x - e1.x); val my = Math.abs(e2.y - e1.y)
+                    if (my < dp(16) || my < mx * 1.5f) return false
+                    adjust = if (e1.x < stage.width / 2f) 1 else 2
+                    volAcc = 0f
+                }
+                val f = dy / stage.height.coerceAtLeast(1) // finger up = more
+                if (adjust == 1) brightnessBy(f) else volumeBy(f)
+                return true
+            }
         })
-        stage.setOnTouchListener { _, e -> if (state == PState.FULL) gd.onTouchEvent(e) else false }
+        stage.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) adjust = 0
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                boost(false)
+                if (adjust != 0) { adjust = 0; fadeHint() }
+            }
+            if (state == PState.FULL) gd.onTouchEvent(e) else false
+        }
         videoFrame = AspectFrame(this)
         stage.addView(videoFrame, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.CENTER))
         seekHint = text("", 18f, C.TEXT, bold = true).apply {
@@ -819,7 +841,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         artImg = RoundImage(this)
         art.addView(artImg, lpL(dp(240), dp(135)))
         art.addView(text("♪", 28f, C.ACCENT).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) }, lpL(MATCH, WRAP))
-        artChannel = text(channel, 14f, C.DIM).apply { gravity = Gravity.CENTER }
+        artChannel = text(channel, 14f, C.DIM).apply { gravity = Gravity.CENTER; setOnClickListener { visitChannel() } }
         art.addView(artChannel, lpL(MATCH, WRAP))
         stage.addView(art, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.CENTER))
         root.addView(stage, lpL(MATCH, 0, 1f))
@@ -914,6 +936,65 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         Sheet.choose(a, tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { Speeds.label(it) }, Speeds.ALL.indexOf(speed), C.ACCENT) { setSpeed(Speeds.ALL[it]) }
     }
 
+    private var boosted = false
+    /** A fullscreen slide in progress: 0 none, 1 brightness, 2 volume. */
+    private var adjust = 0
+    private var volAcc = 0f
+    /** The window brightness was changed by a slide (restored to the system's when fullscreen ends). */
+    private var brightSet = false
+
+    private fun brightnessBy(f: Float) {
+        val w = ui?.window ?: return
+        val now = w.attributes.screenBrightness.takeIf { it >= 0f }
+            ?: (try { android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f } catch (_: Exception) { 0.5f })
+        val v = (now + f).coerceIn(0.01f, 1f)
+        w.attributes = w.attributes.apply { screenBrightness = v }
+        brightSet = true
+        showHint("☀ ${Math.round(v * 100)}%", true)
+    }
+
+    private fun volumeBy(f: Float) {
+        volAcc += f * vol.max * 1.5f
+        val steps = volAcc.toInt()
+        if (steps != 0) {
+            volAcc -= steps
+            vol.sync(audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+            setVolume(vol.level + steps)
+            syncVolumeBar()
+        }
+        showHint("♪ ${vol.level} / ${vol.max}", false)
+    }
+
+    private fun restoreBrightness() {
+        if (!brightSet) return
+        brightSet = false
+        ui?.window?.let { w -> w.attributes = w.attributes.apply { screenBrightness = -1f } }
+    }
+
+    private fun showHint(text: String, left: Boolean) {
+        seekHint.text = text
+        (seekHint.layoutParams as FrameLayout.LayoutParams).gravity = Gravity.CENTER_VERTICAL or (if (left) Gravity.START else Gravity.END)
+        seekHint.requestLayout()
+        seekHint.animate().cancel()
+        seekHint.alpha = 1f; seekHint.visibility = View.VISIBLE
+    }
+
+    private fun fadeHint() = seekHint.animate().alpha(0f).setStartDelay(300).setDuration(300).withEndAction { seekHint.visibility = View.GONE }.start()
+
+    /** Hold on the picture: play at 2× (or the chosen speed if faster) until the finger lifts, then back to [speed]. */
+    private fun boost(on: Boolean) {
+        val p = mp ?: return
+        if (on == boosted) return
+        if (on && (!prepared || !p.isPlaying || speed >= 2f)) return
+        boosted = on
+        // a paused player must not get a speed (that starts it): play() sets [speed] again
+        if (p.isPlaying) try { p.playbackParams = (p.playbackParams ?: PlaybackParams()).setSpeed(if (on) 2f else speed) } catch (_: Exception) {}
+        if (on) {
+            stage.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            showHint("2× »", false)
+        } else seekHint.animate().alpha(0f).setDuration(250).withEndAction { seekHint.visibility = View.GONE }.start()
+    }
+
     private fun setSpeed(s: Float) {
         speed = s
         speedBtn.text = Speeds.label(s)
@@ -950,6 +1031,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
+        if (!on) restoreBrightness()
         ui?.let { Hub.setHeaderShown(it, !on) }
         ui?.requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else if (rotationLocked) ActivityInfo.SCREEN_ORIENTATION_LOCKED else ActivityInfo.SCREEN_ORIENTATION_SENSOR
@@ -1265,7 +1347,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         everPlayed = true
         noisyWatch(true)
         if (p.currentPosition >= p.duration - 300 && p.duration > 0) p.seekTo(0)
-        if (speed != 1f) try { p.playbackParams = (p.playbackParams ?: PlaybackParams()).setSpeed(speed) } catch (_: Exception) {}
+        // also undoes a 2× hold that ended while paused
+        try { if (speed != 1f || p.playbackParams.speed != 1f) p.playbackParams = (p.playbackParams ?: PlaybackParams()).setSpeed(speed) } catch (_: Exception) {}
         p.start()
         playWhenReady = true
         screenOn(true)

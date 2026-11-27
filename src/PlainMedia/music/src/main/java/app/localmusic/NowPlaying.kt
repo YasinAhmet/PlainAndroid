@@ -117,7 +117,11 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         title.isSelected = true
         title.ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
         title.marqueeRepeatLimit = -1
-        texts.addView(title); texts.addView(artist)
+        // the song's names are links: title / "· Album" → album page, artist → artist page
+        title.setOnClickListener { Player.current?.let { act.goToAlbum(it) } }
+        artist.setOnClickListener { Player.current?.let { act.goToArtist(it) } }
+        from.setOnClickListener { Player.current?.let { act.goToAlbum(it) } }
+        texts.addView(title); texts.addView(artist, lpL(WRAP, WRAP))
         titleRow.addView(texts, lpL(0, WRAP, 1f))
         titleRow.addView(act.icon(R.drawable.mus_ic_add_list, 48, 11, desc = tr("Add to playlist", "Çalma listesine ekle")) { Player.current?.let { act.addToPlaylist(listOf(it)) } })
         col.addView(titleRow, lpL(MATCH, WRAP))
@@ -132,6 +136,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         repeatBtn = act.icon(R.drawable.mus_ic_repeat, 52, 13, desc = tr("Repeat", "Tekrarla")) { Player.cycleRepeat() }
         playBtn = act.icon(R.drawable.mus_ic_play, 72, 20, 0xFF000000.toInt(), tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
         playBtn.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33000000), oval(C.TEXT), null)
+        playBtn.setOnLongClickListener { act.toggleStopAfterSong(); true } // hold: stop after this song
         fun spacer() = View(act).also { controls.addView(it, lpL(0, 1, 1f)) }
         controls.addView(shuffleBtn); spacer()
         controls.addView(act.icon(R.drawable.mus_ic_prev, 60, 14, desc = tr("Previous", "Önceki")) { Player.prev() }); spacer()
@@ -148,6 +153,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
             contentDescription = tr("Playback speed", "Oynatma hızı")
             setPadding(act.dp(14), act.dp(5), act.dp(14), act.dp(5))
             minWidth = act.dp(64)
+            setOnLongClickListener { if (Player.speed != 1f) { Player.setSpeed(1f); act.toast(tr("Normal speed", "Normal hız")) }; true } // hold: back to 1×
         }
         steps.addView(speedBtn, lpL(WRAP, WRAP).apply { leftMargin = act.dp(18); rightMargin = act.dp(18) })
         steps.addView(act.icon(R.drawable.mus_ic_fwd10, 48, 11, desc = tr("Forward 10 s", "10 sn ileri")) { Player.seekBy(SeekStep.MS) })

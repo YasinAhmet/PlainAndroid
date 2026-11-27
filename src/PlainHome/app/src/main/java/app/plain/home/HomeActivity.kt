@@ -19,6 +19,7 @@ import android.provider.AlarmClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
@@ -201,6 +202,37 @@ class HomeActivity : Activity() {
             insets
         }
         setContentView(root)
+    }
+
+    // --- swipe down anywhere (with the app list at its top): the notification shade ---------------------
+    private var swipeX = 0f
+    private var swipeY = 0f
+    private var swipeT = 0L
+    private var shadeDone = false
+
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { swipeX = e.rawX; swipeY = e.rawY; swipeT = e.eventTime; shadeDone = false }
+            MotionEvent.ACTION_MOVE -> if (!shadeDone && e.pointerCount == 1) {
+                val dy = e.rawY - swipeY
+                val dx = Math.abs(e.rawX - swipeX)
+                if (dy > dp(90f) && dy > dx * 2 && e.eventTime - swipeT < 600 && !scroll.canScrollVertically(-1)) {
+                    shadeDone = true
+                    MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }.let { super.dispatchTouchEvent(it); it.recycle() } // no app opens, no hold menu
+                    openShade()
+                }
+            }
+        }
+        return if (shadeDone) true else super.dispatchTouchEvent(e)
+    }
+
+    /** StatusBarManager.expandNotificationsPanel (EXPAND_STATUS_BAR, a normal permission granted at install). */
+    @android.annotation.SuppressLint("WrongConstant")
+    private fun openShade() {
+        try {
+            val sb = getSystemService("statusbar")
+            Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb)
+        } catch (_: Exception) {}
     }
 
     /** Day and month names in the app's language (a TextClock would follow the phone's). */
@@ -400,7 +432,7 @@ class HomeActivity : Activity() {
             }
         }
         sheet.section(tr("App", "Uygulama"))
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this) { recreate() } }
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this)) { Sheet.language(this) { recreate() } }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .show()
     }

@@ -131,7 +131,8 @@ class TrailScreen(private val act: MainActivity) {
             textSize = 16f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             elevation = act.dpf(6)
-            setOnClickListener { if (!on) startTrail() else act.toast(tr("Hold the button to stop.", "Durdurmak için düğmeye basılı tutun.")) }
+            // recording: tap = pause / resume, hold = stop
+            setOnClickListener { if (!on) startTrail() else togglePause() }
             setOnLongClickListener { if (on) askStop(); on }
         }
         view.addView(power, lpF(act.dp(84), act.dp(84), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = act.dp(14) })
@@ -405,11 +406,9 @@ class TrailScreen(private val act: MainActivity) {
         act.setTrailMode(v)
         offBar.visibility = if (v) View.GONE else View.VISIBLE
         statsBox.visibility = if (v) View.VISIBLE else View.GONE
-        power.text = if (v) tr("STOP\n(hold)", "DUR\n(uzun bas)") else tr("START", "BAŞLA")
-        power.textSize = if (PlainLang.turkish) 14f else 16f
+        syncPower()
         cam.visibility = if (v) View.VISIBLE else View.GONE
         if (v) refreshPhotos() else map.markers = emptyList()
-        power.background = ripple(oval(if (v) C.RED else C.GREEN))
         refreshOverlays()
         main.removeCallbacks(tick)
         if (v) {
@@ -425,9 +424,32 @@ class TrailScreen(private val act: MainActivity) {
         }
     }
 
+    /** The power button: START (green), STOP (red, hold) or PAUSED (amber, tap to resume). */
+    private fun syncPower() {
+        val paused = on && Trail.paused
+        power.text = when {
+            !on -> tr("START", "BAŞLA")
+            paused -> tr("PAUSED\n(tap)", "DURAKLADI\n(dokun)")
+            else -> tr("STOP\n(hold)", "DUR\n(uzun bas)")
+        }
+        power.textSize = if (PlainLang.turkish || paused) 13f else 16f
+        power.background = ripple(oval(when { !on -> C.GREEN; paused -> 0xFFE0A030.toInt(); else -> C.RED }))
+    }
+
+    private fun togglePause() {
+        val p = !Trail.paused
+        Trail.setPaused(act, p)
+        power.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        act.toast(if (p) tr("Paused: GPS off, this time doesn't count. Tap again to go on.", "Duraklatıldı: GPS kapalı, bu süre sayılmaz. Sürdürmek için yine dokunun.")
+            else tr("Recording again", "Kayıt sürüyor"))
+        syncPower()
+        updateStats()
+    }
+
     private fun onTrail() {
         if (!on) return
         if (!Trail.active) { setOn(false); return }
+        syncPower()
         if (!Trail.lastLat.isNaN()) map.setMe(Trail.lastLat, Trail.lastLon, Trail.lastAcc)
         // once per recording, the moment GPS locks: the right time to switch on airplane mode
         if (Trail.gps == Trail.Gps.OK && prefs.getLong("airTipFor", 0L) != Trail.startTime) {
@@ -449,9 +471,9 @@ class TrailScreen(private val act: MainActivity) {
     private fun updateStats() {
         if (!on) return
         tDist.text = Fmt.dist(Trail.distM)
-        tTime.text = Fmt.dur((System.currentTimeMillis() - Trail.startTime) / 1000)
+        tTime.text = Fmt.dur(Trail.movingMs / 1000)
         val acc = Trail.lastAcc.roundToInt()
-        val g = when (Trail.gps) {
+        val g = if (Trail.paused) tr("Paused · GPS off", "Duraklatıldı · GPS kapalı") else when (Trail.gps) {
             Trail.Gps.OK -> "GPS ±$acc m"
             Trail.Gps.SEARCHING -> if (Trail.lastLat.isNaN()) tr("Searching for GPS…", "GPS aranıyor…") else tr("Weak GPS ±$acc m", "Zayıf GPS ±$acc m")
             Trail.Gps.RESTING -> tr("Resting · GPS paused", "Mola · GPS duraklatıldı")
@@ -469,7 +491,7 @@ class TrailScreen(private val act: MainActivity) {
         val box = FrameLayout(act).apply { setPadding(act.dp(20), act.dp(8), act.dp(20), 0); addView(et) }
         AlertDialog.Builder(act)
             .setTitle(tr("Stop and save this trail?", "Rota durdurulup kaydedilsin mi?"))
-            .setMessage("${Fmt.dist(Trail.distM)} · ${Fmt.dur((System.currentTimeMillis() - Trail.startTime) / 1000)} · ↑ ${Trail.ascentM.roundToInt()} m")
+            .setMessage("${Fmt.dist(Trail.distM)} · ${Fmt.dur(Trail.movingMs / 1000)} · ↑ ${Trail.ascentM.roundToInt()} m")
             .setView(box)
             .setPositiveButton(tr("Save", "Kaydet")) { _, _ -> finish(et.text.toString().trim().ifEmpty { def }, true) }
             .setNeutralButton(tr("Discard", "At")) { _, _ ->

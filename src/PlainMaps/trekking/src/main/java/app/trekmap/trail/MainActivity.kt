@@ -420,7 +420,8 @@ class MainActivity : Activity() {
             tr("In your pocket GPS takes a fix every 5 s instead of 2 s and hands them over every 2 minutes, so the phone sleeps more. Still a point every ~7 m.",
                 "Cepteyken GPS 2 sn yerine 5 sn'de bir konum alır ve 2 dakikada bir iletir; telefon daha çok uyur. Yine ~7 m'de bir nokta."))
         s.section(tr("App", "Uygulama"))
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) {
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true,
+                reset = Sheet.languageReset(this) { Dev.event("settings", "language=${PlainLang.choice}"); languageChanged() }) {
                 // a change rebuilds the screens in place (never touches a recording)
                 Sheet.language(this, C.TRACK) {
                     Dev.event("settings", "language=${PlainLang.choice}")

@@ -431,6 +431,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         var dx = 0f
         var dy = 0f
         var held = false
+        var lastTapT = 0L
+        var lastTapX = 0f
+        var lastTapY = 0f
         val hold = Runnable {
             held = true
             texture.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -445,7 +448,18 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 MotionEvent.ACTION_MOVE -> if (abs(e.x - dx) >= slop || abs(e.y - dy) >= slop) main.removeCallbacks(hold)
                 MotionEvent.ACTION_UP -> {
                     main.removeCallbacks(hold)
-                    if (!held && abs(e.x - dx) < slop && abs(e.y - dy) < slop) onPreviewTap(e.x, e.y, v.width, v.height)
+                    if (!held && abs(e.x - dx) < slop && abs(e.y - dy) < slop) {
+                        // double tap: switch between the front and back camera; a single tap focuses at once (no wait)
+                        val t = e.eventTime
+                        if (t - lastTapT < ViewConfiguration.getDoubleTapTimeout() && hypot(e.x - lastTapX, e.y - lastTapY) < dp(80) && !recording) {
+                            lastTapT = 0L
+                            texture.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            flip()
+                        } else {
+                            lastTapT = t; lastTapX = e.x; lastTapY = e.y
+                            onPreviewTap(e.x, e.y, v.width, v.height)
+                        }
+                    }
                 }
                 MotionEvent.ACTION_CANCEL -> main.removeCallbacks(hold)
             }

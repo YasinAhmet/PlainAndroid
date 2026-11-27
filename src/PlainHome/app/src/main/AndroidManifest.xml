@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Offline home screen: no permissions at all. Needs to see launchable apps. -->
+    <!-- Offline home screen: no internet. Needs to see launchable apps; EXPAND_STATUS_BAR (normal, no prompt)
+         lets a swipe down open the notification shade. -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />

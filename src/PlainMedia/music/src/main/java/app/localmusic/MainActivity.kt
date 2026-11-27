@@ -13,6 +13,7 @@ import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.content.Context
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -34,7 +35,9 @@ import app.plain.ui.Ic
 import app.plain.ui.Sheet
 
 sealed class Row
-class HeaderRow(val title: String, val sub: String?, val actions: List<Pair<String, () -> Unit>>, val accent: Int = 0) : Row()
+/** [link]: a part of [sub] that opens another page (an album's artist name → the artist page). */
+class HeaderRow(val title: String, val sub: String?, val actions: List<Pair<String, () -> Unit>>, val accent: Int = 0,
+                val link: Pair<String, () -> Unit>? = null) : Row()
 class SectionRow(val text: String) : Row()
 class GroupRow(val title: String, val sub: String, val artId: Long, val onClick: () -> Unit, val onLong: (() -> Unit)? = null, val round: Boolean = false, val artSongs: List<Song>? = null, val mosaic: Boolean = false) : Row()
 /** Up to three album cards side by side (compact album grid). */
@@ -80,9 +83,13 @@ class MainActivity : Activity() {
     private val hideUndo = Runnable { undoBar.visibility = View.GONE; undoAction = null }
     private lateinit var spaceBar: TextView
     private var spaceChecked = false
-    private class Drill(val title: String, val rows: () -> List<Row>, var scroll: Int = 0, var scrollTop: Int = 0)
+    /** A sub-page. [key] names what it shows ("artist:<key>"), so opening the page already shown doesn't stack it;
+     *  [fromSearch]: opened from search results (Back returns to them, typing again closes it). */
+    private class Drill(val title: String, val rows: () -> List<Row>, var scroll: Int = 0, var scrollTop: Int = 0,
+                        val key: String? = null, val fromSearch: Boolean = false)
     private val drill = ArrayList<Drill>()
     private val tabScroll = HashMap<Int, Pair<Int, Int>>()
+    private var searchScroll: Pair<Int, Int>? = null
     private var query = ""
     private var editPlaylist: Playlist? = null
 
@@ -290,8 +297,9 @@ class MainActivity : Activity() {
             selection != null && nowPlaying == null && overlays.isEmpty() -> endSelection()
             overlays.isNotEmpty() -> closeOverlay(overlays.last())
             nowPlaying != null -> closeNowPlaying()
-            query.isNotEmpty() -> { search.setText(""); hideKeyboard() }
             editPlaylist != null -> { editPlaylist = null; render() }
+            drill.lastOrNull()?.fromSearch == true -> popDrill()
+            query.isNotEmpty() -> { search.setText(""); hideKeyboard() }
             drill.isNotEmpty() -> popDrill()
             else -> moveTaskToBack(true)
         }
@@ -359,7 +367,10 @@ class MainActivity : Activity() {
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun afterTextChanged(s: Editable?) {
                     val q = s?.toString() ?: ""
-                    if (q != query) { query = q; render(resetScroll = true) }
+                    if (q != query) {
+                        while (drill.lastOrNull()?.fromSearch == true) drill.removeAt(drill.size - 1) // typing again: back to results
+                        query = q; render(resetScroll = true)
+                    }
                 }
             })
             setOnEditorActionListener { _, _, _ -> hideKeyboard(); true }
@@ -416,7 +427,7 @@ class MainActivity : Activity() {
         titleView = text("", 22f, C.TEXT, bold = true).apply { setPadding(dp(16), dp(4), dp(16), dp(2)); visibility = View.GONE }
         col.addView(titleView, lpL(MATCH, WRAP))
 
-        list = ListView(this).apply {
+        list = SwipeListView(this).apply {
             divider = null
             dividerHeight = 0
             selector = android.graphics.drawable.ColorDrawable(0)
@@ -426,14 +437,24 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, dp(8))
             setOnItemClickListener { _, _, pos, _ -> onRowClick(this@MainActivity.adapter.rows[pos]) }
             setOnItemLongClickListener { _, _, pos, _ -> onRowLong(this@MainActivity.adapter.rows[pos]) }
+            // swipe a song right = play next, left = add to the end of the queue
+            swipeable = { pos -> selection == null && (this@MainActivity.adapter.rows.getOrNull(pos) as? SongRow)?.mode == SongRow.Mode.NORMAL }
+            onSwipe = { pos, right ->
+                (this@MainActivity.adapter.rows.getOrNull(pos) as? SongRow)?.song?.let { s ->
+                    if (Player.current == null) { Player.playList(listOf(s.id), 0); return@let }
+                    if (right) { Player.playNext(listOf(s)); toast(tr("Plays next: ${s.title}", "Sonra çalacak: ${s.title}")) }
+                    else { Player.addToQueue(listOf(s)); toast(tr("Added to queue: ${s.title}", "Sıraya eklendi: ${s.title}")) }
+                }
+            }
         }
         col.addView(list, lpL(MATCH, 0, 1f))
 
-        // mini player
-        mini = LinearLayout(this).apply {
+        // mini player: tap = now playing, swipe sideways = next / previous song, the artist name = artist page
+        mini = SwipeBar(this).apply {
             orientation = LinearLayout.VERTICAL
             background = outline(dpf(10), C.OUTLINE_BTN)
             setOnClickListener { openNowPlaying() }
+            onSwipe = { d -> if (d > 0) Player.next() else Player.prev() }
             visibility = View.GONE
         }
         val miniRow = LinearLayout(this).apply {
@@ -445,10 +466,11 @@ class MainActivity : Activity() {
         miniRow.addView(miniArt, lpL(dp(42), dp(42)))
         val miniText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, dp(6), 0) }
         miniTitle = text("", 14f, C.TEXT, bold = true)
-        miniSub = text("", 12.5f, C.DIM)
-        miniText.addView(miniTitle); miniText.addView(miniSub)
+        miniSub = text("", 12.5f, C.DIM).apply { setOnClickListener { Player.current?.let { goToArtist(it) } } }
+        miniText.addView(miniTitle); miniText.addView(miniSub, lpL(WRAP, WRAP))
         miniRow.addView(miniText, lpL(0, WRAP, 1f))
         miniPlay = icon(R.drawable.mus_ic_play, 44, 9, desc = tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
+        miniPlay.setOnLongClickListener { toggleStopAfterSong(); true }
         miniRow.addView(miniPlay)
         miniRow.addView(icon(R.drawable.mus_ic_next, 44, 10, desc = tr("Next", "Sonraki")) { Player.next() })
         mini.addView(miniRow, lpL(MATCH, WRAP))
@@ -549,16 +571,25 @@ class MainActivity : Activity() {
 
     private fun scrollKey() = if (tab == LIBRARY) 10 + seg else tab
 
+    /** Search results are on screen (a page opened from them covers them until Back). */
+    private fun showingSearch() = query.isNotEmpty() && drill.lastOrNull()?.fromSearch != true
+
     private fun saveScroll() {
         val p = list.firstVisiblePosition
         val top = list.getChildAt(0)?.top ?: 0
-        if (drill.isEmpty()) tabScroll[scrollKey()] = p to top else drill.last().apply { scroll = p; scrollTop = top }
+        when {
+            showingSearch() -> searchScroll = p to top
+            drill.isEmpty() -> tabScroll[scrollKey()] = p to top
+            else -> drill.last().apply { scroll = p; scrollTop = top }
+        }
     }
 
-    private fun pushDrill(title: String, rows: () -> List<Row>) {
+    /** Open a sub-page. A link to the page already shown ([key]) only scrolls it back to the top. */
+    private fun pushDrill(title: String, key: String? = null, rows: () -> List<Row>) {
         endSelection()
+        if (key != null && !showingSearch() && editPlaylist == null && drill.lastOrNull()?.key == key) { list.smoothScrollToPosition(0); return }
         saveScroll()
-        drill += Drill(title, rows)
+        drill += Drill(title, rows, key = key, fromSearch = query.isNotEmpty())
         render(resetScroll = true)
     }
 
@@ -567,8 +598,11 @@ class MainActivity : Activity() {
         editPlaylist = null
         drill.removeAt(drill.size - 1)
         render()
-        if (drill.isEmpty()) tabScroll[scrollKey()]?.let { (p, t) -> list.setSelectionFromTop(p, t) }
-        else drill.last().let { list.setSelectionFromTop(it.scroll, it.scrollTop) }
+        when {
+            showingSearch() -> searchScroll?.let { (p, t) -> list.setSelectionFromTop(p, t) }
+            drill.isEmpty() -> tabScroll[scrollKey()]?.let { (p, t) -> list.setSelectionFromTop(p, t) }
+            else -> drill.last().let { list.setSelectionFromTop(it.scroll, it.scrollTop) }
+        }
     }
 
     private fun hideKeyboard() {
@@ -586,7 +620,7 @@ class MainActivity : Activity() {
                 "LocalMusic'in bu telefondaki müzik dosyalarına erişmesi gerekiyor.\nHiçbir şey telefondan çıkmaz: uygulamanın internet izni yok."), tr("Allow access", "Erişime izin ver") to {
                 requestPermissions(if (Build.VERSION.SDK_INT >= 33) arrayOf(Library.PERMISSION, Library.VIDEO_PERMISSION) else arrayOf(Library.PERMISSION), REQ_PERMS)
             }))
-            query.isNotEmpty() -> searchRows(lib)
+            showingSearch() -> searchRows(lib)
             drill.isNotEmpty() -> drill.last().rows()
             else -> tabRows(lib)
         }
@@ -859,8 +893,8 @@ class MainActivity : Activity() {
     )
 
     private fun openGroup(g: Group, sub: String?) {
-        if (query.isNotEmpty()) { hideKeyboard() }
-        pushDrill(g.title) {
+        hideKeyboard()
+        pushDrill(g.title, "group:" + g.key) {
             val fresh = findGroup(g) ?: g
             listOf<Row>(HeaderRow(fresh.title, listOfNotNull(sub, fresh.stats).joinToString("\n"), playButtons(fresh.songs))) +
                 fresh.songs.mapIndexed { i, s -> SongRow(s, fresh.songs, i) }
@@ -961,8 +995,8 @@ class MainActivity : Activity() {
 
     /** Artist page: play everything (merged) or pick an album. */
     private fun openArtist(g: Group) {
-        if (query.isNotEmpty()) hideKeyboard()
-        pushDrill(g.title) {
+        hideKeyboard()
+        pushDrill(g.title, "artist:" + g.key) {
             val lib = Library.index
             val fresh = lib.artists.firstOrNull { it.key == g.key } ?: g
             val albums = lib.albumsOf(fresh)
@@ -987,17 +1021,45 @@ class MainActivity : Activity() {
 
     /** Album page: tracks in order, track numbers instead of art. */
     fun openAlbum(g: Group) {
-        if (query.isNotEmpty()) hideKeyboard()
-        pushDrill(g.title) {
+        hideKeyboard()
+        pushDrill(g.title, "album:" + g.key) {
             val fresh = Library.index.albums.firstOrNull { it.key == g.key } ?: g
             val info = listOfNotNull(fresh.artist, fresh.year.takeIf { it > 0 }?.toString()).joinToString(" · ")
-            listOf<Row>(HeaderRow(fresh.title, info + "\n" + fresh.stats, playButtons(fresh.songs) + eraseButton(fresh.songs, K_ALBUM, fresh.title, Packing.isPacked(fresh)))) +
+            val by = artistOfAlbum(fresh) // the album artist's name opens the artist page
+            listOf<Row>(HeaderRow(fresh.title, info + "\n" + fresh.stats, playButtons(fresh.songs) + eraseButton(fresh.songs, K_ALBUM, fresh.title, Packing.isPacked(fresh)),
+                link = by?.let { a -> fresh.artist to { openArtist(a) } })) +
                 fresh.songs.mapIndexed { i, s -> SongRow(s, fresh.songs, i, inAlbum = true) }
         }
     }
 
+    /** The artist an album page links to: the artist of most of its songs ("Various artists" links nowhere). */
+    private fun artistOfAlbum(album: Group): Group? {
+        val top = album.songs.groupingBy { it.artistKey }.eachCount().maxByOrNull { it.value } ?: return null
+        if (top.value * 2 < album.songs.size) return null
+        return Library.index.artists.firstOrNull { it.key == top.key }
+    }
+
+    /** Go to the artist of [s] (now playing, the mini player): closes now playing first. */
+    fun goToArtist(s: Song) {
+        val a = Library.index.artistOf(s) ?: return
+        closeOverlays(); closeNowPlaying(); openArtist(a)
+    }
+
+    /** Go to the album of [s]. Loose single tracks have no album page: their artist page instead. */
+    fun goToAlbum(s: Song) {
+        val a = Library.index.albumOf(s)?.takeIf { s.album.isNotBlank() } ?: return goToArtist(s)
+        closeOverlays(); closeNowPlaying(); openAlbum(a)
+    }
+
+    private fun closeOverlays() { while (overlays.isNotEmpty()) closeOverlay(overlays.last()) }
+
+    /** Hold play/pause: pause after this song (hold again to cancel). */
+    fun toggleStopAfterSong() {
+        toast(if (Player.toggleStopAfterSong()) tr("Stops after this song", "Bu şarkıdan sonra durur") else tr("Keeps playing", "Çalmaya devam eder"))
+    }
+
     private fun openPlaylist(p: Playlist) {
-        pushDrill(p.name) {
+        pushDrill(p.name, "playlist:" + p.id) {
             val lib = Library.index
             val editing = editPlaylist === p
             // Editing works on the saved order (drag and ✕ use entry positions), whatever sort is picked.
@@ -1117,8 +1179,8 @@ class MainActivity : Activity() {
         val album = lib.albumOf(s); val artist = lib.artistOf(s)
         if (album != null || artist != null) {
             sheet.section(tr("Go to", "Git"))
-            album?.let { a -> sheet.item(Ic.ALBUM, a.title, sub = tr("Album · ${Text.count(a.count, "song")}", "Albüm · ${Text.count(a.count, "song")}"), more = true) { closeNowPlaying(); openAlbum(a) } }
-            artist?.let { a -> sheet.item(Ic.ARTIST, a.title, sub = tr("Artist · ${Text.count(a.count, "song")}", "Sanatçı · ${Text.count(a.count, "song")}"), more = true) { closeNowPlaying(); openArtist(a) } }
+            album?.let { a -> sheet.item(Ic.ALBUM, a.title, sub = tr("Album · ${Text.count(a.count, "song")}", "Albüm · ${Text.count(a.count, "song")}"), more = true) { closeOverlays(); closeNowPlaying(); openAlbum(a) } }
+            artist?.let { a -> sheet.item(Ic.ARTIST, a.title, sub = tr("Artist · ${Text.count(a.count, "song")}", "Sanatçı · ${Text.count(a.count, "song")}"), more = true) { closeOverlays(); closeNowPlaying(); openArtist(a) } }
         }
         sheet.section(tr("More", "Diğer"))
         if (selectable && selection == null && nowPlaying == null && overlays.isEmpty())
@@ -1227,8 +1289,10 @@ class MainActivity : Activity() {
         val sheet = Sheet(this, C.ACCENT).header(tr("Music", "Müzik"),
             tr("${Text.count(lib.songs.size, "song")} on this phone · no internet", "Bu telefonda ${Text.count(lib.songs.size, "song")} · internet yok"))
         sheet.section(tr("Playback", "Çalma"))
-            .item(Ic.SLEEP, tr("Sleep timer", "Uyku zamanlayıcısı"), value = sleepValue(), more = true) { sleepMenu() }
-            .item(Ic.SPEED, tr("Playback speed", "Oynatma hızı"), value = Speeds.label(Player.speed), more = true) { speedMenu() }
+            .item(Ic.SLEEP, tr("Sleep timer", "Uyku zamanlayıcısı"), value = sleepValue(), more = true,
+                reset = Sheet.Reset(tr("Off", "Kapalı")) { Player.setSleepMinutes(0) }) { sleepMenu() }
+            .item(Ic.SPEED, tr("Playback speed", "Oynatma hızı"), value = Speeds.label(Player.speed), more = true,
+                reset = Sheet.Reset(Speeds.label(1f)) { Player.setSpeed(1f) }) { speedMenu() }
         if (pipSupported) sheet.toggle(Ic.PIP, tr("Picture-in-picture on Home", "Ana ekranda küçük pencere"), pipAuto,
             sub = tr("A playing video goes into a small window when you leave the app", "Uygulamadan çıkınca oynayan video küçük pencerede sürer")) { on ->
             Store.prefs.edit().putBoolean("pip_auto", on).apply()
@@ -1248,7 +1312,7 @@ class MainActivity : Activity() {
                 tr("Clear", "Temizle")) { Store.clearHistory(); render() }
         }
         sheet.section(tr("App", "Uygulama"))
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, C.ACCENT) { onLanguageChanged() } }
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this) { onLanguageChanged() }) { Sheet.language(this, C.ACCENT) { onLanguageChanged() } }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .item(Ic.INFO, tr("About", "Hakkında")) {
                 confirm("Plain Media · " + tr("Music", "Müzik"), tr("Plays only music files stored on this phone.\n\nNo internet permission: the app cannot go online.\nNo background polling: it only works while music plays or while you look at it.\n\n${lib.songs.size} songs in the library.",
@@ -1576,7 +1640,7 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(10), dp(16), dp(10))
         addView(text(r.title, 24f, C.TEXT, bold = true, lines = 2))
-        r.sub?.let { addView(text(it, 13f, C.DIM, lines = 3).apply { setPadding(0, dp(2), 0, 0) }) }
+        r.sub?.let { addView(text(it, 13f, C.DIM, lines = 3).apply { setPadding(0, dp(2), 0, 0); r.link?.let { (part, fn) -> linkify(this, part, fn) } }) }
         if (r.actions.isNotEmpty()) {
             val row = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
             r.actions.forEachIndexed { i, (label, fn) ->
@@ -1626,6 +1690,7 @@ class MainActivity : Activity() {
 
     private fun songView(r: SongRow, h: SongHolder, dragger: Dragger): View {
         val s = r.song
+        h.translationX = 0f; h.alpha = 1f // a recycled row may still be sliding back from a swipe
         val isCurrent = Player.current?.id == s.id && (r.mode != SongRow.Mode.QUEUE || r.index == Player.queue.pos)
         h.title.text = s.title
         h.title.setTextColor(if (isCurrent) C.ACCENT else C.TEXT)
@@ -1752,4 +1817,131 @@ class MainActivity : Activity() {
     }
 
     fun newRowAdapter(dragger: () -> Dragger) = RowAdapter(dragger)
+
+    /** Make [part] of [tv]'s text a link (brighter, no underline) that runs [fn]. */
+    private fun linkify(tv: TextView, part: String, fn: () -> Unit) {
+        val full = tv.text.toString()
+        val at = full.indexOf(part)
+        if (part.isBlank() || at < 0) return
+        val sp = android.text.SpannableString(full)
+        sp.setSpan(object : android.text.style.ClickableSpan() {
+            override fun onClick(v: View) = fn()
+            override fun updateDrawState(ds: android.text.TextPaint) { ds.color = C.TEXT; ds.isUnderlineText = false }
+        }, at, at + part.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        tv.text = sp
+        tv.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+        tv.highlightColor = 0
+    }
+}
+
+/**
+ * A list whose rows can be swiped sideways ([swipeable] decides which): the row follows the finger and past a quarter of
+ * the width [onSwipe] runs (right = true when swiped to the right). Vertical scrolling, taps and holds work as before.
+ */
+class SwipeListView(ctx: Context) : ListView(ctx) {
+    var swipeable: ((Int) -> Boolean)? = null
+    var onSwipe: ((pos: Int, right: Boolean) -> Unit)? = null
+    private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+    private var x0 = 0f
+    private var y0 = 0f
+    private var pos = -1
+    private var row: View? = null
+    private var decided = false
+    private var swiping = false
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean = track(e) || super.onInterceptTouchEvent(e)
+    override fun onTouchEvent(e: MotionEvent): Boolean = track(e) || super.onTouchEvent(e)
+
+    private fun track(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                x0 = e.x; y0 = e.y; decided = false; swiping = false
+                pos = pointToPosition(e.x.toInt(), e.y.toInt())
+                row = if (pos >= 0 && swipeable?.invoke(pos) == true) getChildAt(pos - firstVisiblePosition) else null
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val r = row ?: return false
+                if (!decided) {
+                    val dx = Math.abs(e.x - x0); val dy = Math.abs(e.y - y0)
+                    if (dx > slop * 2 && dx > dy * 1.6f) {
+                        decided = true; swiping = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }.let { super.onTouchEvent(it); it.recycle() } // no click / hold
+                    } else if (dy > slop) decided = true // a scroll: leave it to the list
+                }
+                if (swiping) { r.translationX = (e.x - x0) * 0.7f; r.alpha = 1f - Math.min(0.5f, Math.abs(e.x - x0) / width); return true }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (swiping) {
+                val r = row
+                val dx = e.x - x0
+                swiping = false
+                if (e.actionMasked == MotionEvent.ACTION_UP && Math.abs(dx) > width * 0.25f) {
+                    performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                    onSwipe?.invoke(pos, dx > 0)
+                }
+                r?.animate()?.translationX(0f)?.alpha(1f)?.setDuration(180)?.start()
+                row = null
+                return true
+            }
+        }
+        return false
+    }
+}
+
+/**
+ * A bar that also takes a sideways swipe ([onSwipe]: +1 = swiped left / next, −1 = swiped right / previous), even when the
+ * finger starts on one of its buttons. The bar follows the finger a little; a tap still clicks.
+ */
+class SwipeBar(ctx: Context) : LinearLayout(ctx) {
+    var onSwipe: ((Int) -> Unit)? = null
+    private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+    private var x0 = 0f
+    private var y0 = 0f
+    private var dragging = false
+    private var vt: android.view.VelocityTracker? = null
+
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            x0 = e.rawX; y0 = e.rawY; dragging = false
+            vt?.recycle(); vt = android.view.VelocityTracker.obtain()
+        }
+        vt?.addMovement(e)
+        return super.dispatchTouchEvent(e)
+    }
+
+    private fun sideways(e: MotionEvent): Boolean {
+        val dx = Math.abs(e.rawX - x0); val dy = Math.abs(e.rawY - y0)
+        return onSwipe != null && dx > slop * 2 && dx > dy * 1.5f
+    }
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_MOVE && !dragging && sideways(e)) { dragging = true; parent?.requestDisallowInterceptTouchEvent(true) }
+        return dragging
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (!dragging && e.actionMasked == MotionEvent.ACTION_MOVE && sideways(e)) {
+            dragging = true
+            parent?.requestDisallowInterceptTouchEvent(true)
+            val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
+            super.onTouchEvent(cancel); cancel.recycle() // no click, no long press
+        }
+        if (!dragging) return super.onTouchEvent(e)
+        val dx = e.rawX - x0
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> translationX = dx * 0.4f
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                vt?.computeCurrentVelocity(1000)
+                val v = vt?.xVelocity ?: 0f
+                val go = e.actionMasked == MotionEvent.ACTION_UP && (Math.abs(dx) > width * 0.25f || (Math.abs(v) > 900 * resources.displayMetrics.density && Math.abs(dx) > slop * 3))
+                if (go) {
+                    performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                    onSwipe?.invoke(if (dx < 0) 1 else -1)
+                }
+                animate().translationX(0f).setDuration(160).start()
+                dragging = false
+            }
+        }
+        return true
+    }
 }

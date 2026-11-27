@@ -38,6 +38,27 @@ class PageGrid(ctx: Context) : View(ctx) {
     var onHold: ((Int) -> Unit)? = null
     /** +1 = next page, -1 = previous (a quick sideways fling). */
     var onFling: ((Int) -> Unit)? = null
+    /** Hold a cell, then slide without lifting: the cells from [anchor] to [to] (page indices); [onDragEnd] when the finger lifts. */
+    var onDragSelect: ((anchor: Int, to: Int) -> Unit)? = null
+    var onDragEnd: (() -> Unit)? = null
+    /** Pinch: +1 = spread (bigger photos, fewer columns), −1 = pinch together (more columns). Once per gesture. */
+    var onPinch: ((Int) -> Unit)? = null
+    private var pinchScale = 1f
+    private var pinched = false
+    private val scaler = android.view.ScaleGestureDetector(ctx, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScaleBegin(det: android.view.ScaleGestureDetector): Boolean { pinchScale = 1f; return onPinch != null }
+        override fun onScale(det: android.view.ScaleGestureDetector): Boolean {
+            pinchScale *= det.scaleFactor
+            if (!pinched && (pinchScale > 1.25f || pinchScale < 0.8f)) {
+                pinched = true
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onPinch?.invoke(if (pinchScale > 1f) 1 else -1)
+            }
+            return true
+        }
+    })
+    private var dragAnchor = -1
+    private var dragAt = -1
     var onSize: ((Int, Int) -> Unit)? = null
 
     private val d = resources.displayMetrics.density
@@ -147,6 +168,7 @@ class PageGrid(ctx: Context) : View(ctx) {
             if (i in items.indices && onHold != null) {
                 performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 onHold?.invoke(i)
+                if (onDragSelect != null && labels == null) { dragAnchor = i; dragAt = i; parent?.requestDisallowInterceptTouchEvent(true) }
             }
         }
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
@@ -156,5 +178,32 @@ class PageGrid(ctx: Context) : View(ctx) {
         }
     })
 
-    override fun onTouchEvent(e: MotionEvent): Boolean = gestures.onTouchEvent(e)
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (dragAnchor < 0) {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) pinched = false
+            scaler.onTouchEvent(e)
+            if (e.pointerCount > 1 || pinched || scaler.isInProgress) {
+                // two fingers: no tap, hold or page fling
+                if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }.let { gestures.onTouchEvent(it); it.recycle() }
+                return true
+            }
+            return gestures.onTouchEvent(e)
+        }
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val i = indexAt(e).coerceIn(0, (items.size - 1).coerceAtLeast(0))
+                if (e.y >= 0 && i != dragAt && i in items.indices) {
+                    dragAt = i
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    onDragSelect?.invoke(dragAnchor, i)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                dragAnchor = -1; dragAt = -1
+                onDragEnd?.invoke()
+                MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }.let { gestures.onTouchEvent(it); it.recycle() } // no tap, no fling
+            }
+        }
+        return true
+    }
 }

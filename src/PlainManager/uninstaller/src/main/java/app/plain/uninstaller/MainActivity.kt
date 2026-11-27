@@ -390,7 +390,8 @@ class MainActivity : Activity() {
             .section(tr("App", "Uygulama"))
             // A language change recreates the activity; tab, filter and selections come back through
             // onSaveInstanceState. Not while a batch is running.
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) {
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true,
+                reset = Sheet.languageReset(this) { if (busy) toast(tr("The new language shows after this job", "Yeni dil bu işlemden sonra görünür")) else recreate() }) {
                 Sheet.language(this, C.ACCENT) {
                     if (busy) toast(tr("The new language shows after this job", "Yeni dil bu işlemden sonra görünür")) else recreate()
                 }

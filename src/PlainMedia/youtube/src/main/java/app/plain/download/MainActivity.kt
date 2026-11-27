@@ -485,12 +485,15 @@ class MainActivity : Activity() {
             )
             .section(tr("Downloads", "İndirmeler"))
             .toggle(Ic.WIFI, tr("Wi-Fi only", "Yalnızca Wi-Fi"), Store.wifiOnly, sub = tr("Off: mobile data is used too", "Kapalı: mobil veri de kullanılır")) { on -> Store.wifiOnly = on }
-            .item(Ic.TUNE, tr("Audio format", "Ses biçimi"), value = if (Store.originalAudio) tr("Original", "Orijinal") else tr("Clean M4A", "Temiz M4A"), more = true) { audioFormatMenu() }
-            .item(Ic.SPEED, tr("Parallel audio downloads", "Paralel ses indirme"), sub = tr("For bulk music downloads", "Toplu müzik indirmeleri için"), value = "${Store.parallelAudio}", more = true) {
+            .item(Ic.TUNE, tr("Audio format", "Ses biçimi"), value = if (Store.originalAudio) tr("Original", "Orijinal") else tr("Clean M4A", "Temiz M4A"), more = true,
+                reset = Sheet.Reset(tr("Original", "Orijinal")) { Store.originalAudio = true }) { audioFormatMenu() }
+            .item(Ic.SPEED, tr("Parallel audio downloads", "Paralel ses indirme"), sub = tr("For bulk music downloads", "Toplu müzik indirmeleri için"), value = "${Store.parallelAudio}", more = true,
+                reset = Sheet.Reset("3") { Store.parallelAudio = 3 }) {
                 Sheet.choose(this, tr("Parallel audio downloads", "Paralel ses indirme"), (1..4).map { "$it" }, Store.parallelAudio - 1, C.ACCENT,
                     tr("More is faster on good Wi-Fi; videos always download one at a time", "İyi Wi-Fi'de çoğu daha hızlıdır; videolar her zaman tek tek iner")) { Store.parallelAudio = it + 1 }
             }
-            .item(Ic.PHOTO, tr("Cover art in audio files", "Ses dosyalarında kapak"), value = Store.artQuality.label, more = true) { artMenu() }
+            .item(Ic.PHOTO, tr("Cover art in audio files", "Ses dosyalarında kapak"), value = Store.artQuality.label, more = true,
+                reset = Sheet.Reset(ArtQuality.LOW.label) { Store.artQuality = ArtQuality.LOW }) { artMenu() }
             .item(Ic.ADD, tr("Add missing cover art", "Eksik kapakları ekle"), sub = tr("For files saved without one", "Kapaksız kaydedilen dosyalar için")) { offerArt(force = true) }
             .section(tr("Storage", "Depolama"))
             .item(Ic.CACHE, tr("Cache limits", "Önbellek sınırları"), value = "${Store.videoCapGb} / ${Store.musicCapGb} GB", sub = tr("Video / music", "Video / müzik"), more = true) { cacheLimits() }
@@ -501,12 +504,13 @@ class MainActivity : Activity() {
             .section(tr("Playback", "Oynatma"))
             .toggle(Ic.PIP, tr("Picture-in-picture on Home", "Ana ekranda küçük pencere"), Store.pipAuto,
                 sub = tr("Off: Home pauses the video", "Kapalı: Ana ekran videoyu duraklatır")) { on -> Store.pipAuto = on; player.updatePip(force = true) }
-            .item(Ic.MAP, tr("Region for blocked videos", "Engelli videolar için bölge"), value = Store.altRegion.ifEmpty { tr("Off", "Kapalı") }, more = true) { regionMenu() }
+            .item(Ic.MAP, tr("Region for blocked videos", "Engelli videolar için bölge"), value = Store.altRegion.ifEmpty { tr("Off", "Kapalı") }, more = true,
+                reset = Sheet.Reset("US") { Store.altRegion = "US" }) { regionMenu() }
             .section(tr("Account", "Hesap"))
             .item(Ic.ACCOUNT, tr("YouTube account", "YouTube hesabı"), value = acct, more = true) { account.show() }
             .item(Ic.UPLOAD, tr("Import subscriptions", "Abonelikleri içe aktar"), sub = tr("From a Google Takeout file", "Google Takeout dosyasından"), more = true) { selectTab(1); search.importDialog() }
             .section(tr("App", "Uygulama"))
-            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, C.ACCENT) { languageChanged() } }
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this) { languageChanged() }) { Sheet.language(this, C.ACCENT) { languageChanged() } }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .item(Ic.INFO, tr("About & legal", "Hakkında ve yasal")) { about() }
             .show()

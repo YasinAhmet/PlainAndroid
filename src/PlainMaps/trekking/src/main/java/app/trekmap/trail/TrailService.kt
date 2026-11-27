@@ -44,14 +44,17 @@ class TrailService : Service() {
     }
 
     private fun startFg() {
-        val start = if (Trail.startTime > 0) Trail.startTime else System.currentTimeMillis()
+        // the chronometer counts trail time (pauses left out); paused: no clock
+        val start = if (Trail.startTime > 0) System.currentTimeMillis() - Trail.movingMs else System.currentTimeMillis()
+        val paused = Trail.paused
         val n = Notification.Builder(this, Notif.TRAIL)
             .setSmallIcon(R.drawable.trail_ic_notif)
-            .setContentTitle(tr("Recording trail", "Rota kaydediliyor"))
-            .setContentText(tr("Tap to open · hold the power button in the app to stop", "Açmak için dokunun · durdurmak için uygulamadaki düğmeye basılı tutun"))
-            .setUsesChronometer(true)
+            .setContentTitle(if (paused) tr("Trail paused · GPS off", "Rota duraklatıldı · GPS kapalı") else tr("Recording trail", "Rota kaydediliyor"))
+            .setContentText(if (paused) tr("Tap the button in the app to go on · hold it to stop", "Sürdürmek için uygulamadaki düğmeye dokunun · durdurmak için basılı tutun")
+                else tr("Tap to open · tap the power button to pause, hold it to stop", "Açmak için dokunun · duraklatmak için düğmeye dokunun, durdurmak için basılı tutun"))
+            .setUsesChronometer(!paused)
             .setWhen(start)
-            .setShowWhen(true)
+            .setShowWhen(!paused)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setContentIntent(Notif.openApp(this))

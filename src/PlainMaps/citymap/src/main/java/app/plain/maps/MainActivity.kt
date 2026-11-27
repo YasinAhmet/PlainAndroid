@@ -623,8 +623,9 @@ open class MainActivity : Activity() {
             "Bu dairede duran hat yok. Daha büyük daire için haritaya basılı tutun (400 m'ye kadar) ya da bir sokağa daha yakın dokunun.")))
         return rows.mapIndexed { i, r ->
             val col = lineColor(r.v, i)
+            // tap: the line; hold: the stop named under it (all its lines)
             row(badge(r.v.ref, col), "→ " + r.v.headsign.ifEmpty { r.v.lineName },
-                warn(r.v) + "${r.stop.name} · ${Fmt.dist(r.dist)}" + times(r.next, now, r.v)) {
+                warn(r.v) + "${r.stop.name} · ${Fmt.dist(r.dist)}" + times(r.next, now, r.v), onLong = { show(Screen.StopS(r.stop.id)) }) {
                 show(Screen.LineS(r.v.id, r.stop.id))
             }
         }
@@ -1326,7 +1327,7 @@ open class MainActivity : Activity() {
                     val km = String.format(java.util.Locale.US, "%.1f", (l.v.dists[l.alightIdx] - l.v.dists[l.boardIdx]) / 1000.0)
                     tr("Board at ${l.board.name} · $dep\n$stopsN stop${if (stopsN > 1) "s" else ""} ($km km) to ${l.alight.name}",
                         "Biniş: ${l.board.name} · $dep\n$stopsN durak ($km km), iniş: ${l.alight.name}")
-                }) {
+                }, onLong = { show(Screen.StopS(l.board.id)) }) { // hold: the boarding stop
                 show(Screen.LineS(l.v.id, l.board.id))
             })
         }
@@ -1607,13 +1608,14 @@ open class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------------------ rows
-    private fun row(lead: View, title: String, sub: String?, leadSize: Int = 0, onClick: () -> Unit): View {
+    private fun row(lead: View, title: String, sub: String?, leadSize: Int = 0, onLong: (() -> Unit)? = null, onClick: () -> Unit): View {
         val r = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(5), dp(6), dp(5))
             background = ripple(null)
             setOnClickListener { onClick() }
+            if (onLong != null) setOnLongClickListener { onLong(); true }
         }
         if (leadSize > 0) r.addView(lead, lpL(leadSize, leadSize).apply { rightMargin = dp(12); leftMargin = dp(4) })
         else r.addView(lead, lpL(WRAP, WRAP).apply { rightMargin = dp(10) })

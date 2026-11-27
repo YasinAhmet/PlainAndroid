@@ -708,6 +708,38 @@ object Player {
             when (action) { CUSTOM_BACK -> seekBy(-SeekStep.MS); CUSTOM_FWD -> seekBy(SeekStep.MS) }
         }
         override fun onStop() = stop()
+        // the headset / Bluetooth button: 1× play/pause, 2× next, 3× previous, hold = stop after this song
+        override fun onMediaButtonEvent(i: android.content.Intent): Boolean {
+            @Suppress("DEPRECATION")
+            val k = (if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(android.content.Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                else i.getParcelableExtra<KeyEvent>(android.content.Intent.EXTRA_KEY_EVENT)) ?: return super.onMediaButtonEvent(i)
+            if (k.keyCode != KeyEvent.KEYCODE_HEADSETHOOK && k.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) return super.onMediaButtonEvent(i)
+            buttonKey(k)
+            return true
+        }
+    }
+
+    private var presses = 0
+    private var held = false
+    private val flushPresses = Runnable {
+        val n = presses
+        presses = 0
+        when { n == 1 -> toggle(); n == 2 -> next(); n >= 3 -> prev() }
+    }
+
+    /** Counts presses of the one headset button (a short wait tells 1, 2 and 3 apart). */
+    private fun buttonKey(k: KeyEvent) {
+        when (k.action) {
+            KeyEvent.ACTION_DOWN -> if (k.repeatCount == 0) held = false
+                else if (!held) { held = true; main.removeCallbacks(flushPresses); presses = 0; toggleStopAfterSong() }
+            KeyEvent.ACTION_UP -> if (!held) { presses++; main.removeCallbacks(flushPresses); main.postDelayed(flushPresses, 450) }
+        }
+    }
+
+    /** Pause after the current song, or cancel that (hold play/pause, hold the headset button). */
+    fun toggleStopAfterSong(): Boolean {
+        if (sleepEndOfSong) setSleepMinutes(0) else setSleepEndOfSong()
+        return sleepEndOfSong
     }
     private const val CUSTOM_BACK = "back10"
     private const val CUSTOM_FWD = "fwd10"

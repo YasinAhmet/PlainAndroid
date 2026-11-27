@@ -42,6 +42,12 @@ import app.plain.shared.R
 class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
     class Action(val icon: Int, val label: String, val fn: () -> Unit)
 
+    /**
+     * Hold a setting row to put it back to its default: [label] is the default as the row shows it, [fn] applies it.
+     * [closes]: the reset rebuilds the screen (language), so the sheet closes first.
+     */
+    class Reset(val label: String, val closes: Boolean = false, val fn: () -> Unit)
+
     private val dialog = Dialog(a)
     private val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
     private var rows = 0
@@ -98,20 +104,30 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
     /**
      * A row. [value]: the current setting, shown on the right; [more]: opens another choice (› on the right);
      * [danger]: red (erase, delete…); [keepOpen]: the sheet stays (for rows that only change something shown here);
-     * [onLong]: a long press (edit / delete the thing the row stands for).
+     * [onLong]: a long press (edit / delete the thing the row stands for); [reset]: a long press puts the setting back to
+     * its default (the row's value changes in place, the sheet stays).
      */
     fun item(icon: Int?, label: String, sub: String? = null, value: String? = null, more: Boolean = false,
-             danger: Boolean = false, enabled: Boolean = true, keepOpen: Boolean = false, onLong: (() -> Unit)? = null, fn: () -> Unit): Sheet {
+             danger: Boolean = false, enabled: Boolean = true, keepOpen: Boolean = false, onLong: (() -> Unit)? = null,
+             reset: Reset? = null, fn: () -> Unit): Sheet {
         val color = when { !enabled -> FAINT; danger -> RED; else -> TEXT }
         val r = rowBase(icon, label, sub, if (danger) RED else if (enabled) DIM else FAINT, color)
-        if (value != null) r.addView(text(value, 14f, if (enabled) DIM else FAINT, lines = 1).apply {
+        val valueView = if (value != null) text(value, 14f, if (enabled) DIM else FAINT, lines = 1).apply {
             gravity = Gravity.END
             maxWidth = dp(150)
             setPadding(dp(10), 0, if (more) dp(2) else 0, 0)
-        })
+        }.also { r.addView(it) } else null
         if (more) r.addView(icon(R.drawable.sheet_ic_chevron, FAINT), LinearLayout.LayoutParams(dp(20), dp(20)))
         if (enabled) r.setOnClickListener { if (!keepOpen) dialog.dismiss(); fn() } else r.isEnabled = false
         if (enabled && onLong != null) r.setOnLongClickListener { dialog.dismiss(); onLong(); true }
+        else if (enabled && reset != null) r.setOnLongClickListener {
+            if (valueView?.text?.toString() == reset.label) { toast(tr("Already the default: ${reset.label}", "Zaten varsayılan: ${reset.label}")); return@setOnLongClickListener true }
+            if (reset.closes) dialog.dismiss()
+            reset.fn()
+            valueView?.text = reset.label
+            toast(tr("Reset to ${reset.label}", "Varsayılana döndü: ${reset.label}"))
+            true
+        }
         add(r)
         return this
     }
@@ -221,6 +237,8 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
 
     private fun icon(res: Int, tint: Int) = ImageView(a).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(tint) }
 
+    private fun toast(s: String) = android.widget.Toast.makeText(a, s, android.widget.Toast.LENGTH_SHORT).show()
+
     private fun text(s: String, sp: Float, color: Int, bold: Boolean = false, lines: Int = 1) = TextView(a).apply {
         text = s
         textSize = sp
@@ -297,6 +315,10 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
 
         /** The language row's value: "English", "Türkçe" or "System default (English)". */
         fun languageValue(): String = PlainLang.name(PlainLang.choice)
+
+        /** Hold the language row: back to the phone's language. */
+        fun languageReset(a: Activity, onChanged: () -> Unit = { a.recreate() }) =
+            Reset(PlainLang.name(PlainLang.SYSTEM), closes = true) { if (PlainLang.choice != PlainLang.SYSTEM) { PlainLang.set(a, PlainLang.SYSTEM); onChanged() } }
 
         /** This app's version for the "Check for updates" row ("v3.6"). */
         fun version(a: Activity): String = try { "v" + a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "" }
