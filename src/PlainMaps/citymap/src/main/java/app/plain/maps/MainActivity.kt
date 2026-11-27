@@ -251,7 +251,7 @@ open class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundRect(C.CARD, dpf(22))
+            background = outline(dpf(22))
             setPadding(dp(10), 0, dp(2), 0)
         }
         box.addView(Icon(this, Icon.SEARCH).apply { color = C.DIM }, lpL(dp(20), dp(20)))
@@ -307,14 +307,14 @@ open class MainActivity : Activity() {
         val fabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
         val routeBtn = Icon(this, Icon.ROUTE).apply {
             color = C.ACCENT
-            background = ripple(oval(C.PANEL))
+            background = ripple(outlineOval(fill = C.PANEL))
             contentDescription = tr("Route", "Rota")
             setOnClickListener { hideKeyboard(); search.clearFocus(); openRoute() }
         }
         fabs.addView(routeBtn, lpL(dp(50), dp(50)).apply { rightMargin = dp(10) })
         gpsBtn = Icon(this, Icon.GPS).apply {
             color = C.DIM
-            background = ripple(oval(C.PANEL))
+            background = ripple(outlineOval(fill = C.PANEL))
             setOnClickListener { gpsTap() }
         }
         fabs.addView(gpsBtn, lpL(dp(50), dp(50)))
@@ -324,6 +324,7 @@ open class MainActivity : Activity() {
             background = GradientDrawable().apply {
                 setColor(C.PANEL)
                 cornerRadii = floatArrayOf(dpf(16), dpf(16), dpf(16), dpf(16), 0f, 0f, 0f, 0f)
+                setStroke(dp(1), C.LINE)
             }
             isClickable = true
         }
@@ -727,7 +728,7 @@ open class MainActivity : Activity() {
             val views = ArrayList<View>()
             views.add(routeButtons(Pt(st.lat, st.lon, st.name)))
             for (nt in d.notices) views.add(text("⚠ ${nt.at}\n${nt.msg}", 13f, 0xFFFFCC80.toInt()).apply {
-                setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundRect(0x33FF9800, dpf(8))
+                setPadding(dp(10), dp(8), dp(10), dp(8)); background = outline(dpf(8), 0x99FF9800.toInt())
                 layoutParams = lpL(MATCH, WRAP).apply { bottomMargin = dp(6) }
             })
             if (d.rows.isEmpty()) views.add(note(tr("No departures from this stop in the timetable.", "Saat çizelgesinde bu duraktan kalkış yok.")))
@@ -787,7 +788,7 @@ open class MainActivity : Activity() {
 
             for (nt in d.notices) {
                 views.add(text(tr("⚠ İETT notice", "⚠ İETT duyurusu") + " · ${nt.kind} · ${nt.at}\n${nt.msg}", 13f, 0xFFFFCC80.toInt()).apply {
-                    setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundRect(0x33FF9800, dpf(8))
+                    setPadding(dp(10), dp(8), dp(10), dp(8)); background = outline(dpf(8), 0x99FF9800.toInt())
                     layoutParams = lpL(MATCH, WRAP).apply { bottomMargin = dp(6) }
                 })
             }
@@ -847,7 +848,7 @@ open class MainActivity : Activity() {
         val sat = 1 shl 5; val sun = 1 shl 6; val weekday = 0x1F
         for ((label, mask) in listOf(tr("Weekdays", "Hafta içi") to weekday, tr("Saturday", "Cumartesi") to sat, tr("Sunday", "Pazar") to sun)) {
             val on = s.day and mask != 0
-            days.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.TEXT) {
+            days.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) C.ACCENT else C.TEXT) {
                 s.day = if (mask == weekday) 1 else mask
                 render()
             }, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
@@ -1132,7 +1133,7 @@ open class MainActivity : Activity() {
             for ((label, bit) in listOf(tr("Lines", "Hatlar") to Store.Kinds.LINES, tr("Stops", "Duraklar") to Store.Kinds.STOPS,
                 tr("Places", "Yerler") to Store.Kinds.PLACES, tr("Streets", "Sokaklar") to Store.Kinds.STREETS)) {
                 val on = kinds and bit != 0
-                bar.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) 0xFF06262B.toInt() else C.DIM) {
+                bar.addView(button(label, if (on) C.ACCENT else C.CARD, if (on) C.ACCENT else C.DIM) {
                     val k = kinds xor bit
                     searchKinds = if (k == 0) Store.Kinds.ALL else k
                     render()
@@ -1141,7 +1142,7 @@ open class MainActivity : Activity() {
         }
         val placeCats = placeCats
         val n = cats?.size ?: placeCats.size
-        bar.addView(button(tr("Place types ($n/${placeCats.size})", "Yer türleri ($n/${placeCats.size})"), if (cats != null) C.ACCENT else C.CARD, if (cats != null) 0xFF06262B.toInt() else C.TEXT) {
+        bar.addView(button(tr("Place types ($n/${placeCats.size})", "Yer türleri ($n/${placeCats.size})"), if (cats != null) C.ACCENT else C.CARD, if (cats != null) C.ACCENT else C.TEXT) {
             val checked = BooleanArray(placeCats.size) { cats == null || placeCats[it].first in cats }
             android.app.AlertDialog.Builder(this).setTitle(tr("Show these places", "Bu yerleri göster"))
                 .setMultiChoiceItems(placeCats.map { it.second }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
@@ -1241,7 +1242,7 @@ open class MainActivity : Activity() {
             col.addView(text(label, 12f, C.DIM))
             col.addView(text(if (picking == which) tr("Tap the map…", "Haritaya dokunun…") else p?.name ?: tr("Not set", "Seçilmedi"), 15f, if (picking == which) C.ACCENT else C.TEXT, lines = 1))
             r.addView(col, lpL(0, WRAP, 1f))
-            r.addView(button(tr("Map", "Harita"), if (picking == which) C.ACCENT else C.CARD, if (picking == which) 0xFF06262B.toInt() else C.TEXT) {
+            r.addView(button(tr("Map", "Harita"), if (picking == which) C.ACCENT else C.CARD, if (picking == which) C.ACCENT else C.TEXT) {
                 picking = if (picking == which) 0 else which
                 render()
             }, lpL(WRAP, WRAP).apply { leftMargin = dp(6) })
@@ -1298,7 +1299,7 @@ open class MainActivity : Activity() {
                     tr("\nBoard at ${first.board.name}$dep", "\nBiniş: ${first.board.name}$dep")
                 val r = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
-                    background = ripple(roundRect(if (i == 0) 0x1826C6DA else 0x0FFFFFFF, dpf(10)))
+                    background = ripple(outline(dpf(10), if (i == 0) C.ACCENT else C.OUTLINE))
                     setOnClickListener { show(Screen.Legs(o)) }
                     layoutParams = lpL(MATCH, WRAP).apply { topMargin = dp(6) }
                 }
@@ -1354,7 +1355,7 @@ open class MainActivity : Activity() {
         }
         views.add(note(tr("Get off at ${o.legs.last().alight.name}, about ${Fmt.dist(o.j.endDist.toDouble())} from the destination.",
             "İniş: ${o.legs.last().alight.name}, hedefe yaklaşık ${Fmt.dist(o.j.endDist.toDouble())}.")))
-        views.add(button(tr("★ Save to My routes", "★ Rotalarıma kaydet"), C.ACCENT, 0xFF06262B.toInt()) { saveRoute(o) }.apply {
+        views.add(button(tr("★ Save to My routes", "★ Rotalarıma kaydet"), C.ACCENT, C.ACCENT) { saveRoute(o) }.apply {
             layoutParams = lpL(MATCH, WRAP).apply { topMargin = dp(8) }
         })
         body(*views.toTypedArray())
@@ -1465,7 +1466,7 @@ open class MainActivity : Activity() {
                 "It needs Wi-Fi and ${City.downloadSize} of download, and takes 10–60 minutes. After that, everything works offline.",
                 "Eşitleme ${City.localName} haritasını, yerleri, metro/tramvay/vapur hatlarını (OpenStreetMap) ve tüm ${City.operator} otobüs hatlarını, " +
                     "duraklarını ve saatlerini indirir. Wi-Fi ve ${City.downloadSize} indirme gerekir; 10–60 dakika sürer. Sonrasında her şey çevrimdışı çalışır.")),
-            button(tr("Open sync settings", "Eşitleme ayarlarını aç"), C.ACCENT, 0xFF06262B.toInt()) { show(Screen.Settings) },
+            button(tr("Open sync settings", "Eşitleme ayarlarını aç"), C.ACCENT, C.ACCENT) { show(Screen.Settings) },
         )
     }
 
@@ -1499,7 +1500,7 @@ open class MainActivity : Activity() {
             } ?: tr("No situational sync yet.", "Henüz güncel durum eşitlemesi yapılmadı.") else ""
             main.post { info.text = s; sitInfo?.text = sit }
         }
-        syncBtn = button("", C.ACCENT, 0xFF06262B.toInt()) {
+        syncBtn = button("", C.ACCENT, C.ACCENT) {
             if (SyncState.running) SyncService.stop() else startSync()
         }
         views.add(syncBtn!!)
@@ -1653,7 +1654,7 @@ open class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(6), 0)
-            background = ripple(if (focus) roundRect(0x22FFD740, dpf(8)) else null)
+            background = ripple(if (focus) outline(dpf(8), 0x99FFD740.toInt()) else null)
             setOnClickListener { onClick() }
         }
         val track = object : View(this) {

@@ -358,8 +358,7 @@ class MapView(ctx: Context) : View(ctx) {
         }
         circle?.let { ci ->
             val r = (ci[2] / Geo.metersPerUnit(Geo.lat(ci[1])) * world).toFloat()
-            fill.color = 0x18FFFFFF
-            c.drawCircle((ci[0] * world - ox).toFloat(), (ci[1] * world - oy).toFloat(), r, fill)
+            // outline only: a filled disc would light every pixel inside it (OLED)
             c.drawCircle((ci[0] * world - ox).toFloat(), (ci[1] * world - oy).toFloat(), r, circlePaint)
         }
         if (holdR > 0.0) {

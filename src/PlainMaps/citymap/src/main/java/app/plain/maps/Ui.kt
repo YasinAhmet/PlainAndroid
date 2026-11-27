@@ -21,8 +21,12 @@ const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 object C {
-    const val PANEL = 0xF7202328.toInt()
-    const val CARD = 0xFF22262B.toInt()
+    // OLED (2026-11-28): panels over the map are near-opaque black (they darken the map, they light nothing) and
+    // buttons/cards are black with a 1 dp outline; nothing non-black is filled.
+    const val PANEL = 0xF2000000.toInt()
+    const val CARD = 0xFF000000.toInt()
+    const val LINE = 0xFF333333.toInt()
+    const val OUTLINE = 0xFF222222.toInt()
     const val TEXT = 0xFFEDEDED.toInt()
     const val DIM = 0xFF9AA0A6.toInt()
     const val ACCENT = 0xFF26C6DA.toInt()
@@ -40,6 +44,12 @@ fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density
 fun Context.dpf(v: Number): Float = v.toFloat() * resources.displayMetrics.density
 
 fun roundRect(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
+/** Black shape with a 1 dp outline (the OLED replacement for a filled one). */
+fun Context.outline(radius: Float, stroke: Int = C.LINE, fill: Int = 0xFF000000.toInt()) =
+    GradientDrawable().apply { setColor(fill); cornerRadius = radius; setStroke(dp(1), stroke) }
+fun Context.outlineOval(stroke: Int = C.LINE, fill: Int = 0xFF000000.toInt()) =
+    GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill); setStroke(dp(1), stroke) }
+
 fun ripple(bg: Drawable?) = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, if (bg == null) roundRect(0xFFFFFFFF.toInt(), 0f) else null)
 
 fun lpL(w: Int, h: Int, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
@@ -53,24 +63,35 @@ fun Context.text(s: CharSequence, sp: Float = 14f, color: Int = C.TEXT, bold: Bo
     if (lines > 0) { maxLines = lines; ellipsize = TextUtils.TruncateAt.END }
 }
 
+/** An outlined button: [color] is the outline ([C.CARD] = the plain grey line, [C.ACCENT] = on / primary). */
 fun Context.button(label: String, color: Int = C.CARD, textColor: Int = C.TEXT, onClick: (View) -> Unit) = TextView(this).apply {
     text = label
     textSize = 13.5f
     setTextColor(textColor)
     gravity = Gravity.CENTER
-    background = ripple(roundRect(color, dpf(16)))
+    background = ripple(outline(dpf(16), if (color == C.CARD) C.LINE else color))
     setPadding(dp(12), dp(6), dp(12), dp(6))
     setOnClickListener(onClick)
 }
 
-/** A line number in a coloured pill. */
+/** [color] made light enough to read on black (dark line colours are mixed towards white). */
+fun readable(color: Int): Int {
+    val r = (color shr 16) and 0xFF; val g = (color shr 8) and 0xFF; val b = color and 0xFF
+    val lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if (lum >= 110) return color or 0xFF000000.toInt()
+    val t = ((110 - lum) / 110.0 * 0.7 + 0.25).coerceAtMost(0.8)
+    fun mix(c: Int) = (c + (255 - c) * t).toInt().coerceIn(0, 255)
+    return (0xFF shl 24) or (mix(r) shl 16) or (mix(g) shl 8) or mix(b)
+}
+
+/** A line number in a pill outlined in the line's colour (OLED: outline and text, no fill). */
 fun Context.badge(ref: String, color: Int) = TextView(this).apply {
     text = ref
     textSize = 13f
     setTypeface(Typeface.DEFAULT_BOLD)
-    val lum = (0.299 * ((color shr 16) and 0xFF) + 0.587 * ((color shr 8) and 0xFF) + 0.114 * (color and 0xFF))
-    setTextColor(if (lum > 150) 0xFF101010.toInt() else 0xFFFFFFFF.toInt())
-    background = roundRect(color or 0xFF000000.toInt(), dpf(6))
+    val c = readable(color)
+    setTextColor(c)
+    background = GradientDrawable().apply { setColor(0xFF000000.toInt()); cornerRadius = dpf(6); setStroke((1.5f * resources.displayMetrics.density).toInt().coerceAtLeast(1), c) }
     gravity = Gravity.CENTER
     minWidth = dp(46)
     setPadding(dp(6), dp(3), dp(6), dp(3))

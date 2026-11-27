@@ -323,10 +323,11 @@ class SetupActivity : Activity(), Installer.Listener {
         setColor(C.BG); cornerRadius = dp(radius).toFloat(); setStroke(dp(1), stroke)
     }
 
-    private fun pill(label: String, primary: Boolean, onClick: () -> Unit) = text(label, 15f, if (primary) C.BG else C.TEXT, bold = true).apply {
+    private fun pill(label: String, primary: Boolean, onClick: () -> Unit) = text(label, 15f, if (primary) C.ACCENT else C.TEXT, bold = true).apply {
         gravity = Gravity.CENTER
         setPadding(dp(16), dp(12), dp(16), dp(12))
-        background = if (primary) GradientDrawable().apply { setColor(C.ACCENT); cornerRadius = dp(24).toFloat() } else outline(0xFF3A3A3A.toInt(), 24)
+        // the primary one is outlined in the accent, not filled (OLED)
+        background = if (primary) outline(C.ACCENT, 24) else outline(0xFF3A3A3A.toInt(), 24)
         setOnClickListener { onClick() }
     }
 

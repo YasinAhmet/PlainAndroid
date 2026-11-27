@@ -16,15 +16,18 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /**
- * Draws one map tile from the offline cells. A dark, plain style: streets, water and parks
- * underneath, the bus "web" (every İETT route, faint, so busy corridors glow brighter), rail and
+ * Draws one map tile from the offline cells. OLED style (2026-11-28): the ground is black, and coastlines, lakes and
+ * parks are outlines only (lit pixels cost battery), with streets the bus "web" (every İETT route, faint, so busy corridors glow brighter), rail and
  * ferry lines in their colours, then stops, places and labels.
  */
 class TileRenderer(private val store: Store, private val density: Float, val size: Int) {
     companion object {
-        const val NODATA = 0xFF121416.toInt()
-        const val LAND = 0xFF1B1E22.toInt()
-        const val WATER = 0xFF0E2232.toInt()
+        /** The ground, inside and outside the synced area: black (unlit OLED pixels). */
+        const val NODATA = 0xFF000000.toInt()
+        /** Coastlines and lake shores. */
+        const val WATER_EDGE = 0xFF3A7CA5.toInt()
+        /** The synced area's border, so the end of the data shows. */
+        const val AREA_EDGE = 0xFF2A2A2A.toInt()
         const val WEB = 0xFF26C6DA.toInt()
         private val EMPTY = emptyList<Feature>()
     }
@@ -45,6 +48,7 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
     // --------------------------------------------------------------- paints (each render thread has its own)
     private inner class Ctx {
         val fill = Paint().apply { style = Paint.Style.FILL; isAntiAlias = true }
+        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         val web = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.BUTT; strokeJoin = Paint.Join.ROUND }
         val ferry = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -54,7 +58,7 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
         val rail = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF4A4F56.toInt(); pathEffect = DashPathEffect(floatArrayOf(density * 3, density * 3), 0f) }
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB4B8BE.toInt(); textSize = density * 10.5f }
         val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xF0141619.toInt(); textSize = density * 10.5f; style = Paint.Style.STROKE; strokeWidth = density * 3f; strokeJoin = Paint.Join.ROUND
+            color = 0xFF000000.toInt(); textSize = density * 10.5f; style = Paint.Style.STROKE; strokeWidth = density * 3f; strokeJoin = Paint.Join.ROUND
         }
         val path = Path()
         val pts = FloatArray(4096)
@@ -85,12 +89,12 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
         return max(base * s, min) * density
     }
 
-    private fun areaColor(k: Int) = when (k) {
-        K.LAND -> LAND
-        K.WATER -> WATER
-        K.PARK -> 0xFF1C2A20.toInt()
-        K.FOREST -> 0xFF19271D.toInt()
-        else -> 0xFF1F251F.toInt()
+    /** Outline colour of an area (nothing is filled). */
+    private fun edgeColor(k: Int) = when (k) {
+        K.LAND, K.WATER -> WATER_EDGE
+        K.PARK -> 0xFF3B6B47.toInt()
+        K.FOREST -> 0xFF35603F.toInt()
+        else -> 0xFF44503F.toInt()
     }
 
     /** Is this kind drawn at tile zoom tz? */
@@ -119,19 +123,16 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
         cv.drawColor(NODATA)
         val area = store.area ?: return bmp
         val n = (1 shl tz).toDouble()
-        // the synced area: water around land when the coastline is known, plain land otherwise
+        // the synced area: only its border is drawn (land and sea are both black; the coastline is a line)
         val ax0 = ((Geo.mx(area.w) * n - tx) * size).toFloat(); val ax1 = ((Geo.mx(area.e) * n - tx) * size).toFloat()
         val ay0 = ((Geo.my(area.n) * n - ty) * size).toFloat(); val ay1 = ((Geo.my(area.s) * n - ty) * size).toFloat()
         if (ax1 < 0 || ay1 < 0 || ax0 > size || ay0 > size) return bmp
-        c.fill.color = LAND
-        cv.drawRect(ax0, ay0, ax1, ay1, c.fill)
+        c.edge.color = AREA_EDGE; c.edge.strokeWidth = density
+        cv.drawRect(ax0, ay0, ax1, ay1, c.edge)
+        // the coastline polygons are cut at this box: those cut edges are not coast
         val la = store.landArea
-        if (store.hasLand && la != null) {
-            // sea where the coastline is known; the land polygons cover the rest of it
-            c.fill.color = WATER
-            cv.drawRect(((Geo.mx(la.w) * n - tx) * size).toFloat(), ((Geo.my(la.n) * n - ty) * size).toFloat(),
-                ((Geo.mx(la.e) * n - tx) * size).toFloat(), ((Geo.my(la.s) * n - ty) * size).toFloat(), c.fill)
-        }
+        val landBox = if (store.hasLand && la != null) RectF(((Geo.mx(la.w) * n - tx) * size).toFloat(), ((Geo.my(la.n) * n - ty) * size).toFloat(),
+            ((Geo.mx(la.e) * n - tx) * size).toFloat(), ((Geo.my(la.s) * n - ty) * size).toFloat()) else null
         cv.save()
         cv.clipRect(ax0, ay0, ax1, ay1)
 
@@ -166,9 +167,11 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
             when {
                 f.rings != null -> {
                     if (f.kind == K.LAND && !store.hasLand) continue
-                    c.fill.color = areaColor(f.kind)
-                    buildPolygon(c.path, f, p)
-                    cv.drawPath(c.path, c.fill)
+                    if (f.kind >= K.PARK && tz < 12) continue // park outlines would only be clutter zoomed out
+                    c.edge.color = edgeColor(f.kind)
+                    c.edge.strokeWidth = density * (if (f.kind <= K.WATER) (if (tz >= 14) 1.4f else 1.1f) else 1f)
+                    buildOutline(c.path, f, p, if (f.kind == K.LAND) landBox else null)
+                    cv.drawPath(c.path, c.edge)
                 }
                 f.point -> {
                     drawPoint(cv, c, f, p, tz)
@@ -220,22 +223,35 @@ class TileRenderer(private val store: Store, private val density: Float, val siz
         else -> 10
     }
 
-    private fun buildPolygon(path: Path, f: Feature, p: Placed) {
+    /**
+     * The real edges of an area's rings as an open path. Rings were cut into cells (with a little padding) and the
+     * coastline's land polygons also at [cutBox]; edges made by those cuts are skipped, so only shores and park
+     * borders are drawn. Cell coordinates run 0..1, so a cut edge lies entirely at ≤ 0 or ≥ 1 on one axis.
+     */
+    private fun buildOutline(path: Path, f: Feature, p: Placed, cutBox: RectF?) {
         path.rewind()
-        path.fillType = Path.FillType.EVEN_ODD
         val rings = f.rings!!
         val xy = f.xy
+        val eps = 0.75f
         for (r in rings.indices) {
             val a = rings[r]
             val b = if (r + 1 < rings.size) rings[r + 1] else xy.size
-            var i = a
-            var first = true
-            while (i < b) {
-                val x = (p.ox + xy[i] * p.s).toFloat(); val y = (p.oy + xy[i + 1] * p.s).toFloat()
-                if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
-                i += 2
+            val cnt = (b - a) / 2
+            if (cnt < 2) continue
+            var pen = false
+            for (k in 0 until cnt) {
+                val i0 = a + 2 * k; val i1 = a + 2 * ((k + 1) % cnt)
+                val u0 = xy[i0]; val v0 = xy[i0 + 1]; val u1 = xy[i1]; val v1 = xy[i1 + 1]
+                val x0 = (p.ox + u0 * p.s).toFloat(); val y0 = (p.oy + v0 * p.s).toFloat()
+                val x1 = (p.ox + u1 * p.s).toFloat(); val y1 = (p.oy + v1 * p.s).toFloat()
+                val cut = (u0 <= 0f && u1 <= 0f) || (u0 >= 1f && u1 >= 1f) || (v0 <= 0f && v1 <= 0f) || (v0 >= 1f && v1 >= 1f) ||
+                    (cutBox != null && (
+                        (abs(x0 - cutBox.left) < eps && abs(x1 - cutBox.left) < eps) || (abs(x0 - cutBox.right) < eps && abs(x1 - cutBox.right) < eps) ||
+                        (abs(y0 - cutBox.top) < eps && abs(y1 - cutBox.top) < eps) || (abs(y0 - cutBox.bottom) < eps && abs(y1 - cutBox.bottom) < eps)))
+                if (cut) { pen = false; continue }
+                if (!pen) { path.moveTo(x0, y0); pen = true }
+                path.lineTo(x1, y1)
             }
-            path.close()
         }
     }
 

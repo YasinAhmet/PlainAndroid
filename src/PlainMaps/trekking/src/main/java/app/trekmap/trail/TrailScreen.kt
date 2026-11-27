@@ -68,7 +68,7 @@ class TrailScreen(private val act: MainActivity) {
 
     init {
         map.provider = provider
-        map.bg = 0xFF141414.toInt()
+        map.bg = C.BG
         map.maxTileZ = { Packs.maxZ(map.layer).coerceAtLeast(0) }
         map.layer = pickLayer()
         map.attribution = map.layer.attribution
@@ -78,7 +78,7 @@ class TrailScreen(private val act: MainActivity) {
         val top = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(10), act.dp(10), act.dp(10), 0) }
         offBar.apply {
             orientation = LinearLayout.VERTICAL
-            background = roundRect(C.PANEL, act.dpf(12))
+            background = act.outline(act.dpf(12), fill = C.PANEL)
             setPadding(act.dp(12), act.dp(8), act.dp(8), act.dp(8))
             addView(act.text(tr("Planned trail", "Planlanan rota"), 12f, C.DIM))
             addView(spinner, lpL(MATCH, act.dp(40)))
@@ -86,7 +86,7 @@ class TrailScreen(private val act: MainActivity) {
         }
         statsBox.apply {
             orientation = LinearLayout.VERTICAL
-            background = roundRect(C.PANEL, act.dpf(12))
+            background = act.outline(act.dpf(12), fill = C.PANEL)
             setPadding(act.dp(14), act.dp(8), act.dp(14), act.dp(10))
             val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
             row.addView(tDist, lpL(0, WRAP, 1f))
@@ -149,7 +149,7 @@ class TrailScreen(private val act: MainActivity) {
             text = "📷"
             textSize = 24f
             gravity = Gravity.CENTER
-            background = ripple(oval(C.PANEL))
+            background = ripple(act.outlineOval(fill = C.PANEL))
             elevation = act.dpf(4)
             setOnClickListener { act.takePhoto() }
             visibility = View.GONE
@@ -454,7 +454,10 @@ class TrailScreen(private val act: MainActivity) {
             else -> tr("STOP\n(hold)", "DUR\n(uzun bas)")
         }
         power.textSize = if (PlainLang.turkish || paused) 13f else 16f
-        power.background = ripple(oval(when { !on -> C.GREEN; paused -> 0xFFE0A030.toInt(); else -> C.RED }))
+        // a ring in the state's colour with the label in it, not a filled disc (OLED)
+        val ring = when { !on -> C.GREEN_LINE; paused -> C.AMBER_LINE; else -> C.RED_LINE }
+        power.background = ripple(act.outlineOval(ring, C.PANEL, 3f))
+        power.setTextColor(ring)
     }
 
     private fun togglePause() {

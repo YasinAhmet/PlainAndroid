@@ -252,7 +252,7 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
     private fun round(c: Int, r: Float) = GradientDrawable().apply { setColor(c); cornerRadius = r }
     private fun box(r: Float, stroke: Int) = GradientDrawable().apply { setColor(BG); cornerRadius = r; setStroke(dp(1), stroke) }
 
-    /** A small on/off switch drawn in the OLED style (outline when off, accent when on). */
+    /** A small on/off switch drawn in the OLED style: an outlined track, grey when off, the accent when on; never filled. */
     private class Switch(ctx: Context, private val accent: Int) : View(ctx) {
         var checked = false
             set(v) { field = v; invalidate() }
@@ -263,9 +263,9 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
             val d = resources.displayMetrics.density
             val h = height.toFloat(); val w = width.toFloat()
             rect.set(d, d, w - d, h - d)
-            p.style = if (checked) Paint.Style.FILL else Paint.Style.STROKE
+            p.style = Paint.Style.STROKE
             p.strokeWidth = 1.5f * d
-            p.color = if (checked) (accent and 0x00FFFFFF) or 0x66000000 else 0xFF555555.toInt()
+            p.color = if (checked) accent else 0xFF555555.toInt()
             c.drawRoundRect(rect, h / 2, h / 2, p)
             p.style = Paint.Style.FILL
             p.color = if (checked) accent else 0xFF8A8A8A.toInt()

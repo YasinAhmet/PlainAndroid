@@ -133,8 +133,11 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         val controls = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         shuffleBtn = act.icon(R.drawable.mus_ic_shuffle, 52, 13, desc = tr("Shuffle", "Karıştır")) { Player.toggleShuffle() }
         repeatBtn = act.icon(R.drawable.mus_ic_repeat, 52, 13, desc = tr("Repeat", "Tekrarla")) { Player.cycleRepeat() }
-        playBtn = act.icon(R.drawable.mus_ic_play, 72, 20, 0xFF000000.toInt(), tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
-        playBtn.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33000000), oval(C.TEXT), null)
+        playBtn = act.icon(R.drawable.mus_ic_play, 72, 20, C.TEXT, tr("Play/pause", "Oynat/duraklat")) { Player.toggle() }
+        // an outlined ring, not a white disc: a filled 72 dp circle lit more pixels than the rest of the screen (OLED)
+        playBtn.background = ripple(android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(C.BG); setStroke(act.dp(1.5f), C.TEXT)
+        })
         playBtn.setOnLongClickListener { act.toggleStopAfterSong(); true } // hold: stop after this song
         fun spacer() = View(act).also { controls.addView(it, lpL(0, 1, 1f)) }
         controls.addView(shuffleBtn); spacer()

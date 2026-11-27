@@ -73,7 +73,7 @@ class PlanScreen(private val act: MainActivity) {
         map.onMarkerTap = { m -> (m.tag as? Pair<*, *>)?.let { (p, d) -> if (p is Photo && d is java.io.File) openPhoto(p, d) } }
         map.layer = layer
         map.attribution = layer.attribution
-        map.bg = 0xFF2B2B2B.toInt()
+        map.bg = C.BG
         view.addView(map, FrameLayout.LayoutParams(MATCH, MATCH))
         buildTop()
         buildPanel()
@@ -102,7 +102,7 @@ class PlanScreen(private val act: MainActivity) {
         }
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         wifiLabel.setPadding(act.dp(8), act.dp(4), act.dp(8), act.dp(4))
-        wifiLabel.background = roundRect(C.PANEL, act.dpf(8))
+        wifiLabel.background = act.outline(act.dpf(8), fill = C.PANEL)
         row.addView(wifiLabel, lpL(WRAP, WRAP))
         row.addView(View(act), lpL(0, 1, 1f))
         row.addView(layerBtn, lpL(WRAP, act.dp(34)))
@@ -132,7 +132,7 @@ class PlanScreen(private val act: MainActivity) {
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundRect(C.CARD, act.dpf(12))
+            background = act.outline(act.dpf(12))
             setPadding(act.dp(12), act.dp(2), act.dp(3), act.dp(2))
         }
         box.addView(search, lpL(0, WRAP, 1f))
@@ -338,7 +338,7 @@ class PlanScreen(private val act: MainActivity) {
         section = i
         listAdapter = null
         body.removeAllViews()
-        tabBtns.forEachIndexed { k, b -> b.background = ripple(roundRect(if (k == i) C.GREEN else C.CARD, act.dpf(10))) }
+        tabBtns.forEachIndexed { k, b -> b.background = ripple(act.outline(act.dpf(10), if (k == i) C.GREEN_LINE else C.LINE)); b.setTextColor(if (k == i) C.GREEN_LINE else C.TEXT) }
         if (i < 0) {
             body.visibility = View.GONE
             return
@@ -712,7 +712,7 @@ class PlanScreen(private val act: MainActivity) {
 
     private fun updateSnapBtn() {
         snapBtn.text = if (Prefs.snap(act)) tr("Snap ✓", "Oturt ✓") else tr("Snap ✗", "Oturt ✗")
-        snapBtn.background = ripple(roundRect(if (Prefs.snap(act)) C.GREEN else C.CARD, act.dpf(10)))
+        snapBtn.background = ripple(act.outline(act.dpf(10), if (Prefs.snap(act)) C.GREEN_LINE else C.LINE)); snapBtn.setTextColor(if (Prefs.snap(act)) C.GREEN_LINE else C.TEXT)
     }
 
     private fun toggleSnap() {

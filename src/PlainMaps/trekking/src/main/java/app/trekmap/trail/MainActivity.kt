@@ -68,7 +68,7 @@ class MainActivity : Activity() {
         tabs = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF0E0E0E.toInt())
+            setBackgroundColor(C.BG)
             setPadding(dp(8), dp(4), dp(4), dp(4))
         }
         tabs.addView(Hub.switcher(this, "trekking"), lpL(WRAP, WRAP).apply { marginEnd = dp(6) })
@@ -116,8 +116,9 @@ class MainActivity : Activity() {
     private fun highlight(planTab: Boolean) {
         tabPlan.setTextColor(if (planTab) C.TEXT else C.DIM)
         tabTrail.setTextColor(if (planTab) C.DIM else C.TEXT)
-        tabPlan.setBackgroundColor(if (planTab) 0xFF1E1E1E.toInt() else 0)
-        tabTrail.setBackgroundColor(if (planTab) 0 else 0xFF1E1E1E.toInt())
+        // the chosen tab: outlined, not filled (OLED)
+        tabPlan.background = ripple(if (planTab) outline(dpf(10)) else roundRect(0, 0f))
+        tabTrail.background = ripple(if (planTab) roundRect(0, 0f) else outline(dpf(10)))
     }
 
     fun showPlan() {

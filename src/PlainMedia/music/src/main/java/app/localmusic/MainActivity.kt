@@ -1773,7 +1773,7 @@ class MainActivity : Activity() {
 
     class AlbumCard(ctx: MainActivity) : LinearLayout(ctx) {
         val art = SquareArtView(ctx, ctx.dpf(8))
-        val play = ctx.icon(R.drawable.mus_ic_play, 30, 7, 0xFF000000.toInt(), tr("Play album", "Albümü oynat"))
+        val play = ctx.icon(R.drawable.mus_ic_play, 30, 7, C.ACCENT, tr("Play album", "Albümü oynat"))
         val title = ctx.text("", 13f, C.TEXT, bold = true)
         val sub = ctx.text("", 11.5f, C.DIM, lines = 2)
 
@@ -1782,7 +1782,10 @@ class MainActivity : Activity() {
             setPadding(ctx.dp(4), ctx.dp(4), ctx.dp(4), ctx.dp(8))
             val box = FrameLayout(ctx)
             box.addView(art, lpF(MATCH, WRAP))
-            play.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33000000), oval(C.ACCENT), null)
+            // black disc with an accent ring over the art (OLED: no accent fill)
+            play.background = ripple(android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(C.BG); setStroke(ctx.dp(1.5f), C.ACCENT)
+            })
             box.addView(play, lpF(ctx.dp(30), ctx.dp(30), Gravity.END or Gravity.BOTTOM).apply { setMargins(0, 0, ctx.dp(5), ctx.dp(5)) })
             addView(box, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(title, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ctx.dp(4) })

@@ -28,8 +28,14 @@ const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 object C {
     const val BG = 0xFF000000.toInt()
-    const val PANEL = 0xEE121212.toInt()
-    const val CARD = 0xFF262626.toInt()
+    // OLED (2026-11-28): panels are near-opaque black over the map, buttons/cards black with a 1 dp outline
+    const val PANEL = 0xF2000000.toInt()
+    const val CARD = 0xFF000000.toInt()
+    const val LINE = 0xFF333333.toInt()
+    /** GREEN as a line/text colour on black (GREEN itself is too dark to read there). */
+    const val GREEN_LINE = 0xFF6CBF6C.toInt()
+    const val AMBER_LINE = 0xFFE0A030.toInt()
+    const val RED_LINE = 0xFFE57373.toInt()
     const val TEXT = 0xFFEDEDED.toInt()
     const val DIM = 0xFF9E9E9E.toInt()
     const val GREEN = 0xFF2E7D32.toInt()
@@ -47,6 +53,14 @@ fun Context.toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
 fun roundRect(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
 fun oval(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+/** Black (or [fill]) shape with a 1 dp outline: the OLED replacement for a filled one. */
+fun Context.outline(radius: Float, stroke: Int = C.LINE, fill: Int = C.BG, widthDp: Float = 1f) =
+    GradientDrawable().apply { setColor(fill); cornerRadius = radius; setStroke(dp(widthDp).coerceAtLeast(1), stroke) }
+fun Context.outlineOval(stroke: Int = C.LINE, fill: Int = C.BG, widthDp: Float = 1f) =
+    GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill); setStroke(dp(widthDp).coerceAtLeast(1), stroke) }
+/** A button outline colour: neutral fills become the grey line, GREEN becomes the readable green. */
+fun lineFor(color: Int) = when (color) { C.CARD, C.PANEL, C.BG -> C.LINE; C.GREEN -> C.GREEN_LINE; C.RED -> C.RED_LINE; else -> color }
+
 fun ripple(bg: Drawable) = RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), bg, null)
 
 fun lpL(w: Int, h: Int, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
@@ -63,8 +77,9 @@ fun Context.button(label: String, color: Int = C.CARD, onClick: (View) -> Unit):
     text = label
     isAllCaps = false
     textSize = 14f
-    setTextColor(C.TEXT)
-    background = ripple(roundRect(color, dpf(10)))
+    val line = lineFor(color)
+    setTextColor(if (line == C.LINE) C.TEXT else line)
+    background = ripple(outline(dpf(10), line, if (color == C.PANEL) C.PANEL else C.BG))
     stateListAnimator = null
     minWidth = 0; minimumWidth = 0
     minHeight = dp(36); minimumHeight = dp(36)
