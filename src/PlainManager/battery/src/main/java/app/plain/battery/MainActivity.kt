@@ -483,8 +483,10 @@ class MainActivity : Activity() {
 
     /** Outlined pill used for tabs, the period switch, the tracking switch and Refresh. */
     private fun pill(label: String, selected: Boolean, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 14f; gravity = Gravity.CENTER; maxLines = 1
-        setPadding(px(12), 0, px(12), 0)
+        text = label; textSize = 14f; gravity = Gravity.CENTER
+        // one line, cut with … (maxLines alone wrapped a long Turkish label and showed half of it)
+        isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END
+        setPadding(px(6), 0, px(6), 0)
         stylePill(this, selected)
         setOnClickListener { onClick() }
     }

@@ -249,13 +249,12 @@ open class MainActivity : Activity() {
         ui = FrameLayout(this)
         root.addView(ui, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // thumb row (the sheet's top row, always shown): switcher pill, search box, settings
+        // thumb row (the sheet's top row, always shown): search box, settings (the city drawers sit on top, Hub)
         topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(10), dp(8), dp(8))
         }
-        topBar.addView(Hub.switcher(this, City.id), lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -441,7 +440,7 @@ open class MainActivity : Activity() {
             top is Screen.Settings || top is Screen.Welcome -> 0.50
             else -> 0.34
         }
-        // plus the top row (switcher, search), which used to sit at the top of the screen
+        // plus the top row (search, settings), which used to sit at the top of the screen
         sheet.maxH = (h * frac).toInt() + maxOf(topBar.height, dp(60))
     }
 
@@ -514,7 +513,7 @@ open class MainActivity : Activity() {
         sheetBack.visibility = if (stack.size > 1) View.VISIBLE else View.INVISIBLE
     }
 
-    /** Open: grab handle, title row and body under the top row. Closed: only the top row (switcher, search, settings). */
+    /** Open: grab handle, title row and body under the top row. Closed: only the top row (search, settings). */
     private fun showSheetContent(open: Boolean) {
         val v = if (open) View.VISIBLE else View.GONE
         sheetHandle.visibility = v

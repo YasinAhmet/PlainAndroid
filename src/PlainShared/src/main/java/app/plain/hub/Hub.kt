@@ -188,7 +188,8 @@ object Hub {
     /**
      * How a tab sits in the frame. [LIST]: the app's tabs as drawers on top (the open one pulled out), a big title under
      * them only when the tab sets one, and the thumb bar at the bottom with whatever the tab puts in [bar] (search, ⋮ …).
-     * [FULL]: the tab draws edge to edge (a map, the camera) and places [switcher] itself; it gets all insets.
+     * [FULL]: the drawers on top as a black strip (they take the status-bar inset); below them the tab draws to the
+     * screen's bottom edge (a map, the camera) and handles the bottom insets itself. No title, no thumb bar.
      */
     enum class Style { LIST, FULL }
 
@@ -225,7 +226,13 @@ object Hub {
      */
     fun bar(a: Activity): LinearLayout? = frameOf(a)?.slot
 
-    /** The switcher pill ("Istanbul ▾") for a [Style.FULL] tab to place where it likes (a map sheet, a camera bar). */
+    /** Dims the drawers and stops them switching (the camera while it records), or turns them back on. */
+    fun setSwitchEnabled(a: Activity, on: Boolean) { frameOf(a)?.setSwitchEnabled(on) }
+
+    /**
+     * The old switcher pill ("Istanbul ▾"). Since 2026-11-28 every tab, full-screen ones included, switches with the
+     * drawers on top; kept for a screen outside the frame that still needs a way to the other tabs.
+     */
     fun switcher(a: Activity, key: String): TextView = pill(a, key)
 
     internal fun pill(a: Activity, key: String): TextView {
@@ -311,7 +318,7 @@ data class Tab(
  * At the bottom: the tab's own [slot] (search, ⋮). It takes the status-bar inset (drawers) and the navigation-bar +
  * keyboard inset (thumb bar) itself and hands the content the window insets without them. Drawers, title and bar hide
  * in picture-in-picture and when the tab asks ([Hub.setHeaderShown]).
- * [Hub.Style.FULL]: no drawers, no bar, the content gets every inset (it places [Hub.switcher] itself).
+ * [Hub.Style.FULL]: the drawers on top too, no title, no bar; the content gets every inset but the top one.
  */
 internal class HubFrame(private val act: Activity, private val key: String, private val content: View, private val style: Hub.Style) : LinearLayout(act) {
     private val top: LinearLayout
@@ -354,20 +361,34 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
             setOnClickListener { onBack?.invoke() }
         }
         drawerRow.addView(back, LayoutParams((40 * dp).toInt(), (DRAWER_H * dp).toInt()))
-        val cabinet = LinearLayout(act).apply { orientation = HORIZONTAL; clipChildren = false; clipToPadding = false }
+        // the cabinet: each drawer as wide as its name, the spare width shared out; when there are too many (Plain
+        // Maps' cities) it scrolls sideways. The open drawer slides down into the row's bottom padding (no clipping).
+        val cabinet = Cabinet(act).apply { orientation = HORIZONTAL; clipChildren = false; clipToPadding = false }
         val vis = Hub.mainTabs(act, key).ifEmpty { listOfNotNull(Hub.tab(key)) }
         vis.forEachIndexed { i, t ->
             val d = drawer(t.label) { pick(t.key) }
             drawers += t.key to d
-            cabinet.addView(d, LayoutParams(0, (DRAWER_H * dp).toInt(), 1f).apply { if (i > 0) leftMargin = (6 * dp).toInt() })
+            cabinet.addView(d, LayoutParams(LayoutParams.WRAP_CONTENT, (DRAWER_H * dp).toInt()).apply { if (i > 0) leftMargin = (6 * dp).toInt() })
         }
         // tabs not shown yet (see Tab.shown) wait behind one more drawer
         if (Hub.otherTabs(act, key).isNotEmpty()) {
             val d = drawer(tr("Others", "Diğerleri") + " ▾") { Hub.showOthers(act, key) }
             drawers += "" to d
-            cabinet.addView(d, LayoutParams(0, (DRAWER_H * dp).toInt(), 1f).apply { leftMargin = (6 * dp).toInt() })
+            cabinet.addView(d, LayoutParams(LayoutParams.WRAP_CONTENT, (DRAWER_H * dp).toInt()).apply { leftMargin = (6 * dp).toInt() })
         }
-        drawerRow.addView(cabinet, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        val shelf = android.widget.HorizontalScrollView(act).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipChildren = false
+            clipToPadding = false
+            // more drawers off to the side fade into the black (a darkening edge, no lit pixels)
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength((24 * dp).toInt())
+            addView(cabinet)
+        }
+        drawerRow.addView(shelf, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        // keep the open drawer in view when the cabinet scrolls
+        drawers.firstOrNull { it.first == key }?.second?.let { d -> shelf.post { shelf.scrollTo((d.left - 24 * dp).toInt().coerceAtLeast(0), 0) } }
         titleEnd = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         drawerRow.addView(titleEnd, LayoutParams(LayoutParams.WRAP_CONTENT, (DRAWER_H * dp).toInt()).apply { leftMargin = (4 * dp).toInt() })
         top.addView(drawerRow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
@@ -406,7 +427,8 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         }
         bar.addView(slot, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         fitBar()
-        if (style == Hub.Style.LIST) addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // full-screen tabs (a map, the camera) get the drawers too, as a black strip above them
+        addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         if (style == Hub.Style.LIST) addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         showOpen(key, animate = false)
@@ -426,7 +448,9 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
             includeFontPadding = false
             setPadding((6 * dp).toInt(), 0, (6 * dp).toInt(), 0)
         }
-        addView(name, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(name, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        minimumWidth = (72 * dp).toInt()
+        setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
         // the pull: a 2 dp line (a tiny indicator, allowed as a fill by the design rules)
         addView(View(act), LayoutParams((16 * dp).toInt(), (2 * dp).toInt().coerceAtLeast(1)).apply { topMargin = (6 * dp).toInt() })
         contentDescription = label
@@ -497,13 +521,17 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         updateVisibility()
     }
 
+    /** Drawers dimmed and not tappable (the camera while it records). */
+    fun setSwitchEnabled(on: Boolean) {
+        for ((_, d) in drawers) { d.isEnabled = on; d.alpha = if (on) 1f else 0.4f }
+    }
+
     private fun updateVisibility() {
-        if (style == Hub.Style.FULL) return
         val pip = Build.VERSION.SDK_INT >= 24 && act.isInPictureInPictureMode
         val v = if (wanted && !pip) View.VISIBLE else View.GONE
         if (top.visibility != v) {
             top.visibility = v
-            bar.visibility = v
+            if (style == Hub.Style.LIST) bar.visibility = v
             lastInsets?.let { dispatchApplyWindowInsets(it) } ?: requestApplyInsets()
         }
     }
@@ -527,13 +555,33 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
     @Suppress("DEPRECATION")
     override fun dispatchApplyWindowInsets(insets: WindowInsets): WindowInsets {
         lastInsets = insets
-        if (style == Hub.Style.FULL || top.visibility != View.VISIBLE) {
+        if (top.visibility != View.VISIBLE) {
             content.dispatchApplyWindowInsets(insets)
             return insets
         }
         val topInset: Int
         val bottom: Int
         val child: WindowInsets
+        if (style == Hub.Style.FULL) {
+            // a full-screen tab keeps its bottom insets (it places its own controls); only the top is the drawers'
+            if (Build.VERSION.SDK_INT >= 30) {
+                topInset = insets.getInsets(WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.captionBar()).top
+                val c = insets.getInsets(WindowInsets.Type.displayCutout())
+                child = WindowInsets.Builder(insets)
+                    .setInsets(WindowInsets.Type.statusBars(), Insets.NONE)
+                    .setInsets(WindowInsets.Type.captionBar(), Insets.NONE)
+                    .setInsets(WindowInsets.Type.displayCutout(), Insets.of(c.left, 0, c.right, c.bottom))
+                    .setInsetsIgnoringVisibility(WindowInsets.Type.statusBars(), Insets.NONE)
+                    .setInsetsIgnoringVisibility(WindowInsets.Type.captionBar(), Insets.NONE)
+                    .build()
+            } else {
+                topInset = insets.systemWindowInsetTop
+                child = insets.replaceSystemWindowInsets(insets.systemWindowInsetLeft, 0, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            }
+            if (drawerRow.paddingTop != topInset) drawerRow.setPadding(drawerRow.paddingLeft, topInset, drawerRow.paddingRight, drawerRow.paddingBottom)
+            content.dispatchApplyWindowInsets(child)
+            return insets
+        }
         if (Build.VERSION.SDK_INT >= 30) {
             val sb = insets.getInsets(WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.captionBar())
             val nav = insets.getInsets(WindowInsets.Type.navigationBars())
@@ -572,6 +620,29 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         const val FAINT = 0xFF484848.toInt()
         const val OUTLINE_BTN = 0xFF333333.toInt()
         const val DRAWER_H = 44
+    }
+}
+
+/**
+ * The row of drawers: each drawer as wide as its name (at least its minimum); when they are narrower together than
+ * the screen, the spare width is shared out evenly, else the row is wider and its [HorizontalScrollView] scrolls.
+ * (LinearLayout weights shrank every drawer to the same width inside the scroll view, cutting the names.)
+ */
+internal class Cabinet(ctx: Context) : LinearLayout(ctx) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), heightMeasureSpec)
+        val avail = MeasureSpec.getSize(widthMeasureSpec)
+        val n = childCount
+        if (n == 0 || measuredWidth >= avail) return
+        val extra = (avail - measuredWidth) / n
+        var rest = (avail - measuredWidth) - extra * n
+        for (i in 0 until n) {
+            val c = getChildAt(i)
+            val w = c.measuredWidth + extra + if (rest > 0) 1 else 0
+            if (rest > 0) rest--
+            c.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(c.measuredHeight, MeasureSpec.EXACTLY))
+        }
+        setMeasuredDimension(avail, measuredHeight)
     }
 }
 

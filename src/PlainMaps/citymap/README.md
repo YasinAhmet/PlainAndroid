@@ -86,6 +86,19 @@ Quirks: ESHOT's calendar dates run out (the 2026-08 feed ended 2026-10-05) but o
 keeps working; Kocaeli's trip_headsign is the line's name in both directions, so the last stop's name is shown instead;
 shapes.txt rows are not in sequence order (they are sorted). Real-file tests: `ESHOT_ZIP` and `KOCAELI_DIR` in RealDataTest.
 
+## Antalya (since Plain Maps 3.6): OpenStreetMap only
+
+Antalya publishes no open bus timetables (checked 2026-11-28). Its buses come from the extract's bus route relations
+(`City.Bus.OSM`, `Sync.osmBusLines`): one line variant per relation, platforms (else stop positions) as stops, no trips,
+so line screens say there is no timetable. Map, tram and ferry: openstreetmap.fr `mediterranean-latest.osm.pbf`
+(about 100 MB), cut to `City.area`. Only about 30 bus relations exist in OSM, so many lines are missing.
+
+What exists and was not used: AntalyaKart's Kentkart API has everything but needs signed `X-KK-*` headers (a secret in
+the web app); `ulasim.antalya.bel.tr/Home/TarifeListesi` (POST selDay/selDirection/selRoute, multipart) gives 169 lines
+with full stop order and stop numbers but only one trip per line, direction and day, about 600 KB per answer; OSM bus
+stops carry those stop numbers as `ref` (about 67 % match). Tram geometry: `cbs.antalya.bel.tr` ArcGIS
+`TUCBS/AntalyaRayliSistem/FeatureServer` layers 0/1; tram departures: `antray.antalyaulasim.com.tr` WebForms postbacks.
+
 ## Build
 
 ```powershell

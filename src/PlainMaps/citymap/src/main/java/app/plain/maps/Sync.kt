@@ -151,11 +151,8 @@ class Sync(
                     core()
                     if (!done("transit")) { egoTransit(); mark("transit") }
                 }
-                City.Bus.OSM -> {
-                    // the map (its bus routes decide how far it reaches), then the bus lines from those routes
-                    core()
-                    if (!done("transit")) { osmTransit(); mark("transit") }
-                }
+                // the bus lines come from the extract's bus routes, read with the map
+                City.Bus.OSM -> core()
                 City.Bus.IETT, City.Bus.GTFS -> {
                     if (!done("transit")) { if (City.bus == City.Bus.GTFS) gtfsTransit() else transit(); mark("transit") }
                     if (!done("area")) { fitToStops(); mark("area") }
@@ -310,11 +307,6 @@ class Sync(
         setMeta("transit_fp", fp)
         setMeta("gtfs_date", st.stamp.substringAfter('@').take(10))
         dl.listFiles()?.forEach { it.delete() }
-    }
-
-    // ------------------------------------------------------------------ 1d. OpenStreetMap's bus routes (Kocaeli, Antalya)
-    private fun osmTransit() {
-        TODO()
     }
 
     // ------------------------------------------------------------------ 1c. a plain GTFS feed (İzmir: ESHOT, Kocaeli)
@@ -628,7 +620,11 @@ class Sync(
         }
         say(0.27f, tr("Map: reading the city", "Harita: şehir okunuyor"))
         val ex = PbfExtract(f)
-        val keepBus = City.ankara // EGO needs OSM's bus stops (their "ref" is the EGO stop number) and bus routes
+        // EGO needs OSM's bus stops (their "ref" is the EGO stop number) and bus routes; OSM-only cities take their bus lines from the routes
+        val ego = City.bus == City.Bus.EGO
+        val osmBus = City.bus == City.Bus.OSM
+        val keepBus = ego || osmBus
+        val busRels = ArrayList<OsmEl>()
         ex.wantRelation = { Filters.multipolygon(it) || Filters.route(it) || (keepBus && Filters.busRoute(it)) }
         ex.wantWay = { Filters.mapWay(it) || Filters.poi(it) }
         ex.wantNode = { Filters.poi(it) || (keepBus && Filters.busStop(it)) }
@@ -666,7 +662,7 @@ class Sync(
                 ex.run(
                     { e ->
                         if (!inArea(e.lat, e.lon)) return@run
-                        if (keepBus && Filters.busStop(e.tags)) {
+                        if (ego && Filters.busStop(e.tags)) {
                             work.execSQL("INSERT INTO osmstop VALUES(?,?,?,?)", arrayOf(e["ref"], e["name"] ?: "", e.lat, e.lon))
                             seenStops.add(Ego.OsmStop(e["ref"], e["name"] ?: "", e.lat, e.lon))
                         }
@@ -676,7 +672,7 @@ class Sync(
                         fit()
                         if (!inArea(e.geom!!)) return@run
                         // the streets, so EGO lines without a route shape can follow them
-                        if (keepBus && Filters.drivable(e.tags)) work.execSQL("INSERT INTO road VALUES(?)", arrayOf<Any>(Codec.shape(listOf(e.geom))))
+                        if (ego && Filters.drivable(e.tags)) work.execSQL("INSERT INTO road VALUES(?)", arrayOf<Any>(Codec.shape(listOf(e.geom))))
                         if (Filters.mapWay(e.tags)) w.map(e, !ex.truncated(e.uid))
                         if (Filters.poi(e.tags)) {
                             val b = Clip.bounds(e.geom!!)
@@ -686,7 +682,8 @@ class Sync(
                     { e ->
                         fit()
                         if (!inArea(e)) return@run
-                        if (keepBus && Filters.busRoute(e.tags)) {
+                        if (osmBus && Filters.busRoute(e.tags)) busRels.add(e)
+                        else if (ego && Filters.busRoute(e.tags)) {
                             val parts = e.members.orEmpty().filter { it.type == 'w' && it.geom != null }.map { it.geom!! }
                             val ref = e["ref"]?.trim()
                             if (ref != null && parts.isNotEmpty()) {
@@ -701,11 +698,59 @@ class Sync(
                 if (City.ankara) out.execSQL("DELETE FROM poi WHERE lat<? OR lat>? OR lon<? OR lon>?", arrayOf<Any>(area.s, area.n, area.w, area.e))
                 say(0.53f, tr("Metro, tram and ferry lines", "Metro, tramvay ve vapur hatları"))
                 lines(routes) { m -> if (m.type == 'n') ex.memberNode(m.ref) else null }
+                if (osmBus) {
+                    say(0.54f, tr("Bus lines from OpenStreetMap", "OpenStreetMap'ten otobüs hatları"))
+                    osmBusLines(busRels) { m -> if (m.type == 'n') ex.memberNode(m.ref) else null }
+                    mark("transit")
+                }
                 setMeta("core", (if (City.mapCoversArea) area else ex.bbox)?.encode() ?: "")
                 mark("core")
             }
         }
         f.delete()
+    }
+
+    // ------------------------------------------------------------------ bus lines from OSM routes (no timetables)
+    /** Cities without open timetables: each OSM bus route becomes a line variant with its stops and shape, no trips. */
+    private fun osmBusLines(rels: List<OsmEl>, named: (OsmEl.Member) -> OsmEl?) {
+        val t = Transit()
+        val stopIdx = HashMap<Long, Int>()
+        val dirs = HashMap<String, Int>()
+        for (r in rels.sortedBy { it.id }) {
+            val parts = r.members.orEmpty().filter { it.type == 'w' && it.geom != null && !it.role.startsWith("platform") }.map { it.geom!! }
+            val ms = r.members.orEmpty().filter { it.type == 'n' }
+            // platforms carry the names riders know; stop positions when a route has no platforms
+            val stopMs = ms.filter { it.role.startsWith("platform") }.ifEmpty { ms.filter { it.role.startsWith("stop") } }
+            val seq = ArrayList<Int>()
+            for (m in stopMs) {
+                val e = named(m)
+                val la = if (!m.lat.isNaN()) m.lat else e?.lat ?: Double.NaN
+                val lo = if (!m.lon.isNaN()) m.lon else e?.lon ?: Double.NaN
+                if (la.isNaN() || lo.isNaN()) continue
+                val si = stopIdx.getOrPut(m.ref) {
+                    t.stops.add(Transit.Stop(m.ref.toString(), e?.get("ref") ?: "", Text.title(e?.get("name") ?: tr("Stop", "Durak")), la, lo))
+                    t.stops.size - 1
+                }
+                if (seq.lastOrNull() != si) seq.add(si)
+            }
+            if (seq.size < 2 || parts.isEmpty()) continue
+            val ref = r["ref"]?.trim()?.takeIf { it.isNotEmpty() } ?: (r["name"] ?: "?").take(10)
+            val name = (r["name"] ?: ref).replace(Regex("^\\s*(Otobüs|Bus)?\\s*${Regex.escape(ref)}\\s*[:\\-–]?\\s*", RegexOption.IGNORE_CASE), "")
+            t.routes.add(Transit.Route("osm:${r.id}", ref, Text.title(name), ""))
+            val p = Transit.Pattern(t.routes.size - 1, seq.toIntArray())
+            p.dir = dirs.merge(ref, 1, Int::plus)!! - 1
+            p.headsigns[t.stops[seq.last()].name] = 1
+            val key = "osm:${r.id}"
+            val (rings, open) = Coast.join(parts, directed = false)
+            t.shapes[key] = (open + rings).map { Clip.simplify(it, 1.2e-5) }
+            p.shapeIds[key] = 1
+            val d = IntArray(seq.size)
+            for (i in 1 until seq.size) { val a = t.stops[seq[i - 1]]; val b = t.stops[seq[i]]; d[i] = d[i - 1] + Geo.dist(a.lat, a.lon, b.lat, b.lon).toInt() }
+            p.dists = d
+            t.patterns.add(p)
+        }
+        writeBus(t)
+        setMeta("gtfs_date", java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
     }
 
     // ------------------------------------------------------------------ rail & ferry lines

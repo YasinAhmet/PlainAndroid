@@ -63,15 +63,13 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(C.BG) }
         content = FrameLayout(this)
         root.addView(content, lpL(MATCH, 0, 1f))
-        // the bottom bar: the Plain Maps switcher pill, then the Plan / Trail tabs (hidden while recording; the
-        // Trail screen then shows its own pill next to the power button)
+        // the bottom bar: the Plan / Trail tabs (hidden while recording); the Plain Maps drawers sit on top (Hub)
         tabs = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(C.BG)
             setPadding(dp(8), dp(4), dp(4), dp(4))
         }
-        tabs.addView(Hub.switcher(this, "trekking"), lpL(WRAP, WRAP).apply { marginEnd = dp(6) })
         tabPlan = tab(tr("Plan", "Plan")) { showPlan() }
         tabTrail = tab(tr("Trail", "Rota")) { showTrail() }
         tabs.addView(tabPlan, lpL(0, dp(44), 1f))

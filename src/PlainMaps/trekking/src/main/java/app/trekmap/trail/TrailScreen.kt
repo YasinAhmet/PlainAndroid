@@ -44,7 +44,6 @@ class TrailScreen(private val act: MainActivity) {
     private val tSub = act.text("", 13f, C.DIM)
     private val power = TextView(act)
     private val cam = TextView(act)
-    private val switcher = app.plain.hub.Hub.switcher(act, "trekking")
     private val layerBtn: Button
     private val landBtn: Button
     private var plans: List<Entry> = emptyList()
@@ -156,12 +155,6 @@ class TrailScreen(private val act: MainActivity) {
         }
         view.addView(cam, lpF(act.dp(60), act.dp(60), Gravity.BOTTOM or Gravity.START).apply {
             bottomMargin = act.dp(26); marginStart = act.dp(28)
-        })
-        // --- while recording the Plan / Trail bar is hidden: the Plain Maps switcher sits right of the power button
-        // (mirroring the camera on the left), never over it
-        switcher.visibility = View.GONE
-        view.addView(switcher, lpF(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
-            bottomMargin = act.dp(36); marginEnd = act.dp(14)
         })
         map.onMarkerTap = { m ->
             (m.tag as? Photo)?.let { act.showPhoto(it, Photos.recDir(act), Trail.segs) { refreshPhotos() } }
@@ -420,7 +413,6 @@ class TrailScreen(private val act: MainActivity) {
         statsBox.visibility = if (v) View.VISIBLE else View.GONE
         syncPower()
         cam.visibility = if (v) View.VISIBLE else View.GONE
-        switcher.visibility = if (v) View.VISIBLE else View.GONE
         updatePadBottom()
         if (v) refreshPhotos() else map.markers = emptyList()
         refreshOverlays()
