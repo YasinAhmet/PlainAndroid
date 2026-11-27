@@ -90,6 +90,7 @@ open class MainActivity : Activity() {
     private var searchCats: Set<Int>? = null
     private lateinit var gpsBtn: Icon
     private lateinit var sheet: CappedLinear
+    private lateinit var sheetHandle: View
     private lateinit var sheetHead: LinearLayout
     private lateinit var sheetBack: Icon
     private lateinit var sheetTitle: LinearLayout
@@ -240,57 +241,54 @@ open class MainActivity : Activity() {
         ui = FrameLayout(this)
         root.addView(ui, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // search bar + settings
+        // thumb row (the sheet's top row, always shown): switcher pill, search box, settings
         topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(12), 0)
+            setPadding(dp(8), dp(10), dp(8), dp(8))
         }
+        topBar.addView(Hub.switcher(this, City.id), lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundRect(C.PANEL, dpf(24))
-            setPadding(dp(12), 0, dp(4), 0)
+            background = roundRect(C.CARD, dpf(22))
+            setPadding(dp(10), 0, dp(2), 0)
         }
-        box.addView(Icon(this, Icon.SEARCH).apply { color = C.DIM }, lpL(dp(24), dp(24)))
+        box.addView(Icon(this, Icon.SEARCH).apply { color = C.DIM }, lpL(dp(20), dp(20)))
         search = EditText(this).apply {
-            hint = tr("Line, stop, place or street", "Hat, durak, yer veya sokak")
+            hint = tr("Search stops, lines", "Durak, hat ara")
             setHintTextColor(C.DIM)
             setTextColor(C.TEXT)
             textSize = 15f
             background = null
             setSingleLine()
             imeOptions = EditorInfo.IME_ACTION_SEARCH
-            setPadding(dp(8), dp(10), dp(8), dp(10))
+            setPadding(dp(6), dp(8), dp(4), dp(8))
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEARCH) { hideKeyboard(); true } else false }
         }
-        box.addView(search, lpL(0, dp(46), 1f))
+        box.addView(search, lpL(0, dp(42), 1f))
         clearSearch = Icon(this, Icon.CLOSE).apply {
             color = C.DIM
             visibility = View.GONE
             background = ripple(null)
+            contentDescription = tr("Clear", "Temizle")
             setOnClickListener { search.setText(""); if (stack.lastOrNull() is Screen.Search) back() }
         }
-        box.addView(clearSearch, lpL(dp(40), dp(40)))
+        box.addView(clearSearch, lpL(dp(38), dp(38)))
         packsBtn = Icon(this, Icon.LIST).apply {
             color = C.DIM
             background = ripple(null)
+            contentDescription = tr("Query packs", "Arama paketleri")
             setOnClickListener { hideKeyboard(); search.clearFocus(); packsDialog() }
         }
-        box.addView(packsBtn, lpL(dp(40), dp(40)))
+        box.addView(packsBtn, lpL(dp(38), dp(38)))
         topBar.addView(box, lpL(0, WRAP, 1f))
-        val routeBtn = Icon(this, Icon.ROUTE).apply {
-            color = C.ACCENT
-            background = ripple(oval(C.PANEL))
-            setOnClickListener { hideKeyboard(); search.clearFocus(); openRoute() }
-        }
-        topBar.addView(routeBtn, lpL(dp(46), dp(46)).apply { leftMargin = dp(8) })
         val settings = Icon(this, Icon.SETTINGS).apply {
-            background = ripple(oval(C.PANEL))
+            background = ripple(null)
+            contentDescription = tr("Settings", "Ayarlar")
             setOnClickListener { hideKeyboard(); search.clearFocus(); show(Screen.Settings) }
         }
-        topBar.addView(settings, lpL(dp(46), dp(46)).apply { leftMargin = dp(8) })
-        ui.addView(topBar, lpF(MATCH, WRAP, Gravity.TOP))
+        topBar.addView(settings, lpL(dp(42), dp(42)).apply { leftMargin = dp(2) })
 
         search.addTextChangedListener(object : TextWatcher {
             private val run = Runnable { doSearch() }
@@ -304,21 +302,29 @@ open class MainActivity : Activity() {
             }
         })
 
-        // bottom: location button above the sheet
+        // bottom: route finder and location buttons above the sheet
         val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val fabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        val routeBtn = Icon(this, Icon.ROUTE).apply {
+            color = C.ACCENT
+            background = ripple(oval(C.PANEL))
+            contentDescription = tr("Route", "Rota")
+            setOnClickListener { hideKeyboard(); search.clearFocus(); openRoute() }
+        }
+        fabs.addView(routeBtn, lpL(dp(50), dp(50)).apply { rightMargin = dp(10) })
         gpsBtn = Icon(this, Icon.GPS).apply {
             color = C.DIM
             background = ripple(oval(C.PANEL))
             setOnClickListener { gpsTap() }
         }
-        bottom.addView(gpsBtn, lpL(dp(50), dp(50)).apply { gravity = Gravity.END; rightMargin = dp(12); bottomMargin = dp(10) })
+        fabs.addView(gpsBtn, lpL(dp(50), dp(50)))
+        bottom.addView(fabs, lpL(MATCH, WRAP).apply { rightMargin = dp(12); bottomMargin = dp(10) })
         sheet = CappedLinear(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
                 setColor(C.PANEL)
                 cornerRadii = floatArrayOf(dpf(16), dpf(16), dpf(16), dpf(16), 0f, 0f, 0f, 0f)
             }
-            visibility = View.GONE
             isClickable = true
         }
         // grab handle: tap or swipe up to make the sheet taller, swipe down to make it small again
@@ -346,7 +352,9 @@ open class MainActivity : Activity() {
             }
             true
         }
+        sheetHandle = handle
         sheet.addView(handle, lpL(MATCH, dp(18)))
+        sheet.addView(topBar, lpL(MATCH, WRAP))
         sheetHead = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -364,9 +372,9 @@ open class MainActivity : Activity() {
         sheet.addView(sheetScroll, lpL(MATCH, WRAP))
         bottom.addView(sheet, lpL(MATCH, WRAP))
         ui.addView(bottom, lpF(MATCH, WRAP, Gravity.BOTTOM))
+        showSheetContent(false)
 
         sheet.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePads() }
-        topBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePads() }
 
         root.setOnApplyWindowInsetsListener { _, ins ->
             val top: Int; val bot: Int; val l: Int; val r: Int
@@ -383,7 +391,7 @@ open class MainActivity : Activity() {
             sizeSheet()
             WindowInsets.CONSUMED
         }
-        setContentView(Hub.wrap(this, City.id, root))
+        setContentView(Hub.wrap(this, City.id, root, Hub.Style.FULL))
 
         map.onTap = { lat, lon, _, _ -> mapTap(lat, lon) }
         map.onHold = { lat, lon, r -> mapHold(lat, lon, r) }
@@ -394,11 +402,13 @@ open class MainActivity : Activity() {
     private var imeBottom = 0
     private val insetBottom get() = if (imeBottom > 0) imeBottom else navBottom
 
-    /** The keyboard lifts the whole bottom part; otherwise the sheet pads itself above the navigation bar. */
+    /**
+     * The keyboard lifts the whole bottom part (so the search field in the sheet's top row stays above it); otherwise
+     * the sheet pads itself above the navigation bar. The sheet is always shown: closed, it is just its top row.
+     */
     private fun applyInsets() {
         val bottom = sheet.parent as View
-        val open = sheet.visibility == View.VISIBLE
-        bottom.setPadding(0, 0, 0, if (imeBottom > 0) imeBottom else if (open) 0 else navBottom)
+        bottom.setPadding(0, 0, 0, if (imeBottom > 0) imeBottom else 0)
         // the sheet itself stops above the navigation bar, so its last rows are never under it
         sheet.setPadding(0, 0, 0, if (imeBottom > 0) 0 else navBottom)
         sheetBody.setPadding(dp(10), dp(2), dp(10), dp(12))
@@ -408,8 +418,9 @@ open class MainActivity : Activity() {
     private fun oval(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
     private fun updatePads() {
-        val top = ui.paddingTop + topBar.height
-        val bottomH = if (sheet.visibility == View.VISIBLE) sheet.height else insetBottom
+        val top = ui.paddingTop
+        // the sheet (always shown, at least its top row) plus the keyboard under it
+        val bottomH = maxOf(sheet.height + (sheet.parent as View).paddingBottom, insetBottom)
         if (map.padTop != top || map.padBottom != bottomH) { map.padTop = top; map.padBottom = bottomH }
     }
 
@@ -421,7 +432,8 @@ open class MainActivity : Activity() {
             top is Screen.Settings || top is Screen.Welcome -> 0.50
             else -> 0.34
         }
-        sheet.maxH = (h * frac).toInt()
+        // plus the top row (switcher, search), which used to sit at the top of the screen
+        sheet.maxH = (h * frac).toInt() + maxOf(topBar.height, dp(60))
     }
 
     private fun hideKeyboard() {
@@ -480,17 +492,26 @@ open class MainActivity : Activity() {
         stack.clear()
         expanded = false
         token++
-        sheet.visibility = View.GONE
+        showSheetContent(false)
         applyInsets()
         map.lines = emptyList(); map.dots = emptyList(); map.circle = null
     }
 
     private fun openSheet() {
-        if (sheet.visibility != View.VISIBLE) {
-            sheet.visibility = View.VISIBLE
+        if (sheetScroll.visibility != View.VISIBLE) {
+            showSheetContent(true)
             applyInsets()
         }
         sheetBack.visibility = if (stack.size > 1) View.VISIBLE else View.INVISIBLE
+    }
+
+    /** Open: grab handle, title row and body under the top row. Closed: only the top row (switcher, search, settings). */
+    private fun showSheetContent(open: Boolean) {
+        val v = if (open) View.VISIBLE else View.GONE
+        sheetHandle.visibility = v
+        sheetHead.visibility = v
+        sheetScroll.visibility = v
+        topBar.setPadding(dp(8), if (open) 0 else dp(10), dp(8), dp(8))
     }
 
     private fun render() {

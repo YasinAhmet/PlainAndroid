@@ -50,8 +50,8 @@ import java.util.concurrent.Executors
 import kotlin.math.min
 
 /**
- * Record Voice: a big Record / Stop button with Pause, and below it this app's own recordings, newest first, one
- * fixed page at a time. Tap a recording to play or pause it right in its row (with a seek bar); hold it or tap ⋮ to
+ * Record Voice: this app's own recordings, newest first, one fixed page at a time, and under them (in thumb reach,
+ * right above Hub's thumb bar) the clock with a big Record / Stop button and Pause. Tap a recording to play or pause it right in its row (with a seek bar); hold it or tap ⋮ to
  * share, rename or delete it.
  *
  * Recording itself runs in [RecorderService] (so it goes on with the screen off or in another tab). Here nothing
@@ -114,11 +114,13 @@ class VoiceActivity : Activity() {
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
-        // ---- recorder
+        // thumb bar layout: Hub's title on top, the recordings in the middle, pager + recorder at the bottom
+        // ---- recorder (added at the bottom, below the pager)
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(14), 0, dp(14))
+            setPadding(0, dp(12), 0, dp(10))
+            background = lineAbove()
         }
         clock = label("00:00", 46f, TEXT).apply {
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
@@ -135,13 +137,12 @@ class VoiceActivity : Activity() {
         controls.addView(recBtn, LinearLayout.LayoutParams(dp(84), dp(84)).apply { marginStart = dp(20); marginEnd = dp(20) })
         controls.addView(View(this), LinearLayout.LayoutParams(dp(112), dp(44)))  // keeps the button centred
         panel.addView(controls, LinearLayout.LayoutParams(-1, -2))
-        root.addView(panel, LinearLayout.LayoutParams(-1, -2))
 
         // ---- recordings
         header = label("", 14f, TEXT2).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            setPadding(dp(16), dp(10), dp(16), dp(6))
-            background = lineAbove()
+            setPadding(dp(16), dp(4), dp(16), dp(6))
+            background = lineBelow()
         }
         root.addView(header, LinearLayout.LayoutParams(-1, -2))
         val frame = FrameLayout(this)
@@ -168,6 +169,7 @@ class VoiceActivity : Activity() {
         bar.addView(pageLabel, LinearLayout.LayoutParams(0, dp(44), 1f))
         bar.addView(next, LinearLayout.LayoutParams(-2, dp(44)))
         root.addView(bar, LinearLayout.LayoutParams(-1, -2))
+        root.addView(panel, LinearLayout.LayoutParams(-1, -2))
 
         root.setOnApplyWindowInsetsListener { v, ins ->
             @Suppress("DEPRECATION")

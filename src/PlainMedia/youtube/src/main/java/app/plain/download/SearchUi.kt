@@ -45,6 +45,9 @@ class SearchScreen(private val act: MainActivity) {
 
     /** 2.3 app-wide Back history: page pushes and Feed/Search/Lists switches are reported to MainActivity. */
     var onNav: ((NavStep) -> Unit)? = null
+    /** The Hub title: the base's name (Feed, Search, Lists, Spotify) and whether a page is open (Hub's ‹). */
+    var onTitle: ((String, Boolean) -> Unit)? = null
+    fun reportTitle() = onTitle?.invoke(when (base) { searchPage -> tr("Search", "Ara"); listsPage -> tr("Lists", "Listeler"); spotifyPage -> "Spotify"; else -> tr("Feed", "Akış") }, stack.isNotEmpty())
     var onPagePopped: (() -> Unit)? = null
     val topSelecting get() = top.selecting
     fun endTopSelection() = top.endSelection()
@@ -104,7 +107,6 @@ class SearchScreen(private val act: MainActivity) {
         spotifyChip = Chip(act, "Spotify") { showBase(spotifyPage) }
         segBar.addView(View(act), lpL(act.dp(8), 1))
         segBar.addView(spotifyChip)
-        view.addView(segBar, lpL(MATCH, WRAP))
 
         selBar.addView(act.icon(R.drawable.yt_ic_close, desc = tr("Stop selecting", "Seçimi bitir")) { top.endSelection() })
         selBar.addView(selCount, lpL(0, WRAP, 1f))
@@ -114,8 +116,10 @@ class SearchScreen(private val act: MainActivity) {
         selBar.addView(selGo)
         selMore = act.icon(R.drawable.yt_ic_more, desc = tr("More for the selection", "Seçim için diğer")) { selectionMenu() }
         selBar.addView(selMore)
-        view.addView(selBar, lpL(MATCH, WRAP))
+        // thumb bar layout: the page in the middle, Feed / Search / Lists / Spotify (and the selection bar) right above the bottom bar
         view.addView(host, lpL(MATCH, 0, 1f))
+        view.addView(selBar, lpL(MATCH, WRAP))
+        view.addView(segBar, lpL(MATCH, WRAP))
 
         base = when (Store.prefs.getInt("searchSeg", if (Store.follows().isEmpty()) 1 else 0)) { 1 -> searchPage; 2 -> listsPage; 3 -> spotifyPage; else -> feedPage }
         attach()
@@ -188,7 +192,8 @@ class SearchScreen(private val act: MainActivity) {
     private fun attach() {
         host.removeAllViews()
         host.addView(top.root, FrameLayout.LayoutParams(MATCH, MATCH))
-        backBtn.visibility = if (stack.isEmpty()) View.GONE else View.VISIBLE
+        backBtn.visibility = View.GONE // the ‹ is Hub's now (reportTitle)
+        reportTitle()
         feedChip.select(base === feedPage)
         searchChip.select(base === searchPage)
         listsChip.select(base === listsPage)

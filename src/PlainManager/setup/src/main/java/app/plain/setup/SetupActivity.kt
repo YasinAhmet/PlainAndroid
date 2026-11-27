@@ -330,57 +330,57 @@ class SetupActivity : Activity(), Installer.Listener {
         setOnClickListener { onClick() }
     }
 
+    /**
+     * Thumb-bar layout (2026-11-27): the page name is the Hub title; the intro scrolls with the list; install progress,
+     * "Check for updates" and "Update all" sit at the bottom of the content; Install and ⋮ (Play Protect, language)
+     * are in the thumb bar.
+     */
     private fun buildUi() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(C.BG) }
-        val langBtn = text(PlainLang.label(), 13f, C.TEXT, bold = true).apply {
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            background = outline(0xFF3A3A3A.toInt(), 16)
-        }
-        langBtn.setOnClickListener { Sheet.language(this, C.ACCENT) }
-        val titleRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(text(tr("Install & update", "Yükle ve güncelle"), 22f, C.TEXT, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(langBtn)
-        }
-        val head = LinearLayout(this).apply {
+        val intro = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(8))
-            addView(titleRow)
+            setPadding(dp(20), dp(4), dp(20), dp(4))
             addView(text(tr("Simple, offline-first apps. Tick the ones you want and tap Install. " +
                 "Android asks you to confirm each app.",
                 "Sade, internetsiz çalışan uygulamalar. İstediklerinizi seçip Yükle'ye dokunun. " +
-                "Android her uygulama için onay ister."), 14f, C.DIM).apply { setPadding(0, dp(4), 0, 0) })
+                "Android her uygulama için onay ister."), 14f, C.DIM))
             addView(text(tr("Play Protect warning? How to install anyway ›", "Play Protect uyarısı mı? Yine de yüklemek için ›"), 14f, C.ACCENT, bold = true).apply {
                 setPadding(0, dp(8), 0, dp(2))
                 setOnClickListener { playProtect() }
             }, LinearLayout.LayoutParams(-2, -2))
         }
-        status = text("", 13f, C.ACCENT).apply { setPadding(dp(20), dp(4), dp(20), dp(4)) }
+        status = text("", 13f, C.ACCENT).apply { setPadding(dp(20), dp(6), dp(20), dp(2)) }
         skip = text(tr("Skip this app", "Bu uygulamayı atla"), 13f, C.TEXT, bold = true).apply {
-            setPadding(dp(20), dp(2), dp(20), dp(8)); visibility = View.GONE
+            setPadding(dp(20), dp(2), dp(20), dp(4)); visibility = View.GONE
             setOnClickListener { Installer.skipCurrent(this@SetupActivity) }
         }
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), dp(12)) }
-        val scroll = ScrollView(this).apply { addView(list) }
-        checkBtn = pill(tr("Check for updates", "Güncellemeleri denetle"), false) { checkOnline() }
-        installBtn = pill(tr("Install", "Yükle"), true) { install() }
+        val scroll = ScrollView(this).apply {
+            addView(LinearLayout(this@SetupActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(intro)
+                addView(list)
+            })
+        }
+        checkBtn = pill(tr("Check for updates", "Güncellemeleri denetle"), false) { checkOnline() }.apply {
+            textSize = 14f; setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        installBtn = pill(tr("Install", "Yükle"), true) { install() }.apply {
+            isSingleLine = true; ellipsize = TextUtils.TruncateAt.END; setPadding(dp(16), dp(10), dp(16), dp(10))
+        }
         updateAllBtn = pill(tr("Update all", "Tümünü güncelle"), false) { updateAll() }.apply {
+            textSize = 14f; setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(C.ACCENT); background = outline(C.ACCENT, 24); visibility = View.GONE
         }
-        val row = LinearLayout(this).apply {
+        // Above the thumb bar: the "check" and "update all" actions in one row.
+        val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(checkBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
-            addView(installBtn, LinearLayout.LayoutParams(0, -2, 1f))
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            addView(checkBtn, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(updateAllBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
         }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(12))
-            addView(updateAllBtn, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
-            addView(row)
-        }
-        root.addView(head); root.addView(status); root.addView(skip)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(bar)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(status); root.addView(skip); root.addView(actions)
         root.setOnApplyWindowInsetsListener { v, insets ->
             if (Build.VERSION.SDK_INT >= 30) {
                 val b = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
@@ -390,6 +390,26 @@ class SetupActivity : Activity(), Installer.Listener {
             insets
         }
         setContentView(Hub.wrap(this, "setup", root))
+        Hub.setTitle(this, tr("Install & update", "Yükle ve güncelle"))
+        Hub.setOnTitleTap(this) { scroll.smoothScrollTo(0, 0) }
+        Hub.bar(this)?.apply {
+            addView(installBtn, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(text("⋮", 22f, C.TEXT, bold = true).apply {
+                gravity = Gravity.CENTER
+                contentDescription = tr("Menu", "Menü")
+                setOnClickListener { showMenu() }
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }
+    }
+
+    /** ⋮ in the thumb bar: what the old header held (language) and the Play Protect guide. */
+    private fun showMenu() {
+        Sheet(this, C.ACCENT).header(tr("Install & update", "Yükle ve güncelle"))
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), enabled = !checking && !Installer.busy) { checkOnline() }
+            .item(Ic.SHIELD, tr("Play Protect warning?", "Play Protect uyarısı mı?"), sub = tr("How to install anyway", "Yine de yüklemek için"), more = true) { playProtect() }
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true,
+                reset = Sheet.languageReset(this)) { Sheet.language(this, C.ACCENT) }
+            .show()
     }
 
     private fun setStatus(s: String, color: Int, info: Boolean = false) { infoStatus = info; status.text = s; status.setTextColor(color); status.visibility = if (s.isEmpty()) View.GONE else View.VISIBLE }

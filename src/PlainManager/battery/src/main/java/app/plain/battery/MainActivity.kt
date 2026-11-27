@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var body: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var refresh: TextView
+    private lateinit var controls: LinearLayout
     private val tabViews = ArrayList<TextView>()
     private var tab = TAB_NOW
     private var period = PERIOD_RECENT
@@ -66,16 +67,17 @@ class MainActivity : Activity() {
         period = ui.getInt("period", PERIOD_RECENT).coerceIn(0, 1)
         Tracker.schedule(this)   // no-op while tracking is switched off
 
+        // Thumb-bar layout (2026-11-27): the section's name is the Hub title, the content (level and chart first)
+        // fills the middle, and every control is at the bottom: the Apps period switch, the section pills, then
+        // Refresh in the thumb bar.
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(16), px(10), px(12), px(6))
-        }
-        bar.addView(text("Plain Battery", 20f, WHITE, bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        refresh = pill(tr("Refresh", "Yenile"), false) { update(force = true) }
-        bar.addView(refresh, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)))
-        root.addView(bar)
+
+        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), px(4), px(12), px(16)) }
+        scroll = ScrollView(this).apply { addView(body); isVerticalScrollBarEnabled = false }
+        root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+
+        controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, px(12), 0) }
+        root.addView(controls)
 
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(px(12), px(4), px(12), px(4)) }
         TAB_NAMES.forEachIndexed { i, name ->
@@ -86,11 +88,14 @@ class MainActivity : Activity() {
             })
         }
         root.addView(tabs)
-
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, px(12), px(32)) }
-        scroll = ScrollView(this).apply { addView(body); isVerticalScrollBarEnabled = false }
-        root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(Hub.wrap(this, "battery", root))
+
+        refresh = pill(tr("Refresh", "Yenile"), false) { update(force = true) }
+        Hub.bar(this)?.apply {
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(refresh, LinearLayout.LayoutParams(WRAP_CONTENT, px(40)).apply { marginEnd = px(4) })
+        }
+        Hub.setOnTitleTap(this) { scroll.smoothScrollTo(0, 0) }
     }
 
     override fun onResume() {
@@ -132,7 +137,9 @@ class MainActivity : Activity() {
 
     private fun render() {
         tabViews.forEachIndexed { i, v -> stylePill(v, i == tab) }
+        Hub.setTitle(this, TAB_NAMES[tab])
         body.removeAllViews()
+        controls.removeAllViews()
         when (tab) {
             TAB_NOW -> nowTab()
             TAB_APPS -> appsTab()
@@ -218,16 +225,18 @@ class MainActivity : Activity() {
             else -> baseline to tr("Since unplug", "Şarjdan çıkalı")
         }
 
-        val seg = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(10), 0, px(10)) }
+        // the period switch is a control: it sits above the section pills, at the bottom
+        val seg = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(6), 0, px(2)) }
         val labels = listOf(recent?.let { tr("Last ", "Son ") + Rates.formatHours(it.batteryHours) } ?: tr("Last 3 h", "Son 3 sa"), sinceLabel)
         labels.forEachIndexed { i, l ->
             seg.addView(pill(l, i == period) {
                 if (period != i) { period = i; ui.edit().putInt("period", i).apply(); expanded.clear(); render() }
             }, LinearLayout.LayoutParams(0, px(34), 1f).apply { if (i == 0) marginEnd = px(6) })
         }
-        body.addView(seg)
+        controls.addView(seg)
+        body.addView(View(this), LinearLayout.LayoutParams(1, px(8)))
 
-        val d = if (period == PERIOD_RECENT) recent?.delta else Checkin.delta(sinceBase, latest)
+        val d =if (period == PERIOD_RECENT) recent?.delta else Checkin.delta(sinceBase, latest)
         if (d == null) {
             card().addView(text(tr("Needs two snapshots on battery at least 10 min apart. One is taken about every " +
                 "hour, and when you open this tab.",

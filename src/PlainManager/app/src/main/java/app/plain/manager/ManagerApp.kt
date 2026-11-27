@@ -18,6 +18,6 @@ class ManagerApp : Application() {
                 import = Migrate.Spec("app.plain.uninstaller", "Plain Uninstaller",
                     "its list of removed system apps (for restoring them) and settings",
                     "kaldırılan sistem uygulamaları listesini (geri yüklemek için) ve ayarlarını")),
-        ))
+        ), accent = 0xFFE8A447.toInt())
     }
 }

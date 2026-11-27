@@ -44,6 +44,7 @@ class TrailScreen(private val act: MainActivity) {
     private val tSub = act.text("", 13f, C.DIM)
     private val power = TextView(act)
     private val cam = TextView(act)
+    private val switcher = app.plain.hub.Hub.switcher(act, "trekking")
     private val layerBtn: Button
     private val landBtn: Button
     private var plans: List<Entry> = emptyList()
@@ -73,7 +74,7 @@ class TrailScreen(private val act: MainActivity) {
         map.attribution = map.layer.attribution
         view.addView(map, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // --- top: plan chooser (OFF) or stats (ON)
+        // --- top: stats (ON); the plan chooser (OFF) sits at the bottom, above the START button, within thumb reach
         val top = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(10), act.dp(10), act.dp(10), 0) }
         offBar.apply {
             orientation = LinearLayout.VERTICAL
@@ -83,7 +84,6 @@ class TrailScreen(private val act: MainActivity) {
             addView(spinner, lpL(MATCH, act.dp(40)))
             addView(noMaps)
         }
-        top.addView(offBar, lpL(MATCH, WRAP))
         statsBox.apply {
             orientation = LinearLayout.VERTICAL
             background = roundRect(C.PANEL, act.dpf(12))
@@ -124,6 +124,12 @@ class TrailScreen(private val act: MainActivity) {
         side.addView(sideBtn("◎") { locate() }, lpL(act.dp(46), act.dp(46)))
         view.addView(side, lpF(WRAP, WRAP, Gravity.END or Gravity.CENTER_VERTICAL))
 
+        // --- bottom: the plan chooser (OFF), above the power button
+        view.addView(offBar, lpF(MATCH, WRAP, Gravity.BOTTOM).apply {
+            leftMargin = act.dp(10); rightMargin = act.dp(10); bottomMargin = act.dp(14 + 84 + 10)
+        })
+        offBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePadBottom() }
+
         // --- bottom: the power button
         power.apply {
             gravity = Gravity.CENTER
@@ -136,7 +142,7 @@ class TrailScreen(private val act: MainActivity) {
             setOnLongClickListener { if (on) askStop(); on }
         }
         view.addView(power, lpF(act.dp(84), act.dp(84), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = act.dp(14) })
-        map.padBottom = act.dp(104)
+        updatePadBottom()
 
         // --- camera (only while recording): photo goes to the trail + Gallery
         cam.apply {
@@ -150,6 +156,12 @@ class TrailScreen(private val act: MainActivity) {
         }
         view.addView(cam, lpF(act.dp(60), act.dp(60), Gravity.BOTTOM or Gravity.START).apply {
             bottomMargin = act.dp(26); marginStart = act.dp(28)
+        })
+        // --- while recording the Plan / Trail bar is hidden: the Plain Maps switcher sits right of the power button
+        // (mirroring the camera on the left), never over it
+        switcher.visibility = View.GONE
+        view.addView(switcher, lpF(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
+            bottomMargin = act.dp(36); marginEnd = act.dp(14)
         })
         map.onMarkerTap = { m ->
             (m.tag as? Photo)?.let { act.showPhoto(it, Photos.recDir(act), Trail.segs) { refreshPhotos() } }
@@ -408,6 +420,8 @@ class TrailScreen(private val act: MainActivity) {
         statsBox.visibility = if (v) View.VISIBLE else View.GONE
         syncPower()
         cam.visibility = if (v) View.VISIBLE else View.GONE
+        switcher.visibility = if (v) View.VISIBLE else View.GONE
+        updatePadBottom()
         if (v) refreshPhotos() else map.markers = emptyList()
         refreshOverlays()
         main.removeCallbacks(tick)
@@ -422,6 +436,13 @@ class TrailScreen(private val act: MainActivity) {
             map.follow = false
             map.clearMe()
         }
+    }
+
+    /** Keeps the map's centre above the bottom controls: the power button, and the plan chooser when OFF. */
+    private fun updatePadBottom() {
+        val base = act.dp(104)
+        val pad = if (!on && offBar.visibility == View.VISIBLE && offBar.height > 0) act.dp(14 + 84 + 10) + offBar.height else base
+        if (map.padBottom != pad) { map.padBottom = pad; map.invalidate() }
     }
 
     /** The power button: START (green), STOP (red, hold) or PAUSED (amber, tap to resume). */

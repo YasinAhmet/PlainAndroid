@@ -17,7 +17,7 @@ class MediaApp : Application() {
                     "its playlists, play history, queue and settings (your songs stay where they are)",
                     "çalma listelerini, çalma geçmişini, kuyruğunu ve ayarlarını (şarkılarınız yerinde kalır)")),
             Tab("youtube", "Youtube", "Youtube", "app.plain.download.MainActivity"),
-        ))
+        ), accent = 0xFFE8A447.toInt())
         YoutubeApp.init(this)
         // Downloaded YouTube / Spotify playlists and Lists become Music playlists (3.5): the lists saved before that get
         // their links once, when the Music tab first loads its library.

@@ -124,6 +124,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     private lateinit var chipScroll: HorizontalScrollView
     private val chips = LinkedHashMap<String, TextView>()
     private lateinit var photoTab: TextView
+    /** The Hub app switcher pill (null when not wrapped: a capture for another app, the lock screen). */
+    private var switcher: TextView? = null
+    private val hubbed get() = caller == Caller.NONE && !secure
     private lateinit var videoTab: TextView
     private lateinit var shutter: ShutterButton
     private lateinit var thumb: ImageView
@@ -535,12 +538,20 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         }
         chipScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chipRow) }
         bottomBar.addView(chipScroll, LinearLayout.LayoutParams(-1, -2))
+        // the app switcher pill ("Camera ▾", thumb bar layout) sits at the start of the PHOTO | VIDEO row, left of the
+        // shutter row's thumbnail column; only on Plain Camera's own launch (wrapped by Hub), not for callers/lock screen
+        val modeRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        if (hubbed) {
+            switcher = Hub.switcher(this, "camera")
+            modeRow.addView(switcher, LinearLayout.LayoutParams(-2, -2))
+        }
         val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER }
         photoTab = label(tr("PHOTO", "FOTOĞRAF"), 13f).apply { setOnClickListener { setMode(Mode.PHOTO) } }
         videoTab = label(tr("VIDEO", "VİDEO"), 13f).apply { setOnClickListener { setMode(Mode.VIDEO) } }
         tabs.addView(photoTab)
         tabs.addView(videoTab)
-        bottomBar.addView(tabs, LinearLayout.LayoutParams(-1, -2))
+        modeRow.addView(tabs, LinearLayout.LayoutParams(0, -2, 1f))
+        bottomBar.addView(modeRow, LinearLayout.LayoutParams(-1, -2).apply { if (hubbed) bottomMargin = dp(4) })
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         thumb = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -578,11 +589,16 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             insetTop = top
             bottomBar.setPadding(dp(16), dp(4), dp(16), dp(16) + bottom)
             (topBar.layoutParams as FrameLayout.LayoutParams).topMargin = top
+            (timer.layoutParams as FrameLayout.LayoutParams).topMargin = top + dp(60)
+            topBar.requestLayout()
+            timer.requestLayout()
+            layoutPreview()
             ins
         }
         root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, orr, ob -> if (r - l != orr - ol || b - t != ob - ot) layoutPreview() }
-        // Plain Camera's own launch gets the Camera / Gallery header; a capture for another app or the lock screen doesn't
-        setContentView(if (caller == Caller.NONE && !secure) Hub.wrap(this, "camera", root) else root)
+        // Plain Camera's own launch is a Hub tab (full screen: the content gets every inset and shows the switcher
+        // pill in its bottom bar); a capture for another app or the lock screen isn't
+        setContentView(if (hubbed) Hub.wrap(this, "camera", root, Hub.Style.FULL) else root)
         updateUi()
     }
 
@@ -645,6 +661,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         videoTab.isEnabled = idleUi
         flipBtn.isEnabled = idleUi
         flipBtn.alpha = if (idleUi) 1f else 0.4f
+        switcher?.let { it.isEnabled = idleUi; it.alpha = if (idleUi) 1f else 0.4f }
         shutter.video = mode == Mode.VIDEO
         shutter.recording = recording
         thumb.visibility = if (caller == Caller.NONE && !secure && lastUri != null && idleUi) View.VISIBLE else View.INVISIBLE

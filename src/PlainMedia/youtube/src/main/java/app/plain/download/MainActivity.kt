@@ -106,6 +106,13 @@ class MainActivity : Activity() {
         player.attach(this)
         frame.addView(player.root, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(Hub.wrap(this, "youtube", frame))
+        // thumb bar (layout "draft 3"): Download / Search and ⋮ sit at the bottom next to the "Youtube ▾" switcher
+        Hub.bar(this)?.apply {
+            tabViews.forEach { addView(it, lpL(WRAP, WRAP).apply { rightMargin = dp(6) }) }
+            addView(View(this@MainActivity), lpL(0, 1, 1f))
+            addView(icon(R.drawable.yt_ic_more, desc = tr("Menu", "Menü")) { mainMenu() }.also { moreBtn = it })
+        }
+        search.onTitle = { name, page -> if (tab == 1) { Hub.setTitle(this, name); Hub.setBack(this, if (page) ({ handleBack() }) else null) } }
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC // hardware keys = media volume while the app is in front
         search.onNav = { nav.push(it) }
         search.onPagePopped = { nav.dropPage() }
@@ -190,6 +197,7 @@ class MainActivity : Activity() {
 
     fun onPlayerState(s: PState) {
         if (s == PState.FULL) getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(window.decorView.windowToken, 0)
+        Hub.setHeaderShown(this, s != PState.FULL) // the full player has the whole screen
     }
 
     /**
@@ -251,9 +259,10 @@ class MainActivity : Activity() {
         tab = t
         Store.tab = t
         tabViews.forEachIndexed { i, v ->
-            v.setTextColor(if (i == t) C.TEXT else C.LABEL)
-            v.background = if (i == t) underline() else null
+            v.setTextColor(if (i == t) C.ACCENT else C.DIM)
+            v.background = outline(dpf(18), if (i == t) C.ACCENT else C.OUTLINE)
         }
+        if (t == 0) { Hub.setTitle(this, tr("Download", "İndir")); Hub.setBack(this, null) } else search.reportTitle()
         downloadView.visibility = if (t == 0) View.VISIBLE else View.GONE
         search.view.visibility = if (t == 1) View.VISIBLE else View.GONE
         if (!changed) return
@@ -321,22 +330,15 @@ class MainActivity : Activity() {
             v.setPadding(0, ins.systemWindowInsetTop, 0, ins.systemWindowInsetBottom); ins
         }
 
-        val bar = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(6), dp(4), dp(2))
-        }
+        // Download / Search: pills placed in the Hub thumb bar (onCreate)
         for ((i, label) in listOf(tr("Download", "İndir"), tr("Search", "Ara")).withIndex()) {
-            val tv = text(label, 17f, C.LABEL, bold = true).apply {
-                setPadding(dp(12), dp(10), dp(12), dp(10))
+            val tv = text(label, 14f, C.DIM, bold = true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(13), dp(8), dp(13), dp(8))
                 setOnClickListener { selectTab(i) }
             }
             tabViews += tv
-            bar.addView(tv)
         }
-        bar.addView(View(this), lpL(0, 1, 1f))
-        bar.addView(icon(R.drawable.yt_ic_more, desc = tr("Menu", "Menü")) { mainMenu() }.also { moreBtn = it })
-        root.addView(bar, lpL(MATCH, WRAP))
-        root.addView(View(this).apply { setBackgroundColor(C.LINE) }, lpL(MATCH, dp(1)))
 
         val pages = android.widget.FrameLayout(this)
         root.addView(pages, lpL(MATCH, 0, 1f))

@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.download"
         minSdk = 30
         targetSdk = 35
-        versionCode = 32
-        versionName = "3.7"
+        versionCode = 33
+        versionName = "3.8"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

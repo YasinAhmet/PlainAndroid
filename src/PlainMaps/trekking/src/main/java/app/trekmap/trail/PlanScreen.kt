@@ -85,15 +85,10 @@ class PlanScreen(private val act: MainActivity) {
     }
 
     // ------------------------------------------------------------------ layout
+    /** Top: only the Wi-Fi state and the map type. The search field and settings sit at the bottom (see [buildPanel]). */
     private fun buildTop() {
         topCol.orientation = LinearLayout.VERTICAL
         topCol.setPadding(act.dp(8), act.dp(8), act.dp(8), 0)
-        val bar = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = roundRect(C.PANEL, act.dpf(12))
-            setPadding(act.dp(12), act.dp(2), act.dp(3), act.dp(2))
-        }
         search.apply {
             hint = tr("Search a place or forest", "Yer veya orman ara")
             setSingleLine()
@@ -105,18 +100,13 @@ class PlanScreen(private val act: MainActivity) {
             textSize = 14f
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEARCH) { doSearch(); true } else false }
         }
-        bar.addView(search, lpL(0, WRAP, 1f))
-        bar.addView(act.button(tr("Search", "Ara")) { doSearch() }, lpL(WRAP, act.dp(36)))
-        topCol.addView(bar, lpL(MATCH, WRAP))
-
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         wifiLabel.setPadding(act.dp(8), act.dp(4), act.dp(8), act.dp(4))
         wifiLabel.background = roundRect(C.PANEL, act.dpf(8))
         row.addView(wifiLabel, lpL(WRAP, WRAP))
         row.addView(View(act), lpL(0, 1, 1f))
-        row.addView(act.button("⚙") { act.showSettings { applySettings() } }, lpL(act.dp(40), act.dp(34)).apply { marginEnd = act.dp(6) })
         row.addView(layerBtn, lpL(WRAP, act.dp(34)))
-        topCol.addView(row, lpL(MATCH, WRAP).apply { topMargin = act.dp(4) })
+        topCol.addView(row, lpL(MATCH, WRAP))
         view.addView(topCol, lpF(MATCH, WRAP, Gravity.TOP))
         topCol.addOnLayoutChangeListener { _, _, t, _, b, _, _, _, _ -> map.padTop = b - t }
     }
@@ -133,6 +123,23 @@ class PlanScreen(private val act: MainActivity) {
             segRow.addView(b, lpL(0, act.dp(36), 1f).apply { marginStart = act.dp(2); marginEnd = act.dp(2) })
         }
         panel.addView(segRow, lpL(MATCH, WRAP))
+        // the search field and settings: the bottom row, right above the Plan / Trail bar (and the keyboard)
+        val bar = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(act.dp(6), 0, act.dp(6), act.dp(6))
+        }
+        val box = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundRect(C.CARD, act.dpf(12))
+            setPadding(act.dp(12), act.dp(2), act.dp(3), act.dp(2))
+        }
+        box.addView(search, lpL(0, WRAP, 1f))
+        box.addView(act.button(tr("Search", "Ara"), C.PANEL) { doSearch() }, lpL(WRAP, act.dp(36)))
+        bar.addView(box, lpL(0, WRAP, 1f))
+        bar.addView(act.button("⚙") { act.showSettings { applySettings() } }, lpL(act.dp(44), act.dp(40)).apply { marginStart = act.dp(6) })
+        panel.addView(bar, lpL(MATCH, WRAP))
         view.addView(panel, lpF(MATCH, WRAP, Gravity.BOTTOM))
         panel.addOnLayoutChangeListener { _, _, t, _, b, _, _, _, _ ->
             if (panel.visibility == View.VISIBLE) { map.padBottom = b - t; map.invalidate() }

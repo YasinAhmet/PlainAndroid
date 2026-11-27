@@ -63,13 +63,21 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(C.BG) }
         content = FrameLayout(this)
         root.addView(content, lpL(MATCH, 0, 1f))
-        tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(0xFF0E0E0E.toInt()) }
+        // the bottom bar: the Plain Maps switcher pill, then the Plan / Trail tabs (hidden while recording; the
+        // Trail screen then shows its own pill next to the power button)
+        tabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF0E0E0E.toInt())
+            setPadding(dp(8), dp(4), dp(4), dp(4))
+        }
+        tabs.addView(Hub.switcher(this, "trekking"), lpL(WRAP, WRAP).apply { marginEnd = dp(6) })
         tabPlan = tab(tr("Plan", "Plan")) { showPlan() }
         tabTrail = tab(tr("Trail", "Rota")) { showTrail() }
         tabs.addView(tabPlan, lpL(0, dp(44), 1f))
         tabs.addView(tabTrail, lpL(0, dp(44), 1f))
         root.addView(tabs, lpL(MATCH, WRAP))
-        setContentView(Hub.wrap(this, "trekking", root))
+        setContentView(Hub.wrap(this, "trekking", root, Hub.Style.FULL))
         root.setOnApplyWindowInsetsListener { v, ins ->
             if (Build.VERSION.SDK_INT >= 30) {
                 val i = ins.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())

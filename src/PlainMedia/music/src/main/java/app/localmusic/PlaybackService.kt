@@ -73,6 +73,7 @@ class PlaybackService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (!Player.playing) Player.stop()
+        else Player.savePosition() // playing on: keep the place in case Android ends the app
     }
 
     override fun onDestroy() {

@@ -274,16 +274,23 @@ object Player {
             queue.jump(0); prepareCurrent(0, play = false); pause(); return
         }
         queue.jump(n)
-        prepareCurrent(0, playing)
+        prepareCurrent(autoStart(), playing)
         releaseIfIdle()
     }
 
     fun prev() {
         if (position() > 3000) { seekTo(0); return }
         queue.peekPrev()?.let { queue.jump(it) }
-        prepareCurrent(0, playing)
+        prepareCurrent(autoStart(), playing)
         releaseIfIdle()
     }
+
+    /** Long items (videos, podcasts: 10 min or more) the queue moves on to continue where they were left; songs start over. */
+    private fun autoStart(id: Long? = queue.current()): Long {
+        val s = id?.let { songOf(it) } ?: return 0
+        return if (s.isVideo || s.durationMs >= LONG_MS) SongResume.get(s) else 0
+    }
+    private const val LONG_MS = 10 * 60_000L
 
     fun seekTo(ms: Long) {
         val p = mp
@@ -332,9 +339,10 @@ object Player {
         prepareCurrent(0, play = true)
     }
 
+    /** A song tapped in the queue: continues where it was left. */
     fun jump(playPos: Int) {
         queue.jump(playPos)
-        prepareCurrent(0, play = true)
+        prepareCurrent(queue.current()?.let { songOf(it) }?.let { SongResume.get(it) } ?: 0, play = true)
     }
 
     fun toggleShuffle() {
@@ -468,6 +476,8 @@ object Player {
         // song is prepared when it starts and gets the speed in play().
         if (ext || loop || n == null || sleepEndOfSong || speed != 1f) { runCatching { p.setNextMediaPlayer(null) }; return }
         val s = songOf(queue.idAt(n)) ?: return
+        // An item that continues where it was left is prepared when it starts (at that place), not gaplessly.
+        if (autoStart(s.id) > 0) { runCatching { p.setNextMediaPlayer(null) }; return }
         // A video while its picture is on screen is prepared when it starts (with the surface), not gaplessly:
         // the prepared-next player never gets a surface.
         if (s.isVideo && videoHolder != null) { runCatching { p.setNextMediaPlayer(null) }; return }
@@ -520,7 +530,7 @@ object Player {
         }
         if (n == null) { queue.jump(0); prepareCurrent(0, play = false); pause(); return }
         queue.jump(n)
-        prepareCurrent(0, play = true)
+        prepareCurrent(autoStart(), play = true)
     }
 
     private fun onError(p: MediaPlayer) {

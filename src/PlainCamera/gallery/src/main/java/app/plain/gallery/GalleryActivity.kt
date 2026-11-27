@@ -18,7 +18,6 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
 import android.text.InputType
-import android.text.TextUtils
 import android.util.LruCache
 import android.util.Size
 import android.view.Gravity
@@ -60,8 +59,6 @@ class GalleryActivity : Activity() {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var grid: PageGrid
-    private lateinit var back: TextView
-    private lateinit var title: TextView
     private lateinit var pageSel: TextView
     private lateinit var menuBtn: TextView
     private lateinit var camBtn: TextView
@@ -127,27 +124,16 @@ class GalleryActivity : Activity() {
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
-        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        back = label("‹", 26f).apply { contentDescription = tr("Back", "Geri"); setPadding(0, 0, 0, dp(4)); setOnClickListener { goBack() } }
-        title = label(tr("Gallery", "Galeri"), 17f, TEXT2).apply {
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.END
-        }
+        // thumb bar layout: the title (with ‹ / count) is Hub's title row; "All on page", Camera and ⋮ go into the
+        // thumb bar (added after setContentView); the selection actions and the pager sit right above it
         pageSel = button(tr("All on page", "Sayfadakiler")) { selectPage() }.apply { setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }
         menuBtn = label("⋮", 22f).apply { contentDescription = tr("Menu", "Menü"); setOnClickListener { showMenu(it) } }
-        top.addView(back, LinearLayout.LayoutParams(dp(44), dp(48)))
-        top.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
-        // straight to Plain Camera (shown only when it's installed)
+        // straight to the Camera tab
         camBtn = button(tr("Camera", "Kamera")) { openCamera() }.apply {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
             setTextColor(TEXT2)
             contentDescription = tr("Open Plain Camera", "Plain Camera'yı aç")
         }
-        top.addView(pageSel, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(10) })
-        top.addView(camBtn, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(2) })
-        top.addView(menuBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
-        root.addView(top, LinearLayout.LayoutParams(-1, dp(48)))
 
         val frame = FrameLayout(this)
         grid = PageGrid(this).apply {
@@ -201,6 +187,14 @@ class GalleryActivity : Activity() {
             ins
         }
         setContentView(Hub.wrap(this, "gallery", root))
+        Hub.bar(this)?.apply {
+            // a steady height whichever buttons show, so the grid's rows don't jump when selection starts
+            minimumHeight = dp(44)
+            addView(View(this@GalleryActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(pageSel, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(6) })
+            addView(camBtn, LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(2) })
+            addView(menuBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }
         updateBars()
         contentResolver.registerContentObserver(Library.watch, true, observer)
         if (!hasRead()) requestPermissions(readPerms(), 1)
@@ -583,18 +577,15 @@ class GalleryActivity : Activity() {
 
     private fun updateBars() {
         val nested = catsOn && screen != Screen.FOLDERS
-        back.visibility = if (selecting || nested) View.VISIBLE else View.GONE
-        back.text = if (selecting) "✕" else "‹"
-        back.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (selecting) 20f else 26f)
-        back.contentDescription = if (selecting) tr("Cancel selection", "Seçimi iptal et") else tr("Back", "Geri")
-        title.setPadding(dp(if (selecting || nested) 2 else 14), dp(8), dp(8), dp(8))
-        title.text = when {
+        // ‹ cancels the selection or leaves the category (Hub's title row); the title carries the count
+        Hub.setBack(this, if (selecting || nested) ({ goBack() }) else null)
+        Hub.setTitle(this, when {
             selecting -> tr("${Paging.count(selected.size)} selected", "${Paging.count(selected.size)} seçili")
             screen == Screen.FOLDERS -> tr("Categories", "Kategoriler")
             screen == Screen.CATEGORY -> "$category · ${Paging.count(shown.size)}"
             screen == Screen.UNSORTED -> tr("Uncategorized", "Kategorisiz") + " · ${Paging.count(shown.size)}"
             else -> tr("Gallery", "Galeri") + " · ${Paging.count(items.size)}"
-        }
+        })
         pageSel.visibility = if (selecting) View.VISIBLE else View.GONE
         menuBtn.visibility = if (selecting) View.GONE else View.VISIBLE
         camBtn.visibility = if (selecting || !hasCamera) View.GONE else View.VISIBLE

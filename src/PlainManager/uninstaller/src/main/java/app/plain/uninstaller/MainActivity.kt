@@ -112,6 +112,7 @@ class MainActivity : Activity() {
     private lateinit var restoreBtn: TextView
     private lateinit var setupBox: LinearLayout
     private lateinit var menuBtn: TextView
+    private lateinit var searchGap: View
 
     private val appAdapter = AppAdapter()
     private val restoreAdapter = RestoreAdapter()
@@ -206,18 +207,22 @@ class MainActivity : Activity() {
             background = outline(dpf(10), C.RED)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
-        root.addView(banner, lpL(MATCH, WRAP).margins(dp(12), dp(8), dp(12), dp(4)))
+        root.addView(banner, lpL(MATCH, WRAP).margins(dp(12), dp(4), dp(12), dp(4)))
 
-        // Toolbar
-        val bar = hbox().apply { setPadding(dp(16), dp(4), dp(4), 0) }
-        bar.addView(text("Plain Uninstaller", 20f, C.TEXT, bold = true), lpL(0, WRAP, 1f))
-        bar.addView(toolButton("?", tr("How to declutter", "Nasıl sadeleştirilir")) { showHelp() })
+        // Thumb-bar layout (2026-11-27): the page name is the Hub title (‹ back to Apps, or ‹ to clear a selection),
+        // "?" sits at the right of the title, the search field and ⋮ are in the thumb bar, and the page pills,
+        // filter chips and Uninstall/Restore buttons are at the bottom of the content.
+        searchGap = View(this)
         menuBtn = toolButton("⋮", tr("Menu", "Menü")) { showMenu() }
-        bar.addView(menuBtn)
-        root.addView(bar, lpL(MATCH, WRAP))
 
-        // Tabs
-        val tabs = hbox().apply { setPadding(dp(12), dp(4), dp(12), dp(4)) }
+        val content = FrameLayout(this)
+        pages = mapOf(Tab.APPS to buildAppsPage(), Tab.RESTORE to buildRestorePage(), Tab.SETUP to buildSetupPage())
+        pages.values.forEach { content.addView(it, FrameLayout.LayoutParams(MATCH, MATCH)) }
+        root.addView(content, lpL(MATCH, 0, 1f))
+        root.addView(View(this).apply { setBackgroundColor(C.OUTLINE) }, lpL(MATCH, dp(1)))
+
+        // Page pills, right above the thumb bar
+        val tabs = hbox().apply { setPadding(dp(12), dp(2), dp(12), 0) }
         val tv = LinkedHashMap<Tab, TextView>()
         for ((t, label) in listOf(Tab.APPS to tr("Apps", "Uygulamalar"), Tab.RESTORE to tr("Restore", "Geri yükle"), Tab.SETUP to tr("Setup", "Kurulum"))) {
             val v = text(label, 15f, C.DIM, bold = true).apply {
@@ -230,12 +235,6 @@ class MainActivity : Activity() {
         }
         tabViews = tv
         root.addView(tabs, lpL(MATCH, WRAP))
-        root.addView(View(this).apply { setBackgroundColor(C.OUTLINE) }, lpL(MATCH, dp(1)))
-
-        val content = FrameLayout(this)
-        pages = mapOf(Tab.APPS to buildAppsPage(), Tab.RESTORE to buildRestorePage(), Tab.SETUP to buildSetupPage())
-        pages.values.forEach { content.addView(it, FrameLayout.LayoutParams(MATCH, MATCH)) }
-        root.addView(content, lpL(MATCH, 0, 1f))
 
         root.setOnApplyWindowInsetsListener { v, insets ->
             if (Build.VERSION.SDK_INT >= 30) {
@@ -250,7 +249,26 @@ class MainActivity : Activity() {
             insets
         }
         setContentView(Hub.wrap(this, "uninstaller", root))
+        Hub.bar(this)?.apply {
+            addView(search, lpL(0, WRAP, 1f))
+            addView(searchGap, lpL(0, 1, 1f))
+            addView(menuBtn, lpL(dp(44), dp(48)))
+        }
+        Hub.titleEnd(this)?.addView(toolButton("?", tr("How to declutter", "Nasıl sadeleştirilir")) { showHelp() })
         showTab(Tab.APPS)
+    }
+
+    /** Title and ‹ for the page shown: Restore/Setup go back to Apps; on Apps a selection shows its count and ‹ clears it. */
+    private fun updateHeader() {
+        when {
+            tab == Tab.RESTORE -> { Hub.setTitle(this, tr("Restore", "Geri yükle")); Hub.setBack(this) { showTab(Tab.APPS) } }
+            tab == Tab.SETUP -> { Hub.setTitle(this, tr("Setup", "Kurulum")); Hub.setBack(this) { showTab(Tab.APPS) } }
+            selected.isNotEmpty() -> {
+                Hub.setTitle(this, tr("${selected.size} selected", "${selected.size} seçili"))
+                Hub.setBack(this) { selected.clear(); updateSelection() }
+            }
+            else -> { Hub.setTitle(this, null); Hub.setBack(this, null) }
+        }
     }
 
     private fun toolButton(label: String, desc: String, onClick: () -> Unit) = text(label, 20f, C.DIM, bold = true).apply {
@@ -283,8 +301,8 @@ class MainActivity : Activity() {
             chipRow.addView(c, lpL(WRAP, WRAP).margins(r = dp(8)))
         }
         chips = cm
-        page.addView(chipRow, lpL(MATCH, WRAP))
 
+        // goes into the thumb bar (see buildUi)
         search = EditText(this).apply {
             hint = tr("Search apps or package names", "Uygulama veya paket adı ara")
             textSize = 14f
@@ -303,14 +321,6 @@ class MainActivity : Activity() {
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0); true
             }
         }
-        page.addView(search, lpL(MATCH, WRAP).margins(t = dp(8), b = dp(6)))
-
-        val selRow = hbox()
-        countText = text("", 13f, C.DIM)
-        selRow.addView(countText, lpL(0, WRAP, 1f))
-        selRow.addView(pill(tr("Select all visible", "Görünenleri seç")) { selectAllVisible() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
-        selRow.addView(pill(tr("Clear", "Temizle")) { selected.clear(); updateSelection() }.apply { textSize = 13f })
-        page.addView(selRow, lpL(MATCH, WRAP).margins(b = dp(4)))
 
         val listBox = FrameLayout(this)
         appList = listView(appAdapter) { pos -> visible.getOrNull(pos)?.let { toggle(it.pkg) } }
@@ -318,6 +328,16 @@ class MainActivity : Activity() {
         listBox.addView(appList, FrameLayout.LayoutParams(MATCH, MATCH))
         listBox.addView(appsEmpty, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         page.addView(listBox, lpL(MATCH, 0, 1f))
+
+        // Bottom of the page, above the page pills: filter chips, selection row, Uninstall
+        page.addView(chipRow, lpL(MATCH, WRAP).margins(t = dp(6)))
+
+        val selRow = hbox()
+        countText = text("", 13f, C.DIM)
+        selRow.addView(countText, lpL(0, WRAP, 1f))
+        selRow.addView(pill(tr("Select all visible", "Görünenleri seç")) { selectAllVisible() }.apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
+        selRow.addView(pill(tr("Clear", "Temizle")) { selected.clear(); updateSelection() }.apply { textSize = 13f })
+        page.addView(selRow, lpL(MATCH, WRAP).margins(t = dp(6)))
 
         uninstallBtn = bottomButton(tr("Uninstall 0 selected", "Kaldır (0 seçili)")) { startUninstall() }
         page.addView(uninstallBtn, lpL(MATCH, WRAP).margins(t = dp(6)))
@@ -335,7 +355,6 @@ class MainActivity : Activity() {
         row.addView(pill(tr("Select all", "Tümünü seç")) { restoreSelected.addAll(restoreItems.map { it.pkg }); updateRestoreSelection() }
             .apply { textSize = 13f }, lpL(WRAP, WRAP).margins(r = dp(6)))
         row.addView(pill(tr("Clear", "Temizle")) { restoreSelected.clear(); updateRestoreSelection() }.apply { textSize = 13f })
-        page.addView(row, lpL(MATCH, WRAP).margins(b = dp(4)))
 
         val listBox = FrameLayout(this)
         restoreList = listView(restoreAdapter) { pos ->
@@ -345,8 +364,10 @@ class MainActivity : Activity() {
         listBox.addView(restoreList, FrameLayout.LayoutParams(MATCH, MATCH))
         listBox.addView(restoreEmpty, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         page.addView(listBox, lpL(MATCH, 0, 1f))
+        // selection row and Restore at the bottom, above the page pills
+        page.addView(row, lpL(MATCH, WRAP).margins(t = dp(6)))
 
-        restoreBtn = bottomButton(tr("Restore 0 selected", "Geri yükle (0 seçili)")) { startRestore() }
+        restoreBtn =bottomButton(tr("Restore 0 selected", "Geri yükle (0 seçili)")) { startRestore() }
         page.addView(restoreBtn, lpL(MATCH, WRAP).margins(t = dp(6)))
         return page
     }
@@ -369,6 +390,10 @@ class MainActivity : Activity() {
         tab = t
         tabViews.forEach { (k, v) -> v.setTextColor(if (k == t) C.ACCENT else C.DIM) }
         pages.forEach { (k, v) -> v.visibility = if (k == t) View.VISIBLE else View.GONE }
+        // the search field in the thumb bar belongs to the Apps page
+        search.visibility = if (t == Tab.APPS) View.VISIBLE else View.GONE
+        searchGap.visibility = if (t == Tab.APPS) View.GONE else View.VISIBLE
+        updateHeader()
         if (t != Tab.APPS) hideKeyboard()
         when (t) {
             Tab.RESTORE -> loadRestore()
@@ -494,6 +519,7 @@ class MainActivity : Activity() {
         uninstallBtn.setTextColor(if (selected.isEmpty()) C.LABEL else C.TEXT)
         uninstallBtn.background = ripple(outline(dpf(20), if (selected.isEmpty()) C.OUTLINE_BTN else C.RED))
         appAdapter.notifyDataSetChanged()
+        if (tab == Tab.APPS) updateHeader()
     }
 
     private fun iconFor(pkg: String, into: ImageView) {

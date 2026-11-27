@@ -79,6 +79,7 @@ class MainActivity : Activity() {
     private lateinit var selCount: TextView
     private lateinit var undoBar: LinearLayout
     private lateinit var undoText: TextView
+    private lateinit var undoLabel: TextView
     private var undoAction: (() -> Unit)? = null
     private val hideUndo = Runnable { undoBar.visibility = View.GONE; undoAction = null }
     private lateinit var spaceBar: TextView
@@ -338,14 +339,9 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(col, lpF(MATCH, MATCH))
 
-        // top bar: back, search, menu
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(6), dp(4), dp(2))
-        }
-        back = icon(R.drawable.mus_ic_back, desc = tr("Back", "Geri")) { onBackPressed() }
-        top.addView(back)
+        // thumb bar (2026-11-27, layout "draft 3"): the page's name is the Hub title on top (‹ for sub-pages);
+        // search and ⋮ sit in the bottom bar next to the "Music ▾" switcher; the tab pills and the mini player above it
+        back = icon(R.drawable.mus_ic_back, desc = tr("Back", "Geri")) { onBackPressed() } // state only: the ‹ is Hub's
         val searchBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -354,7 +350,7 @@ class MainActivity : Activity() {
         }
         searchBox.addView(ImageView(this).apply { setImageResource(R.drawable.mus_ic_search); tint(C.LABEL) }, lpL(dp(20), dp(20)))
         search = EditText(this).apply {
-            hint = tr("Search songs, artists, albums", "Şarkı, sanatçı, albüm ara")
+            hint = tr("Search", "Ara")
             setHintTextColor(C.LABEL)
             setTextColor(C.TEXT)
             textSize = 15f
@@ -384,10 +380,7 @@ class MainActivity : Activity() {
             })
             clear.visibility = View.GONE
         })
-        top.addView(searchBox, lpL(0, dp(44), 1f).apply { leftMargin = dp(4); rightMargin = dp(2) })
         menuBtn = icon(R.drawable.mus_ic_more, desc = tr("Menu", "Menü")) { mainMenu() }
-        top.addView(menuBtn)
-        col.addView(top, lpL(MATCH, WRAP))
         spaceBar = text("", 13f, C.ACCENT, lines = 2).apply {
             background = outline(dpf(10), C.ACCENT)
             setPadding(dp(12), dp(8), dp(12), dp(8))
@@ -408,7 +401,6 @@ class MainActivity : Activity() {
             tabRow.addView(t, lpL(WRAP, WRAP).apply { rightMargin = dp(8) })
         }
         val tabScrollView = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(tabRow) }
-        col.addView(tabScrollView, lpL(MATCH, WRAP))
 
         // Library segments (only on the Library tab)
         val segRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), 0, dp(12), dp(4)) }
@@ -448,6 +440,7 @@ class MainActivity : Activity() {
             }
         }
         col.addView(list, lpL(MATCH, 0, 1f))
+        col.addView(tabScrollView, lpL(MATCH, WRAP)) // the tab pills: above the mini player, within thumb reach
 
         // mini player: tap = now playing, swipe sideways = next / previous song, the artist name = artist page
         mini = SwipeBar(this).apply {
@@ -507,7 +500,8 @@ class MainActivity : Activity() {
         }
         undoText = text("", 14f, C.TEXT)
         undoBar.addView(undoText, lpL(0, WRAP, 1f))
-        undoBar.addView(text(PlainLang.upper(tr("Undo", "Geri al")), 14f, C.ACCENT, bold = true).apply {
+        undoLabel = text(PlainLang.upper(tr("Undo", "Geri al")), 14f, C.ACCENT, bold = true)
+        undoBar.addView(undoLabel.apply {
             setPadding(dp(14), dp(10), dp(14), dp(10))
             setOnClickListener { val a = undoAction; handler.removeCallbacks(hideUndo); hideUndo.run(); a?.invoke() }
         })
@@ -516,6 +510,11 @@ class MainActivity : Activity() {
         col.addView(mini, lpL(MATCH, WRAP).apply { leftMargin = dp(6); rightMargin = dp(6); bottomMargin = dp(6) })
 
         setContentView(Hub.wrap(this, "music", root))
+        Hub.bar(this)?.apply {
+            addView(searchBox, lpL(0, dp(44), 1f).apply { rightMargin = dp(2) })
+            addView(menuBtn)
+        }
+        Hub.setOnTitleTap(this) { list.smoothScrollToPosition(0) }
         // edge-to-edge safe padding for status/navigation bars
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
@@ -546,6 +545,13 @@ class MainActivity : Activity() {
             t.setTextColor(if (sel) C.TEXT else C.DIM)
         }
         back.visibility = if (drill.isNotEmpty() || query.isNotEmpty() || editPlaylist != null) View.VISIBLE else View.GONE
+        Hub.setBack(this, if (back.visibility == View.VISIBLE) ({ onBackPressed() }) else null)
+        Hub.setTitle(this, when {
+            drill.lastOrNull()?.fromSearch == true -> drill.last().title
+            query.isNotEmpty() -> tr("Search", "Arama")
+            drill.isNotEmpty() -> drill.last().title
+            else -> TABS[tab]
+        })
     }
 
     private fun selectTab(i: Int) {
@@ -657,18 +663,17 @@ class MainActivity : Activity() {
     }
 
     /**
-     * 3.3: a song / video left in the middle asks "Continue from last session?" (Continue = from there, From the
-     * beginning = 0). Not asked for the song that is playing right now.
+     * A song / video left in the middle (here or in the Youtube tab) continues there, with "Start over" in the bar
+     * at the bottom for 8 s (3.8; 3.3 asked first). The song playing right now just plays on from the start.
      */
     private fun askResume(s: Song, go: (Long) -> Unit) {
         val at = SongResume.get(s)
         if (at <= 0 || (Player.playing && Player.current?.id == s.id)) { go(0); return }
-        android.app.AlertDialog.Builder(this, R.style.mus_Dialog)
-            .setTitle(tr("Continue from last session?", "Son oturumdan devam edilsin mi?"))
-            .setMessage(s.title + "\n" + tr("You stopped at ${SongResume.clock(at)}.", "${SongResume.clock(at)} noktasında kalmıştınız."))
-            .setPositiveButton(tr("Continue", "Devam et")) { _, _ -> go(at) }
-            .setNegativeButton(tr("From the beginning", "Baştan başla")) { _, _ -> SongResume.clear(s.id); go(0) }
-            .show()
+        go(at)
+        showUndo(tr("Continued at ${SongResume.clock(at)}", "${SongResume.clock(at)} noktasından sürüyor"), tr("Start over", "Baştan")) {
+            SongResume.clear(s.id)
+            if (Player.current?.id == s.id) Player.seekTo(0)
+        }
     }
 
     private fun songCard(list: List<Song>, i: Int, sub: String? = null): Card {
@@ -1139,9 +1144,10 @@ class MainActivity : Activity() {
     }
 
     /** After an erase without Android's dialog: "Erased … · UNDO" for 8 s (a UI timeout, removed in onStop). */
-    fun showUndo(text: String, undo: () -> Unit) {
+    fun showUndo(text: String, label: String = tr("Undo", "Geri al"), undo: () -> Unit) {
         endSelection()
         undoText.text = text
+        undoLabel.text = PlainLang.upper(label)
         undoAction = undo
         undoBar.visibility = View.VISIBLE
         handler.removeCallbacks(hideUndo)
@@ -1268,7 +1274,7 @@ class MainActivity : Activity() {
                 Sheet.Action(Ic.QUEUE, tr("Add to queue", "Sıraya ekle")) { Player.addToQueue(songs); toast(tr("Added ${songs.size} to queue", "${songs.size} şarkı sıraya eklendi")) },
             )
             .section(tr("Playlist", "Liste"))
-            .item(Ic.EDIT, tr("Rename", "Yeniden adlandır")) { askText(tr("Rename playlist", "Listeyi yeniden adlandır"), p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill[drill.size - 1] = Drill(it, drill.last().rows); render() } }
+            .item(Ic.EDIT, tr("Rename", "Yeniden adlandır")) { askText(tr("Rename playlist", "Listeyi yeniden adlandır"), p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill.last().let { d -> drill[drill.size - 1] = Drill(it, d.rows, key = d.key, fromSearch = d.fromSearch) }; render() } }
             .item(Ic.SORT, tr("Reorder or remove songs", "Şarkıları sırala ya da kaldır"), sub = tr("Drag to reorder, ✕ to remove", "Sıralamak için sürükleyin, kaldırmak için ✕")) { if (drill.isEmpty()) openPlaylist(p); editPlaylist = p; render() }
             .item(Ic.CLOSE, tr("Delete playlist", "Listeyi sil"), sub = tr("Only the list; the songs stay", "Yalnızca liste; şarkılar kalır")) {
                 confirm(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"), tr("Only the playlist is deleted, not the songs.", "Yalnızca liste silinir, şarkılar silinmez."), tr("Delete", "Sil")) {
@@ -1354,6 +1360,7 @@ class MainActivity : Activity() {
         if (Player.current == null) return
         hideKeyboard()
         if (nowPlaying != null) return
+        Hub.setHeaderShown(this, false) // now playing has the whole screen; its buttons sit low
         val v = NowPlayingView(this)
         nowPlaying = v
         applyInsets(v)
@@ -1365,6 +1372,7 @@ class MainActivity : Activity() {
     fun closeNowPlaying() {
         nowPlaying?.let { it.dropVideo(); it.watchVolume(false); root.removeView(it) }
         nowPlaying = null
+        Hub.setHeaderShown(this, true)
         updatePip()
     }
 

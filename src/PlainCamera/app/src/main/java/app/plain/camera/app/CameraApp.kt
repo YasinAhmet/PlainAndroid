@@ -16,6 +16,6 @@ class CameraApp : Application() {
                     "its categories and settings (your photos stay where they are)",
                     "kategorilerini ve ayarlarını (fotoğraflarınız yerinde kalır)")),
             Tab("voice", "Record Voice", "Ses Kaydı", "app.plain.voice.VoiceActivity"),
-        ))
+        ), accent = 0xFFE6B422.toInt())
     }
 }

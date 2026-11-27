@@ -25,7 +25,7 @@ class MapsApp : Application() {
             Tab("istanbul", "Istanbul", "İstanbul", "app.plain.maps.MainActivity"),
             Tab("ankara", "Ankara", "Ankara", "app.plain.maps.AnkaraActivity", ownProcess = true),
             trekking,
-        ))
+        ), accent = 0xFF26C6DA.toInt())
         val proc = Hub.processName()
         when {
             proc.endsWith(":ankara") -> City.id = "ankara"

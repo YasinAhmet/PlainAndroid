@@ -2,37 +2,74 @@ package app.localmusic
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.io.File
 
 /**
- * 3.3: where each song / video was left, so tapping it again asks "Continue from last session?". Written when the
- * player pauses, seeks or loads another song — never by a timer. Finished songs (or ones barely started) keep
- * nothing. Keyed by MediaStore id; at most [MAX] entries, oldest dropped.
+ * Where each song / video was left (3.3; since 3.8 played again it simply continues there). Written when the player
+ * pauses, seeks, loads another song or the app leaves the screen — never by a timer. Finished songs (or ones barely
+ * started) keep nothing. Keyed by MediaStore id; at most [MAX] entries, oldest dropped.
+ *
+ * Shared with the Youtube tab (same app, same "resume" prefs, values "pos,dur,at"): a Plain Youtube download is also
+ * stored under its video id, so a video left in the Youtube tab continues in Music and the other way round.
  */
 object SongResume {
-    const val MAX = 500
-    const val MIN_MS = 15_000L // closer than this to the start or the end: start over, don't ask
+    const val MAX = 800
+    const val MIN_START_MS = 5_000L // less than this played: nothing to remember
+    const val END_MS = 15_000L // closer than this to the end: finished, next time from the start
     private lateinit var prefs: SharedPreferences
+    private var app: Context? = null
+    /** MediaStore id -> Plain Youtube video id (files/downloaded.txt), read again only after the file changed. */
+    private var videoIds: Map<Long, String> = emptyMap()
+    private var videoIdsStamp = -1L
 
-    fun init(ctx: Context) { if (!::prefs.isInitialized) prefs = ctx.applicationContext.getSharedPreferences("resume", Context.MODE_PRIVATE) }
+    fun init(ctx: Context) {
+        if (::prefs.isInitialized) return
+        app = ctx.applicationContext
+        prefs = ctx.applicationContext.getSharedPreferences("resume", Context.MODE_PRIVATE)
+    }
 
-    fun worthAsking(posMs: Long, durMs: Long): Boolean = posMs >= MIN_MS && (durMs <= 0 || durMs - posMs >= MIN_MS)
+    fun worthKeeping(posMs: Long, durMs: Long): Boolean = posMs >= MIN_START_MS && (durMs <= 0 || durMs - posMs >= END_MS)
 
-    /** Position to offer for [s], or 0. Opened files (negative ids) aren't remembered. */
+    /** (pos, dur, at) from "pos,dur,at" (the Youtube tab's format); the 3.3 "pos,at" is read too. */
+    fun decode(v: String?): Triple<Long, Long, Long>? {
+        val p = v?.split(',') ?: return null
+        val pos = p.getOrNull(0)?.toLongOrNull() ?: return null
+        return if (p.size >= 3) Triple(pos, p[1].toLongOrNull() ?: 0L, p[2].toLongOrNull() ?: 0L)
+        else Triple(pos, 0L, p.getOrNull(1)?.toLongOrNull() ?: 0L)
+    }
+
+    @Synchronized
+    private fun videoIdOf(id: Long): String? {
+        val f = File(app?.filesDir ?: return null, LinkedPlaylists.SAVED)
+        val stamp = if (f.exists()) f.lastModified() else 0L
+        if (stamp != videoIdsStamp) {
+            videoIdsStamp = stamp
+            videoIds = try { if (stamp > 0) LinkedPlaylists.savedIds(f.readText()).entries.associate { (v, m) -> m to v } else emptyMap() }
+                catch (_: Exception) { emptyMap() }
+        }
+        return videoIds[id]
+    }
+
+    private fun keys(id: Long): List<String> = listOfNotNull(id.toString(), videoIdOf(id))
+
+    /** Position to continue [s] from, or 0 (the newest of its keys). Opened files (negative ids) aren't remembered. */
     fun get(s: Song): Long {
         if (!::prefs.isInitialized || s.id < 0) return 0
-        val v = prefs.getString(s.id.toString(), null)?.split(',') ?: return 0
-        val pos = v.getOrNull(0)?.toLongOrNull() ?: return 0
-        return if (worthAsking(pos, s.durationMs)) pos else 0
+        val best = keys(s.id).mapNotNull { decode(prefs.getString(it, null)) }.maxByOrNull { it.third } ?: return 0
+        return if (worthKeeping(best.first, s.durationMs)) best.first else 0
     }
 
     fun put(id: Long, posMs: Long, durMs: Long) {
         if (!::prefs.isInitialized || id < 0) return
-        val k = id.toString()
-        if (!worthAsking(posMs, durMs)) { if (prefs.contains(k)) prefs.edit().remove(k).apply(); return }
-        val e = prefs.edit().putString(k, "$posMs,${System.currentTimeMillis()}")
+        val ks = keys(id)
+        val e = prefs.edit()
+        if (!worthKeeping(posMs, durMs)) { ks.forEach { if (prefs.contains(it)) e.remove(it) }; e.apply(); return }
+        val v = "$posMs,$durMs,${System.currentTimeMillis()}"
+        ks.forEach { e.putString(it, v) }
         val all = prefs.all
-        if (all.size > MAX) all.entries.sortedBy { (it.value as? String)?.substringAfter(',')?.toLongOrNull() ?: 0L }
-            .take(all.size - MAX).forEach { e.remove(it.key) }
+        val over = all.size + ks.count { it !in all } - MAX
+        if (over > 0) all.entries.filter { it.key !in ks }.sortedBy { decode(it.value as? String)?.third ?: 0L }
+            .take(over).forEach { e.remove(it.key) }
         e.apply()
     }
 

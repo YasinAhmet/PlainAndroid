@@ -153,9 +153,11 @@ class HomeActivity : Activity() {
             setOnLongClickListener { offerUnhide(); true }
         }
         date = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             maxLines = 1
-            setPadding(dp(12f), 0, 0, 0)
+            ellipsize = TextUtils.TruncateAt.END
+            letterSpacing = 0.02f
+            setPadding(0, 0, 0, dp(2f))
         }
         toggle = TextView(this).apply {
             text = "◐"
@@ -168,13 +170,20 @@ class HomeActivity : Activity() {
                 applyColors()
             }
         }
-        // One compact row: time, date beside it, toggle at the right edge.
+        // Thumb-bar layout (2026-11-27): a quiet title on top (the date small, the time big; tap the time for
+        // alarms, hold it for hidden apps), the apps in the middle, the controls in a bar at the bottom.
         val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(12f), dp(20f), dp(6f))
+            addView(date, LinearLayout.LayoutParams(-1, -2))
+            addView(time, LinearLayout.LayoutParams(-2, -2))
+        }
+        // The thumb bar: the dark/light toggle at the right edge (the root's padding keeps it above the nav bar).
+        val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20f), dp(8f), dp(8f), dp(4f))
-            addView(time, LinearLayout.LayoutParams(-2, -2))
-            addView(date, LinearLayout.LayoutParams(0, -2, 1f))
+            setPadding(dp(12f), dp(2f), dp(8f), dp(4f))
+            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             addView(toggle, LinearLayout.LayoutParams(dp(44f), dp(44f)))
         }
 
@@ -190,6 +199,7 @@ class HomeActivity : Activity() {
 
         root.addView(header, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(bar, LinearLayout.LayoutParams(-1, -2))
         root.setOnApplyWindowInsetsListener { v, insets ->
             if (Build.VERSION.SDK_INT >= 30) {
                 val b = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())

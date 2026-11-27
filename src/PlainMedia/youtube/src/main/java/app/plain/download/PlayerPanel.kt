@@ -392,6 +392,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private lateinit var titleV: TextView
     private lateinit var membersV: TextView
     private lateinit var statusV: TextView
+    private lateinit var startOverV: TextView
     private lateinit var seek: SeekBar
     private lateinit var posV: TextView
     private lateinit var durV: TextView
@@ -412,21 +413,26 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     /**
      * Start playing [r] (from a row, the downloads list, the queue): the player opens full. Left in the middle last
-     * time (3.3)? "Continue from last session?" first: Continue = from there, Start over = from the beginning.
+     * time (here or in the Music tab)? It continues there, with "Start over" for a few seconds (3.8; 3.3 asked first).
      */
     fun open(r: PlayReq) {
         val e = if (r.queue) Store.queue().current else null
         if (r.queue && e == null) { toast(tr("The play queue is empty", "Çalma sırası boş")); return }
-        val key = (e?.id ?: r.id).ifEmpty { (e?.localUri ?: r.uri).orEmpty() }
-        val at = Resume.get(key)
-        val a = ui
-        if (at <= 0 || a == null || a.isFinishing) { openAt(r, 0); return }
-        android.app.AlertDialog.Builder(a)
-            .setTitle(tr("Continue from last session?", "Son oturumdan devam edilsin mi?"))
-            .setMessage(tr("You stopped at ${ResumeRule.clock(at.toLong())}.", "${ResumeRule.clock(at.toLong())} noktasında kalmıştınız."))
-            .setPositiveButton(tr("Continue", "Devam et")) { _, _ -> openAt(r, at) }
-            .setNegativeButton(tr("From the beginning", "Baştan başla")) { _, _ -> Resume.clear(key); openAt(r, 0) }
-            .show()
+        val keys = ResumeRule.keys(e?.id ?: r.id, e?.localUri ?: r.uri)
+        val at = Resume.get(keys)
+        openAt(r, at)
+        if (at > 0) showContinued(at)
+    }
+
+    private val hideStartOver = Runnable { if (::startOverV.isInitialized) startOverV.visibility = View.GONE }
+
+    /** "Continued at 12:34 · Start over" under the picture for 8 s (a UI timeout only). */
+    private fun showContinued(at: Int) {
+        if (!::startOverV.isInitialized) return
+        startOverV.text = tr("Continued at ${ResumeRule.clock(at.toLong())} · ", "${ResumeRule.clock(at.toLong())} noktasından sürüyor · ") +
+            PlainLang.upper(tr("Start over", "Baştan başla"))
+        startOverV.visibility = View.VISIBLE
+        main.removeCallbacks(hideStartOver); main.postDelayed(hideStartOver, 8000)
     }
 
     private fun openAt(r: PlayReq, startMs: Int) {
@@ -476,7 +482,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (!playWhenReady) {
             mp?.let { if (prepared) resumeMs = it.currentPosition }
             releaseAll()
-        }
+        } else rememberPos() // playing on in the background: the place is kept in case Android ends the app
         saveState()
     }
 
@@ -858,6 +864,17 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
         controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(4), dp(12), dp(12)) }
         statusV = text("", 12f, C.LABEL, lines = 3).apply { setPadding(dp(4), 0, dp(4), dp(4)) }
+        startOverV = text("", 13f, C.ACCENT, bold = true).apply {
+            setPadding(dp(4), dp(2), dp(4), dp(8))
+            visibility = View.GONE
+            setOnClickListener {
+                visibility = View.GONE
+                Resume.clear(resumeKeys())
+                resumeMs = 0
+                seekTo(0)
+            }
+        }
+        controls.addView(startOverV, lpL(MATCH, WRAP))
         controls.addView(statusV, lpL(MATCH, WRAP))
         val seekRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         posV = text("0:00", 12f, C.DIM)
@@ -1032,7 +1049,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
         if (!on) restoreBrightness()
-        ui?.let { Hub.setHeaderShown(it, !on) }
+        // (the Hub title and bar are hidden while the player is full: MainActivity.onPlayerState)
         ui?.requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else if (rotationLocked) ActivityInfo.SCREEN_ORIENTATION_LOCKED else ActivityInfo.SCREEN_ORIENTATION_SENSOR
         full.setPadding(0, if (on) 0 else insetTop, 0, if (on) 0 else insetBottom)
@@ -1252,7 +1269,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             status(cacheText())
         }
         p.setOnCompletionListener {
-            if (my == seq) Resume.clear(resumeKey()) // watched to the end: next time starts from the beginning
+            if (my == seq) Resume.clear(resumeKeys()) // watched to the end: next time starts from the beginning
             if (my == seq && queueMode && Store.queue().hasNext) main.post { step(1) } // auto-advance (also in the background); no prefetch
             else if (my == seq) {
                 // the end: nothing keeps running (no foreground service, focus given back, released when in the background)
@@ -1305,14 +1322,17 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
     }
 
-    /** Where this item was left (3.3 "Continue from last session?"): at pause, close and item changes, no timer. */
-    private fun resumeKey() = videoId.ifEmpty { localUri?.toString().orEmpty() }
+    /** Where this item was left: at pause, seek, close, item changes and when the app leaves the screen; no timer. */
+    private fun resumeKeys() = ResumeRule.keys(videoId, localUri?.toString())
 
     private fun rememberPos() {
         val p = mp ?: return
         if (!prepared) return
-        try { Resume.put(resumeKey(), p.currentPosition.toLong(), p.duration.toLong()) } catch (_: Exception) {}
+        try { Resume.put(resumeKeys(), p.currentPosition.toLong(), p.duration.toLong()) } catch (_: Exception) {}
     }
+
+    /** The app is going away (swiped from recents while playing): keep the place and the player state. */
+    fun persist() { rememberPos(); saveState() }
 
     private fun releaseAll() {
         rememberPos()
@@ -1378,7 +1398,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun togglePlay() { if (mp?.isPlaying == true) pause() else resume() }
 
-    private fun seekTo(ms: Int) { val p = mp ?: return; if (prepared) { p.seekTo(ms.coerceIn(0, p.duration)); updateTime() } else resumeMs = ms }
+    private fun seekTo(ms: Int) { val p = mp ?: return; if (prepared) { p.seekTo(ms.coerceIn(0, p.duration)); updateTime(); rememberPos() } else resumeMs = ms }
 
     private fun seekBy(d: Int) { val p = mp ?: return; if (prepared) seekTo(p.currentPosition + d) }
 
@@ -1565,7 +1585,10 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun playEntry(e: QEntry, autoplay: Boolean) {
         releaseAll()
         setEntry(e)
-        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubFile = null; listenItag = 0
+        // the next item of the queue continues where it was left if it is long (a video, a podcast); a song starts over
+        val at = Resume.get(resumeKeys(), longOnly = true)
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = at; pubFile = null; listenItag = 0
+        if (at > 0) showContinued(at)
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
         itemMode = mode

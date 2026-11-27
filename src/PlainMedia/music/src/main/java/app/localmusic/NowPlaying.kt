@@ -51,6 +51,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     private val chrome = ArrayList<View>() // everything but the picture (hidden in fullscreen and PiP)
     private val speedBtn: TextView
     private val pipBtn: ImageView
+    private val queueBtn: ImageView
     private val seekHint: TextView
     private val volIcon: ImageView
     private val volBar: SeekBar
@@ -71,12 +72,10 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dp(20), act.dp(4), act.dp(20), act.dp(12)) }
         addView(col, LayoutParams(MATCH, MATCH))
 
-        val top = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(act.icon(R.drawable.mus_ic_down, desc = tr("Close", "Kapat")) { act.closeNowPlaying() })
+        // thumb bar layout: only "3 / 12 · Album" up here; close, sleep, queue, PiP and ⋮ sit in the bottom row
+        val top = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; minimumHeight = act.dp(36) }
         top.addView(from, lpL(0, WRAP, 1f))
         pipBtn = act.icon(R.drawable.mus_ic_pip, desc = tr("Picture-in-picture", "Pencere içinde pencere")) { act.enterPip() }.apply { visibility = View.GONE }
-        top.addView(pipBtn)
-        top.addView(act.icon(R.drawable.mus_ic_more, desc = tr("More", "Diğer")) { Player.current?.let { act.songMenu(it) } })
         col.addView(top, lpL(MATCH, WRAP))
         chrome += top
 
@@ -180,10 +179,14 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         chrome += volRow
 
         bottom = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        bottom.addView(act.icon(R.drawable.mus_ic_down, 48, 12, desc = tr("Close", "Kapat")) { act.closeNowPlaying() })
         sleepBtn = act.icon(R.drawable.mus_ic_timer, 48, 12, desc = tr("Sleep timer", "Uyku zamanlayıcısı")) { act.sleepMenu() }
         bottom.addView(sleepBtn)
         bottom.addView(sleepText, lpL(0, WRAP, 1f))
-        bottom.addView(act.icon(R.drawable.mus_ic_queue, 48, 12, desc = tr("Queue", "Sıra")) { act.openQueue() })
+        queueBtn = act.icon(R.drawable.mus_ic_queue, 48, 12, desc = tr("Queue", "Sıra")) { act.openQueue() }
+        bottom.addView(queueBtn)
+        bottom.addView(pipBtn)
+        bottom.addView(act.icon(R.drawable.mus_ic_more, 48, 12, desc = tr("More", "Diğer")) { Player.current?.let { act.songMenu(it) } })
         col.addView(bottom, lpL(MATCH, WRAP).apply { topMargin = act.dp(8) })
         chrome += bottom
 
@@ -275,7 +278,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
                 setOnClickListener { Store.prefs.edit().putBoolean("video", !videoWanted()).apply(); Player.current?.let { syncVideo(it) } }
             }
             videoBtn = btn
-            bottom.addView(btn, bottom.childCount - 1, lpL(WRAP, WRAP).apply { rightMargin = act.dp(6) })
+            bottom.addView(btn, bottom.indexOfChild(queueBtn), lpL(WRAP, WRAP).apply { rightMargin = act.dp(6) })
         }
         val on = videoWanted()
         btn?.apply {
@@ -330,8 +333,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
     /** Picture only, edge to edge, system bars hidden (swipe from the edge shows them). Tap or Back leaves it. */
     fun setFullscreen(on: Boolean) {
         if (on == fullscreen || (on && picture == null)) return
-        fullscreen = on
-        Hub.setHeaderShown(act, !on)
+        fullscreen = on // (the Hub title and bar are already hidden while now playing is open)
         if (!inPip) layoutChrome(!on)
         // a landscape video turns the screen to landscape (either way round, by the sensor) while fullscreen
         val s = Player.current

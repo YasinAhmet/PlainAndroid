@@ -61,6 +61,7 @@ class PlayService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val p = PlayerPanel.current
         if (p != null && !p.wantsPlay) PlayerPanel.uiMain.post { p.close() }
+        else if (p != null) PlayerPanel.uiMain.post { p.persist() } // playing on: keep the place in case Android ends the app
     }
 
     override fun onDestroy() {
