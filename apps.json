@@ -1,22 +1,31 @@
 {
   "repo": "YasinAhmet/PlainAndroid",
-  "updated": "2026-11-27T21:42:21Z",
+  "updated": "2026-11-27T21:50:25Z",
   "apps": [
     {
       "key": "setup",
       "name": "Plain Manager",
       "package": "app.plain.setup",
-      "versionCode": 16,
-      "versionName": "2.7",
+      "versionCode": 17,
+      "versionName": "2.8",
       "file": "PlainSetup.apk",
-      "tag": "setup-v2.7",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.7/PlainSetup.apk",
-      "size": 1284449,
-      "sha256": "261fda1f5a91eec80a7d8f3a6cf99d1fd27af541436e8721b7989d60c35088c0",
+      "tag": "setup-v2.8",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.8/PlainSetup.apk",
+      "size": 1946465,
+      "sha256": "0efe77996075a0d91f69c305d64166ab44b10db739d1551f5d978bf0bcf002dd",
       "minSdk": 26,
       "summary": "Installs and updates the Plain apps, plus Battery (battery log) and Uninstaller (bulk removal, also of preinstalled apps with Shizuku) tabs. Formerly Plain Setup.",
       "summary_tr": "Plain uygulamalarını yükler ve günceller; ayrıca Pil (pil günlüğü) ve Kaldırıcı (toplu kaldırma, Shizuku ile hazır yüklü uygulamalar da) sekmeleri. Eski adı Plain Setup.",
       "history": [
+        {
+          "versionCode": 16,
+          "versionName": "2.7",
+          "tag": "setup-v2.7",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.7/PlainSetup.apk",
+          "size": 1284449,
+          "sha256": "261fda1f5a91eec80a7d8f3a6cf99d1fd27af541436e8721b7989d60c35088c0",
+          "minSdk": 26
+        },
         {
           "versionCode": 15,
           "versionName": "2.6",

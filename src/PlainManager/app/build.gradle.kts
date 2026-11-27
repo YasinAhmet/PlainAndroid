@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.setup"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "2.7"
+        versionCode = 17
+        versionName = "2.8"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).
@@ -43,6 +43,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    // Bundled APKs (setup/src/main/assets/apks) must stay stored, not deflated: Installer reads them via assets.openFd,
+    // which throws "probably compressed" otherwise. They're zips already, so compressing gains little anyway.
+    androidResources { noCompress += "apk" }
     lint {
         abortOnError = false
         checkReleaseBuilds = false

@@ -88,7 +88,11 @@ object Installer {
             }
             Source.BUNDLED -> {
                 status(installing(e))
-                app.assets.openFd("apks/${e.file}").use { fd -> fd.createInputStream().use { commit(app, e, it, fd.length) } }
+                val path = "apks/${e.file}"
+                // openFd needs a stored (uncompressed) asset; fall back to a plain stream of unknown size if it isn't.
+                val fd = try { app.assets.openFd(path) } catch (_: IOException) { null }
+                if (fd != null) fd.use { f -> f.createInputStream().use { commit(app, e, it, f.length) } }
+                else app.assets.open(path).use { commit(app, e, it, -1L) }
             }
             Source.ONLINE -> {
                 val dir = File(app.cacheDir, "apks").apply { mkdirs() }
