@@ -8,7 +8,8 @@
     options: --notes "text"  --no-push  --dry-run (build + copy only; no releases, no git)
 
 Each app's project lives next to this repo (A:/Projects/<project>, see catalog.json).
-Releases are tagged <key>-v<versionName> with one asset (<file>.apk). apps.json is the live
+Releases are tagged <key>-v<versionName> with one asset (<file>.apk); Manager's release also attaches every
+bundled app's APK for manual installs (apps.json URLs still point at each app's own tag). apps.json is the live
 catalog Plain Manager reads; it is always released last so /releases/latest is Manager (still PlainSetup.apk).
 Signing: every release build signs with A:/Projects/PlainSigning (never commit that folder).
 
@@ -134,17 +135,26 @@ def with_history(new, old):
     return new
 
 
-def release(entry, notes, latest, dry):
+def release(entry, notes, latest, dry, extra=()):
+    """extra: more APK paths to attach (the Manager release carries every app for manual installs)."""
     if dry:
-        print(f"  (dry run) would release {entry['tag']}")
+        print(f"  (dry run) would release {entry['tag']}" + (f" + {len(extra)} more APKs" if extra else ""))
         return
     if tag_exists(CAT["repo"], entry["tag"]):
         sys.exit(f"Release {entry['tag']} already exists. Bump the version (or use --bump).")
     body = notes or f"{entry['name']} {entry['versionName']}"
-    run(["gh", "release", "create", entry["tag"], os.path.join(DIST, entry["file"]),
+    run(["gh", "release", "create", entry["tag"], os.path.join(DIST, entry["file"]), *extra,
          "--repo", CAT["repo"], "--target", "main",
          "--title", f"{entry['name']} {entry['versionName']}", "--notes", body,
          f"--latest={'true' if latest else 'false'}"])
+
+
+def manager_notes(bundled):
+    apps = ", ".join(f"{e['name']} {e['versionName']} ({e['file']})" for e in bundled)
+    return ("Plain Manager (formerly Plain Setup). Install PlainSetup.apk on a new phone, then pick the Plain apps you want.\n\n"
+            f"Bundles: {apps}.\n\n"
+            "Every app's APK is attached here too, if you'd rather install one by hand. "
+            "All are signed with the same key, so each one updates in place over an earlier install, whether that came from Manager or by hand.")
 
 
 def ensure_dist(entry):
@@ -271,8 +281,8 @@ def main():
         bundled.append({k: v for k, v in e.items() if k != "history"})  # rollback is online-only
     save(os.path.join(assets, "apps.json"), {"repo": CAT["repo"], "apps": bundled})
     s = build_app(setup, live_by_key, True, a.dry_run)  # a new Setup every time (it carries the APKs)
-    release(s, "Plain Manager (formerly Plain Setup). Install this on a new phone, then pick the Plain apps you want. Bundles: " +
-            ", ".join(f"{e['name']} {e['versionName']}" for e in bundled), latest=True, dry=a.dry_run)
+    release(s, manager_notes(bundled), latest=True, dry=a.dry_run,
+            extra=[os.path.join(apk_dir, e["file"]) for e in bundled])  # same files as bundled, for manual installs
     live_by_key["setup"] = with_history(s, live_by_key.get("setup"))
     done.append(f"{setup['name']} {s['versionName']}")
 
