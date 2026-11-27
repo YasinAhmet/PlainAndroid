@@ -312,6 +312,7 @@ class MainActivity : Activity() {
             Library.load(app)
             runOnUiThread {
                 loading = false
+                runCatching { LinkedPlaylists.sync(this, Library.index) } // downloaded YouTube / Spotify playlists
                 Player.onLibraryChanged()
                 render()
                 onPlayerChanged()
@@ -717,47 +718,45 @@ class MainActivity : Activity() {
     // --- Library: Songs / Artists / Albums / Genres / Folders -------------------------------------
 
     private fun libraryRows(lib: LibraryIndex): List<Row> = when (seg) {
-        0 -> listOf<Row>(HeaderRow(tr("Songs", "Şarkılar"), tr("${lib.songs.size} songs", "${lib.songs.size} şarkı") + " · ${Text.time(lib.songs.sumOf { it.durationMs })}", listOf(
-            tr("Shuffle all", "Tümünü karıştır") to { Player.shufflePlay(lib.songs.map { it.id }); openNowPlaying() },
-            tr("Play", "Oynat") to { Player.playList(lib.songs.map { it.id }, 0) },
-        ))) + lib.songs.mapIndexed { i, s -> SongRow(s, lib.songs, i) }
+        0 -> {
+            val songs = lib.songsBy(sortOf(Sorting.Kind.SONGS).id)
+            listOf<Row>(HeaderRow(tr("Songs", "Şarkılar"), tr("${songs.size} songs", "${songs.size} şarkı") + " · ${Text.time(songs.sumOf { it.durationMs })}", listOf(
+                tr("Shuffle all", "Tümünü karıştır") to { Player.shufflePlay(songs.map { it.id }); openNowPlaying() },
+                tr("Play", "Oynat") to { Player.playList(songs.map { it.id }, 0) },
+                sortButton(Sorting.Kind.SONGS),
+            ))) + songs.mapIndexed { i, s -> SongRow(s, songs, i) }
+        }
         1 -> {
-            val sort = Store.prefs.getInt("artistSort", 0)
+            val sort = sortOf(Sorting.Kind.ARTISTS).id
             val max = Store.prefs.getInt("packMax", 1).coerceIn(1, 2)
             val packed = lib.packedArtists(max)
             val plays = playCounts()
-            val list = if (sort == 0) packed.groups.sortedWith(compareBy({ -it.count }, { Text.sortKey(it.title) })) else packed.groups
+            val list = Sorting.groups(packed.groups, sort)
             val rows = ArrayList<Row>()
             rows += HeaderRow(tr("Artists", "Sanatçılar"), "${Text.count(lib.artists.size, "artist")} · ${Text.count(lib.songs.size, "song")}" +
                 (packed.packed?.let {
                     tr("\nArtists with ${if (max == 1) "1 song" else "1–2 songs"} are packed into “${Packing.oneOffsTitle}”",
                         "\n${if (max == 1) "1" else "1–2"} şarkılı sanatçılar “${Packing.oneOffsTitle}” içinde toplanır")
                 } ?: ""), listOf(
-                tr("Most songs", "En çok şarkı") to { setSort("artistSort", 0) }, "A–Z" to { setSort("artistSort", 1) },
+                sortButton(Sorting.Kind.ARTISTS),
                 (if (max == 1) tr("Pack: 1 song", "Topla: 1 şarkı") else tr("Pack: ≤2 songs", "Topla: ≤2 şarkı")) to { setSort("packMax", if (max == 1) 2 else 1) },
-            ), accent = sort)
+            ))
             packed.packed?.let { p -> rows += GroupRow(p.title, p.artist + " · " + Text.count(p.count, "song"), p.songs.first().id, { openPacked(p) }, { groupMenu(p, K_ALL_IN, strong = true) }, round = true, artSongs = p.songs, mosaic = true) }
             list.forEach { g -> rows += GroupRow(g.title, g.stats, g.songs.first().id, { openArtist(g) }, { groupMenu(g, K_ARTIST) }, round = true, artSongs = ArtPick.artist(g.songs, plays)) }
             rows
         }
         2 -> {
-            val sort = Store.prefs.getInt("albumSort", 0)
-            val packed = lib.packedAlbums(sort) {
-                when (sort) {
-                    1 -> lib.albums.sortedWith(compareBy({ Text.sortKey(it.artist) }, { -it.year }, { Text.sortKey(it.title) }))
-                    2 -> lib.albums.sortedWith(compareBy({ -it.count }, { Text.sortKey(it.title) }))
-                    else -> lib.albums
-                }
-            }
+            val packed = lib.packedAlbums(sortOf(Sorting.Kind.ALBUMS).id)
             listOf<Row>(HeaderRow(tr("Albums", "Albümler"), "${Text.count(packed.groups.size, "album")} · ${Text.count(lib.songs.size, "song")}" +
                 (packed.packed?.let { tr("\nSingle tracks are packed into “${Packing.singlesTitle}”", "\nTek parçalar “${Packing.singlesTitle}” içinde toplanır") } ?: ""), listOf(
-                "A–Z" to { setSort("albumSort", 0) }, tr("By artist", "Sanatçıya göre") to { setSort("albumSort", 1) }, tr("Most songs", "En çok şarkı") to { setSort("albumSort", 2) },
-            ), accent = sort)) + albumGrid(listOfNotNull(packed.packed) + packed.groups)
+                sortButton(Sorting.Kind.ALBUMS),
+            ))) + albumGrid(listOfNotNull(packed.packed) + packed.groups)
         }
         3 -> {
             val packed = lib.packedGenres
             if (lib.genres.isEmpty()) listOf(EmptyRow(tr("No genre tags found.", "Tür etiketi bulunamadı."))) else
-                (packed.groups.map { g -> GroupRow(g.title, g.stats, g.songs.first().id, { openGroup(g, null) }, { groupMenu(g, K_GENRE) }) } +
+                listOf<Row>(HeaderRow(tr("Genres", "Türler"), Text.count(lib.genres.size, "genre"), listOf(sortButton(Sorting.Kind.GENRES)))) +
+                (Sorting.groups(packed.groups, sortOf(Sorting.Kind.GENRES).id).map { g -> GroupRow(g.title, g.stats, g.songs.first().id, { openGroup(g, null) }, { groupMenu(g, K_GENRE) }) } +
                     listOfNotNull(packed.packed?.let { p -> GroupRow(p.title, tr("Genres with fewer than 3 songs · ", "3'ten az şarkılı türler · ") + p.stats, p.songs.first().id, { openPacked(p) }, { groupMenu(p, K_GENRE) }) }))
         }
         else -> listOf<Row>(HeaderRow(tr("Folders", "Klasörler"), tr("Single-subfolder chains are merged; single files are packed into “${FolderTree.looseTitle}”",
@@ -816,9 +815,10 @@ class MainActivity : Activity() {
     private fun playlistRows(lib: LibraryIndex): List<Row> {
         val byPath = lib.byPath
         val rows = ArrayList<Row>()
-        rows += HeaderRow(tr("Playlists", "Çalma listeleri"), Text.count(Store.playlists.size, "playlist"), listOf(tr("New playlist", "Yeni çalma listesi") to { newPlaylist(null) }))
-        for (p in Store.playlists) {
-            val songs = p.resolve(lib.byId, byPath)
+        rows += HeaderRow(tr("Playlists", "Çalma listeleri"), Text.count(Store.playlists.size, "playlist"),
+            listOf(tr("New playlist", "Yeni çalma listesi") to { newPlaylist(null) }) + if (Store.playlists.size > 1) listOf(sortButton(Sorting.Kind.PLAYLISTS)) else emptyList())
+        val resolved = Store.playlists.map { it to it.resolve(lib.byId, byPath) }
+        for ((p, songs) in Sorting.playlists(resolved, sortOf(Sorting.Kind.PLAYLISTS).id, { it.first.name }, { it.first.id }, { it.second.size })) {
             rows += GroupRow(p.name, tr("${songs.size} songs", "${songs.size} şarkı") + " · ${Text.time(songs.sumOf { it.durationMs })}", songs.firstOrNull()?.id ?: -1, { openPlaylist(p) }, { playlistMenu(p) })
         }
         if (Store.playlists.isEmpty()) rows += EmptyRow(tr("No playlists yet. Use ⋮ on any song → Add to playlist, or create one here.",
@@ -873,6 +873,27 @@ class MainActivity : Activity() {
     private fun setSort(key: String, v: Int) {
         Store.prefs.edit().putInt(key, v).apply()
         render(resetScroll = true)
+    }
+
+    /** Saved sort of a list ([suffix]: the playlist id for one playlist's page). Artists/albums fall back to their pre-3.5 int prefs. */
+    private fun sortOf(kind: Sorting.Kind, suffix: String = ""): Sorting.Option = Sorting.option(kind, Store.prefs.getString(kind.pref + suffix, null), when (kind) {
+        Sorting.Kind.ARTISTS -> Store.prefs.getInt("artistSort", -1)
+        Sorting.Kind.ALBUMS -> Store.prefs.getInt("albumSort", -1)
+        else -> -1
+    })
+
+    /** Header button "Sort: A–Z" → single-choice list of the orders this list offers. */
+    private fun sortButton(kind: Sorting.Kind, suffix: String = ""): Pair<String, () -> Unit> {
+        val cur = sortOf(kind, suffix)
+        return tr("Sort: ${cur.label}", "Sırala: ${cur.label}") to {
+            val opts = Sorting.options(kind)
+            android.app.AlertDialog.Builder(this, R.style.mus_Dialog).setTitle(tr("Sort by", "Sıralama"))
+                .setSingleChoiceItems(opts.map { it.label }.toTypedArray(), opts.indexOfFirst { it.id == cur.id }) { d, i ->
+                    d.dismiss()
+                    Store.prefs.edit().putString(kind.pref + suffix, opts[i].id).apply()
+                    render(resetScroll = true)
+                }.show()
+        }
     }
 
     private fun albumGrid(albums: List<Group>): List<Row> = albums.chunked(3).map { AlbumPairRow(it) }
@@ -970,10 +991,12 @@ class MainActivity : Activity() {
     private fun openPlaylist(p: Playlist) {
         pushDrill(p.name) {
             val lib = Library.index
-            val songs = p.resolve(lib.byId, lib.songs.associateBy { it.path.lowercase() })
             val editing = editPlaylist === p
+            // Editing works on the saved order (drag and ✕ use entry positions), whatever sort is picked.
+            val raw = p.resolve(lib.byId, lib.byPath)
+            val songs = if (editing) raw else Sorting.songs(raw, sortOf(Sorting.Kind.PLAYLIST, p.id.toString()).id)
             val actions = if (editing) listOf(tr("Done", "Bitti") to { editPlaylist = null; Store.savePlaylists(); render() })
-            else playButtons(songs).take(2) + listOf(tr("Edit", "Düzenle") to { editPlaylist = p; render() }, tr("More", "Diğer") to { playlistMenu(p) })
+            else playButtons(songs).take(2) + listOf(sortButton(Sorting.Kind.PLAYLIST, p.id.toString()), tr("Edit", "Düzenle") to { editPlaylist = p; render() }, tr("More", "Diğer") to { playlistMenu(p) })
             val rows = ArrayList<Row>()
             rows += HeaderRow(p.name, tr("${songs.size} songs", "${songs.size} şarkı") + " · ${Text.time(songs.sumOf { it.durationMs })}" +
                 if (editing) tr("\nDrag ≡ to reorder, ✕ to remove", "\nSıralamak için ≡ sürükleyin, kaldırmak için ✕") else "", actions)
@@ -1146,6 +1169,8 @@ class MainActivity : Activity() {
             tr("Delete playlist (keeps songs)", "Listeyi sil (şarkılar kalır)") to {
                 confirm(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"), tr("Only the playlist is deleted, not the songs.", "Yalnızca liste silinir, şarkılar silinmez."), tr("Delete", "Sil")) {
                     Store.playlists.remove(p); Store.savePlaylists()
+                    LinkedPlaylists.forget(this, p)
+                    Store.prefs.edit().remove(Sorting.Kind.PLAYLIST.pref + p.id).apply()
                     if (drill.isNotEmpty()) popDrill() else render()
                 }
             },

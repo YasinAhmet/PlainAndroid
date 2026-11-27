@@ -305,22 +305,24 @@ class SearchScreen(private val act: MainActivity) {
     // bulk
 
     /** Ask once for the options, then queue [items] (videos only), skipping what is already downloaded or queued. */
-    fun bulk(items: List<Item>, album: String? = null, title: String? = null, music: Boolean = false, after: () -> Unit = {}) {
+    fun bulk(items: List<Item>, album: String? = null, title: String? = null, music: Boolean = false, link: String? = null, after: () -> Unit = {}) {
         val vids = items.filter { it.isVideo }
         if (vids.isEmpty()) { act.toast(tr("No videos selected", "Seçili video yok")); return }
-        bulkTracks(listOf(album to vids), title ?: album ?: tr("${vids.size} selected videos", "Seçili ${vids.size} video"), music, after)
+        bulkTracks(listOf(album to vids), title ?: album ?: tr("${vids.size} selected videos", "Seçili ${vids.size} video"), music, link, after)
     }
 
     /**
      * Queue several lists as ONE batch (one row in the downloads list): every video once, the first list it was found
      * in gives its album folder, already downloaded / queued ones skipped, at most [Bulk.MAX] per run (run again to
-     * continue). [music]: audio is the default choice (albums, Topic / artist channels).
+     * continue). [music]: audio is the default choice (albums, Topic / artist channels). [link]: the whole playlist
+     * ("yt:…" / "spotify:…") also becomes a playlist in the Music tab once the options are confirmed ([PlaylistLinks]).
      */
-    fun bulkTracks(lists: List<Pair<String?, List<Item>>>, title: String, music: Boolean, after: () -> Unit = {}) {
+    fun bulkTracks(lists: List<Pair<String?, List<Item>>>, title: String, music: Boolean, link: String? = null, after: () -> Unit = {}) {
         val n = lists.flatMap { it.second }.filter { it.isVideo }.distinctBy { it.id }.size
         if (n == 0) { act.toast(tr("Nothing to download", "İndirilecek bir şey yok")); return }
         BulkDialog(act, n, music) { kind, fmt, q, height ->
             if (!act.wifiOk()) return@BulkDialog
+            if (link != null) PlaylistLinks.remember(act, link, title, lists.flatMap { it.second })
             val active = Store.activeIds()
             val plan = Collect.plan(lists) { id -> id in active || Store.downloaded(id, kind) }
             if (plan.take.isNotEmpty()) {
@@ -336,7 +338,9 @@ class SearchScreen(private val act: MainActivity) {
                 })
                 DownloadService.start(act)
             }
-            act.message(tr("Download", "İndir"), Collect.summary(plan.take.size, plan))
+            act.message(tr("Download", "İndir"), Collect.summary(plan.take.size, plan) +
+                if (link != null) tr("\n\nThe songs also appear as the playlist “$title” in the Music tab as they finish.",
+                    "\n\nŞarkılar bittikçe Müzik sekmesinde “$title” çalma listesinde de görünür.") else "")
             after()
         }.show()
     }
@@ -1512,7 +1516,7 @@ class SearchScreen(private val act: MainActivity) {
         }
 
         /** Load every continuation first (progress + Stop), then ask the options once and queue them all. */
-        private fun downloadAll() = gatherThen { bulk(items, name, name, music) }
+        private fun downloadAll() = gatherThen { bulk(items, name, name, music, link = if (music) null else "yt:$playlistId") }
 
         private var then: (() -> Unit)? = null
 
@@ -1780,7 +1784,7 @@ class SearchScreen(private val act: MainActivity) {
             act.menu(p.name, listOf(
                 tr("Open", "Aç") to { push(SpotifyListPage(id)) },
                 tr("Listen all", "Tümünü dinle") to { playAll(its, PlayMode.LISTEN, p.name) },
-                tr("Download all…", "Tümünü indir…") to { bulk(its, p.name, p.name, music = true) },
+                tr("Download all…", "Tümünü indir…") to { bulk(its, p.name, p.name, music = true, link = "spotify:${p.id}") },
                 tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(its, p.name, music = true, title = p.name) },
                 tr("Copy to my lists", "Listelerime kopyala") to {
                     val (all, l) = VideoLists.create(Store.lists(), p.name, System.currentTimeMillis())
@@ -1805,7 +1809,7 @@ class SearchScreen(private val act: MainActivity) {
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
             flow.addView(act.pill(tr("Listen all", "Tümünü dinle"), C.ACCENT, C.ACCENT) { playAll(items, PlayMode.LISTEN, pl()?.name) })
             flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { playAll(items, null, pl()?.name) })
-            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, pl()?.name, pl()?.name, music = true) })
+            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, pl()?.name, pl()?.name, music = true, link = "spotify:$playlistId") })
             flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, pl()?.name, music = true, title = pl()?.name) })
             flow.addView(missBtn)
             head.addView(flow, lpL(MATCH, WRAP))

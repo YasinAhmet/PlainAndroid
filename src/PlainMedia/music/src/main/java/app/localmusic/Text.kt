@@ -89,7 +89,7 @@ object Text {
 
     private val TR_WORDS = mapOf(
         "song" to "şarkı", "video" to "video", "artist" to "sanatçı", "album" to "albüm", "folder" to "klasör",
-        "piece" to "parça", "channel" to "kanal", "file" to "dosya", "playlist" to "çalma listesi", "day" to "gün",
+        "piece" to "parça", "genre" to "tür", "channel" to "kanal", "file" to "dosya", "playlist" to "çalma listesi", "day" to "gün",
     )
 
     /** "5 h 12 min", "42 min" */

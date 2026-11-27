@@ -58,3 +58,25 @@ public playlists, pick which to convert, and each song is matched on YouTube Mus
   the continuation that closes the result list (`Browse.page`, test `playlistKeepsItsOwnContinuationNotTheShelfOne`).
 - Spotify: the sign-in is gone. Type a profile link / username (or a playlist link); its public playlists are read
   from Spotify's public pages and converted & synced as before.
+
+## 3.5 (vc 30, installed on the phone, not published yet)
+
+- Sorting in the Music tab: each list has a "Sort: …" button that opens a picker, and each list keeps its own choice
+  (prefs `sort.*`).
+  - Songs: A–Z, Z–A, newest or oldest added, artist, album, year (newest or oldest), longest.
+  - Artists: most songs, A–Z, Z–A, newest or oldest added.
+  - Albums: A–Z, Z–A, artist, newest or oldest added, year (newest or oldest), most songs.
+  - Genres: A–Z, Z–A, most songs, newest added.
+  - Playlists: oldest or newest created, A–Z, Z–A, most songs.
+  - Inside a playlist: playlist order, last added first, A–Z, Z–A, artist, album, added, year. The choice is saved per
+    playlist. Edit mode always shows the saved order.
+- Unknown years and dates sort last in both directions. Logic: `Sorting.kt`, tests in `SortingTest`. The old
+  `artistSort` and `albumSort` int prefs are still read as the starting choice.
+- When you run "Download all" on a YouTube playlist or a converted Spotify playlist and confirm the options, the
+  Youtube tab writes `files/playlist_links.json` (`PlaylistLinks`). Each entry has the key (`yt:<id>` or
+  `spotify:<id>`), the name and the video ids in order. YouTube Music albums (`OLAK…`) are left out because they
+  already show as albums.
+  - The Music tab (`LinkedPlaylists`) reads that file and `files/downloaded.txt` each time its library loads. It
+    adds finished downloads to the playlist with the same `source`, in the source playlist's order.
+  - The playlist appears once the first song is downloaded and grows as more finish.
+  - Songs you remove or reorder stay that way (`got`). Deleting the playlist in the Music tab drops its link.

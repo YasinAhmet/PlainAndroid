@@ -861,3 +861,123 @@ class ControlsTest {
         assertEquals(16 to 9, PipRatio.of(0, 0))
     }
 }
+
+class SortingTest {
+    private fun s(id: Long, title: String, artist: String = "A", album: String = "", year: Int = 0, added: Long = 0, dur: Long = 180_000, track: Int = 0) =
+        Song(id, title, artist, album, "", -1, "", track, 1, year, dur, "Music/", "$title.mp3", 1, added)
+
+    private fun ids(l: List<Song>) = l.map { it.id }
+
+    @Test fun songsAlphabeticAndChronological() {
+        val list = listOf(
+            s(1, "Bravo", "Zed", "Z1", year = 2001, added = 300),
+            s(2, "alpha", "Ann", "A1", year = 0, added = 0, dur = 400_000), // unknown year and date
+            s(3, "Çay", "Ann", "A1", year = 1999, added = 100),
+            s(4, "The Delta", "Bob", "B1", year = 2020, added = 200),
+        )
+        assertEquals(listOf(2L, 1L, 3L, 4L), ids(Sorting.songs(list, "az"))) // "Çay" folds to "cay", "The Delta" to "delta"
+        assertEquals(listOf(4L, 3L, 1L, 2L), ids(Sorting.songs(list, "za")))
+        assertEquals(listOf(1L, 4L, 3L, 2L), ids(Sorting.songs(list, "new"))) // unknown date last
+        assertEquals(listOf(3L, 4L, 1L, 2L), ids(Sorting.songs(list, "old"))) // ...in both directions
+        assertEquals(listOf(4L, 1L, 3L, 2L), ids(Sorting.songs(list, "year")))
+        assertEquals(listOf(3L, 1L, 4L, 2L), ids(Sorting.songs(list, "year_old")))
+        assertEquals(listOf(2L, 3L, 4L, 1L), ids(Sorting.songs(list, "artist")))
+        assertEquals(2L, Sorting.songs(list, "long").first().id)
+        assertEquals(listOf(4L, 3L, 2L, 1L), ids(Sorting.songs(list, "last"))) // playlist: last added first
+        assertEquals(listOf(1L, 2L, 3L, 4L), ids(Sorting.songs(list, "custom")))
+    }
+
+    @Test fun albumsAndArtistsSort() {
+        val lib = LibraryIndex(listOf(
+            s(1, "x", "Ann", "Beta", year = 2010, added = 50), s(2, "y", "Ann", "Beta", year = 2010, added = 900),
+            s(3, "z", "Zed", "Alpha", year = 1990, added = 500),
+            s(4, "w", "Bob", "Gamma", year = 0, added = 100), s(5, "v", "Bob", "Gamma", added = 110), s(6, "u", "Bob", "Gamma", added = 120),
+        ))
+        fun titles(id: String) = Sorting.groups(lib.albums, id).map { it.title }
+        assertEquals(listOf("Alpha", "Beta", "Gamma"), titles("az"))
+        assertEquals(listOf("Gamma", "Beta", "Alpha"), titles("za"))
+        assertEquals(listOf("Beta", "Alpha", "Gamma"), titles("new")) // newest song in the album counts
+        assertEquals(listOf("Beta", "Gamma", "Alpha"), titles("old")) // oldest song in the album counts
+        assertEquals(listOf("Beta", "Alpha", "Gamma"), titles("year")) // no year: last
+        assertEquals(listOf("Alpha", "Beta", "Gamma"), titles("year_old"))
+        assertEquals(listOf("Gamma", "Beta", "Alpha"), titles("most"))
+        assertEquals(listOf("Beta", "Gamma", "Alpha"), titles("artist"))
+        assertEquals(listOf("Bob", "Ann", "Zed"), Sorting.groups(lib.artists, "most").map { it.title })
+        assertEquals(listOf("Ann", "Zed", "Bob"), Sorting.groups(lib.artists, "new").map { it.title })
+        // the album grid caches one packing per sort
+        assertSame(lib.packedAlbums("za"), lib.packedAlbums("za"))
+        assertEquals(listOf("Gamma", "Beta", "Alpha"), lib.packedAlbums("za").groups.map { it.title }) // one single track: not packed
+    }
+
+    @Test fun savedChoiceAndLegacyPrefs() {
+        assertEquals("most", Sorting.option(Sorting.Kind.ARTISTS, null).id)
+        assertEquals("az", Sorting.option(Sorting.Kind.ARTISTS, null, legacy = 1).id)
+        assertEquals("artist", Sorting.option(Sorting.Kind.ALBUMS, null, legacy = 1).id)
+        assertEquals("most", Sorting.option(Sorting.Kind.ALBUMS, null, legacy = 2).id)
+        assertEquals("year", Sorting.option(Sorting.Kind.ALBUMS, "year", legacy = 2).id)
+        assertEquals("az", Sorting.option(Sorting.Kind.SONGS, "bogus").id)
+        assertEquals("custom", Sorting.option(Sorting.Kind.PLAYLIST, null).id)
+        for (k in Sorting.Kind.values()) assertEquals(k.name, Sorting.options(k).size, Sorting.options(k).map { it.id }.distinct().size)
+    }
+
+    @Test fun playlistsSort() {
+        val l = listOf(Triple(1L, "Hike", 5), Triple(2L, "akşam", 12), Triple(3L, "Zen", 1))
+        fun names(id: String) = Sorting.playlists(l, id, { it.second }, { it.first }, { it.third }).map { it.second }
+        assertEquals(listOf("Hike", "akşam", "Zen"), names("old"))
+        assertEquals(listOf("Zen", "akşam", "Hike"), names("new"))
+        assertEquals(listOf("akşam", "Hike", "Zen"), names("az"))
+        assertEquals(listOf("Zen", "Hike", "akşam"), names("za"))
+        assertEquals(listOf("akşam", "Hike", "Zen"), names("most"))
+    }
+}
+
+class LinkedPlaylistsTest {
+    private fun s(id: Long) = Song(id, "t$id", "A", "", "", -1, "", 0, 1, 0, 180_000, "Music/PlainDownload/A/", "t$id.m4a", 1, 0)
+
+    @Test fun savedIndexPrefersAudioAndHonoursForgets() {
+        val m = LinkedPlaylists.savedIds("""
+            aaa:V	content://media/external_primary/video/media/10
+            aaa:A	content://media/external_primary/audio/media/11
+            bbb:A
+            bbb:A	content://media/external_primary/audio/media/20
+            ccc:A	content://media/external_primary/audio/media/30
+            -ccc:A
+            ddd:V	content://media/external_primary/video/media/40
+        """.trimIndent())
+        assertEquals(mapOf("aaa" to 11L, "bbb" to 20L, "ddd" to 40L), m)
+    }
+
+    @Test fun playlistFillsInSourceOrderAndKeepsUserEdits() {
+        // the same JSON shape app.plain.download.PlaylistLinks.encode writes
+        val links = LinkedPlaylists.decodeLinks("""{"v":1,"links":[{"key":"spotify:x","name":"Hike","ids":["v1","v2","v3","v4"],"t":5}]}""")
+        val lists = ArrayList<Playlist>().apply { add(Playlist(7, "Mine")) }
+        val got = HashMap<String, Song>()
+        fun run() = LinkedPlaylists.sync(lists, links) { got[it] }
+
+        assertFalse(run()) // nothing downloaded yet: no playlist
+        assertEquals(1, lists.size)
+        got["v3"] = s(3)
+        assertTrue(run())
+        val p = lists.first { it.source == "spotify:x" }
+        assertEquals("Hike", p.name); assertEquals(8L, p.id)
+        got["v1"] = s(1); got["v4"] = s(4)
+        assertTrue(run())
+        assertEquals(listOf(1L, 3L, 4L), p.entries.map { it.songId }) // late arrivals go to their place
+        p.entries.removeAt(0) // the user removes v1
+        got["v2"] = s(2)
+        assertTrue(run())
+        assertEquals(listOf(2L, 3L, 4L), p.entries.map { it.songId }) // v2 placed before v3; v1 not back
+        assertFalse(run())
+        // round trip keeps the link
+        val back = PlaylistCodec.decode(PlaylistCodec.encode(lists)).first { it.id == 8L }
+        assertEquals("spotify:x", back.source); assertEquals(setOf("v1", "v2", "v3", "v4"), back.got)
+        assertNull(PlaylistCodec.decode(PlaylistCodec.encode(lists)).first { it.id == 7L }.source)
+    }
+
+    @Test fun forgettingALinkDropsOnlyThatOne() {
+        val json = """{"v":1,"links":[{"key":"yt:a","name":"A","ids":["1"],"t":1},{"key":"yt:b","name":"B","ids":["2"],"t":2}]}"""
+        val out = LinkedPlaylists.dropLink(json, "yt:a")!!
+        assertEquals(listOf("yt:b"), LinkedPlaylists.decodeLinks(out).map { it.key })
+        assertNull(LinkedPlaylists.dropLink(json, "yt:zzz"))
+    }
+}

@@ -73,6 +73,11 @@ object Videos {
 class Group(val key: String, val title: String, val songs: List<Song>, val artist: String = "", val albumCount: Int = 0) {
     val duration: Long = songs.sumOf { it.durationMs }
     val year: Int = songs.maxOfOrNull { it.year } ?: 0
+    /** Earliest known year (0 = none): for "Year: oldest". */
+    val firstYear: Int by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.filter { it.year > 0 }.minOfOrNull { it.year } ?: 0 }
+    /** Newest and oldest DATE_ADDED (s) of its songs: for "Newest added" / "Oldest added". */
+    val added: Long by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.maxOfOrNull { it.dateAdded } ?: 0 }
+    val firstAdded: Long by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.filter { it.dateAdded > 0 }.minOfOrNull { it.dateAdded } ?: 0 }
     val count get() = songs.size
     val sub: String get() = Text.count(songs.size, "song")
 
@@ -146,9 +151,12 @@ class LibraryIndex(all: List<Song>) {
     val packedGenres: Packing.Packed by lazy { Packing.genres(genres) }
     private val packedArtists = HashMap<Int, Packing.Packed>()
     fun packedArtists(max: Int): Packing.Packed = synchronized(packedArtists) { packedArtists.getOrPut(max) { Packing.artists(artists, max) } }
-    private val packedAlbums = HashMap<Int, Packing.Packed>()
-    /** Album grid packing for one sort order of [albums] (cached per sort). */
-    fun packedAlbums(sort: Int, sorted: () -> List<Group>): Packing.Packed = synchronized(packedAlbums) { packedAlbums.getOrPut(sort) { Packing.albums(sorted()) } }
+    private val packedAlbums = HashMap<String, Packing.Packed>()
+    /** Album grid packing for one sort order of [albums] (cached per sort id, see [Sorting]). */
+    fun packedAlbums(sort: String): Packing.Packed = synchronized(packedAlbums) { packedAlbums.getOrPut(sort) { Packing.albums(Sorting.groups(albums, sort)) } }
+    private val sortedSongs = HashMap<String, List<Song>>()
+    /** [songs] in one sort order (cached per sort id; "az" is [songs] itself). */
+    fun songsBy(sort: String): List<Song> = if (sort == "az") songs else synchronized(sortedSongs) { sortedSongs.getOrPut(sort) { Sorting.songs(songs, sort) } }
 
     fun albumOf(s: Song): Group? = albumBySong[s.id]
     fun artistOf(s: Song): Group? = artists.firstOrNull { it.key == s.artistKey }
@@ -160,8 +168,12 @@ class LibraryIndex(all: List<Song>) {
     }
 }
 
-/** A user playlist. Entries keep the MediaStore id and the file path, so they survive a rescan. */
-class Playlist(var id: Long, var name: String, val entries: MutableList<Entry> = ArrayList()) {
+/**
+ * A user playlist. Entries keep the MediaStore id and the file path, so they survive a rescan.
+ * [source]: set when the playlist mirrors a downloaded YouTube / Spotify playlist ("yt:…" / "spotify:…", see
+ * [LinkedPlaylists]); [got] = its video ids already placed here (a song the user removed is not added back).
+ */
+class Playlist(var id: Long, var name: String, val entries: MutableList<Entry> = ArrayList(), var source: String? = null, val got: MutableSet<String> = LinkedHashSet()) {
     class Entry(var songId: Long, var path: String)
 
     /** Resolve entries to songs, repairing ids from paths when MediaStore renumbered files. */
@@ -181,6 +193,7 @@ object PlaylistCodec {
         for (p in list) put(JSONObject().apply {
             put("id", p.id)
             put("name", p.name)
+            p.source?.let { put("source", it); put("got", JSONArray(p.got.toList())) }
             put("songs", JSONArray().apply { for (e in p.entries) put(JSONObject().put("id", e.songId).put("path", e.path)) })
         })
     }.toString(1)
@@ -196,7 +209,9 @@ object PlaylistCodec {
                 val s = songs.optJSONObject(j) ?: continue
                 entries += Playlist.Entry(s.optLong("id", -1), s.optString("path", ""))
             }
-            out += Playlist(o.optLong("id", i.toLong()), o.optString("name", "Playlist"), entries)
+            val got = o.optJSONArray("got") ?: JSONArray()
+            out += Playlist(o.optLong("id", i.toLong()), o.optString("name", "Playlist"), entries,
+                o.optString("source").ifEmpty { null }, (0 until got.length()).mapTo(LinkedHashSet()) { got.optString(it) })
         }
         return out
     }
