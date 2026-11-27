@@ -435,4 +435,16 @@ class BrowseTest {
         for (j in jobs) list.add(0, j) // what Store.addAll does
         assertEquals(0L, list.last { it.state == State.QUEUED }.id)
     }
+
+    @Test fun playlistKeepsItsOwnContinuationNotTheShelfOne() {
+        val pvr = (1..3).joinToString(",") { """{"playlistVideoRenderer":{"videoId":"vid0000000$it","title":{"runs":[{"text":"T$it"}]}}}""" }
+        val json = """{"contents":{"twoColumnBrowseResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
+            {"itemSectionRenderer":{"contents":[{"playlistVideoListRenderer":{"contents":[$pvr,
+              {"continuationItemRenderer":{"continuationEndpoint":{"continuationCommand":{"token":"NEXT_VIDEOS"}}}}]}}]}},
+            {"continuationItemViewModel":{"continuationCommand":{"innertubeCommand":{"continuationCommand":{"token":"SHELF"}}}}}
+            ]}}}}]}}}"""
+        val p = Browse.page(json)
+        assertEquals(3, p.items.count { it.isVideo })
+        assertEquals("NEXT_VIDEOS", p.continuation)
+    }
 }

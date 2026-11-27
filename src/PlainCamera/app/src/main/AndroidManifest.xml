@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Plain Camera: Camera and Gallery tabs (the tab modules bring their own activities and permissions). Offline: no INTERNET. -->
+<!-- Plain Camera: Camera, Gallery and Record Voice tabs (the tab modules bring their own activities, services and permissions). Offline: no INTERNET. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- the former Plain Gallery, to copy its data once (package visibility, Android 11+) -->
     <queries>

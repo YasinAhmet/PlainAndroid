@@ -77,6 +77,8 @@ object Library {
         query(ctx, "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?", arrayOf(CAMERA_DIR)) // no wildcards: case-insensitive match
 
     const val CAMERA_DIR = "DCIM/Camera/"
+    /** Plain Media's downloads (LIKE is case-insensitive in MediaStore). Audio, voice recordings included, never shows here. */
+    const val OUR_DOWNLOADS = "Movies/PlainDownload/"
 
     private fun query(ctx: Context, where: String?, whereArgs: Array<String>?): List<Item> {
         val cols = arrayOf(
@@ -89,7 +91,9 @@ object Library {
             MediaStore.MediaColumns.MIME_TYPE,
         )
         val args = Bundle().apply {
-            val types = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (1,3)"
+            // photos and videos, but not the YouTube videos Plain Media saved (Movies/PlainDownload/<Channel>/…)
+            val types = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (1,3) AND " +
+                "(${MediaStore.MediaColumns.RELATIVE_PATH} IS NULL OR ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE '$OUR_DOWNLOADS%')"
             putString(ContentResolver.QUERY_ARG_SQL_SELECTION, if (where == null) types else "$types AND $where")
             if (whereArgs != null) putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, whereArgs)
         }

@@ -78,6 +78,8 @@ class MainActivity : Activity() {
     private val tabViews = ArrayList<TextView>()
     private var tab = -1
     private var started = false
+    /** Between onStart and onStop (the Spotify page reader needs the screen shown). */
+    val visibleNow get() = started
     private var cameFromSearch = false // Back on Download returns to Search after a tap on a search result
 
     // 2.3: the app-level player (overlay) and the Back history
@@ -110,6 +112,9 @@ class MainActivity : Activity() {
         }
         selectTab(Store.tab.coerceIn(0, 1), record = false)
         handleIntent(intent)
+        // 3.3: completed caches become saved files (also the old Cached/ folder: moved, duplicates deleted) — once
+        // when this tab opens, not at every app start (the Music tab alone never runs it)
+        io.execute { try { CachePublisher.publishAll(applicationContext) } catch (_: Exception) {}; main.post { if (!isDestroyed) { renderList(); refreshCached() } } }
     }
 
     companion object {
@@ -688,6 +693,19 @@ class MainActivity : Activity() {
         if (!wifiOk()) return
         val c = choice
         if (kind == Kind.VIDEO && c == null) return
+        // one copy per video (3.3): already saved / already queued as this kind -> say where, don't download again
+        if (Store.queued(v.id, kind)) { toast(tr("Already in the download queue", "Zaten indirme sırasında")); return }
+        val have = Store.savedUri(v.id, kind)
+        if (have != null) {
+            io.execute {
+                val f = Saved.find(this, v.id, kind)
+                main.post {
+                    if (isDestroyed) return@post
+                    if (f != null) message(tr("Already downloaded", "Zaten indirildi"), f.where) else download()
+                }
+            }
+            return
+        }
         askNotificationsOnce()
         val j = Job(
             id = Store.newId(), videoId = v.id, title = v.title, channel = Naming.channel(v.author), durationSec = v.durationSec,
@@ -1212,7 +1230,7 @@ class MainActivity : Activity() {
     }
 
     // ---------------------------------------------------------------------------------------------------------
-    // the temporary "Cached" folder (what was streamed in the player)
+    // the temporary "Cached" folder: what was streamed in the player and isn't complete yet (3.3: complete = saved)
 
     private fun refreshCached() {
         io.execute {
@@ -1229,16 +1247,16 @@ class MainActivity : Activity() {
     private fun renderCached(video: List<CacheMeta>, music: List<CacheMeta>) {
         val n = video.size + music.size
         cachedHeader.visibility = if (n == 0) View.GONE else View.VISIBLE
-        cachedHeader.text = (if (cachedOpen) "▾ " else "▸ ") + tr("Cached · videos ${video.size} (${Text.size(video.sumOf { it.size })}) · ", "Önbellek · videolar ${video.size} (${Text.size(video.sumOf { it.size })}) · ") +
+        cachedHeader.text = (if (cachedOpen) "▾ " else "▸ ") + tr("Partly cached · videos ${video.size} (${Text.size(video.sumOf { it.size })}) · ", "Kısmen önbellekte · videolar ${video.size} (${Text.size(video.sumOf { it.size })}) · ") +
             tr("music ${music.size} (${Text.size(music.sumOf { it.size })})", "müzik ${music.size} (${Text.size(music.sumOf { it.size })})")
         cachedBox.removeAllViews()
         cacheRows.clear()
         cachedBox.visibility = if (cachedOpen && n > 0) View.VISIBLE else View.GONE
         if (!cachedOpen || n == 0) return
-        cachedBox.addView(text(tr("Temporary — cleared when space runs low (keeps 3 GB free) or past the limits in ⋮. Complete ones are in " +
-            "Music|Movies/PlainDownload/Cached/, so the music player shows them.",
-            "Geçici: yer azalınca (3 GB boş tutulur) ya da ⋮ menüsündeki sınırlar aşılınca temizlenir. Tamamlananlar " +
-            "Music|Movies/PlainDownload/Cached/ içindedir, böylece müzik çalar onları gösterir."), 12f, C.LABEL, lines = 3)
+        cachedBox.addView(text(tr("Unfinished streams, kept to resume — cleared when space runs low (keeps 3 GB free) or past the limits in ⋮. " +
+            "Once a video or song is fully played it is saved with your downloads (one copy).",
+            "Yarım kalan akışlar, devam etmek için tutulur: yer azalınca (3 GB boş tutulur) ya da ⋮ menüsündeki sınırlar aşılınca temizlenir. " +
+            "Bir video ya da şarkı tamamen oynatılınca indirilenlerinizle birlikte kaydedilir (tek kopya)."), 12f, C.LABEL, lines = 3)
             .apply { setPadding(0, 0, 0, dp(4)) })
         for ((kind, list) in listOf(CacheKind.VIDEO to video, CacheKind.MUSIC to music)) {
             if (list.isEmpty()) continue

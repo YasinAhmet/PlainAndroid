@@ -27,9 +27,9 @@ object YoutubeApp {
         PlainLang.init(app)
         Store.init(app)
         Account.init(app)
+        Resume.init(app)
         PlayService.channel(app)
-        // once per start, off the main thread: complete private caches become public Cached/ files (migration too)
-        Thread({ try { CachePublisher.publishAll(app) } catch (_: Exception) {} }, "cache-publish").start()
+        // (3.3: completed caches are saved when the Youtube tab opens, not at every process start — MainActivity)
         DownloadService.channel(app)
     }
 }
@@ -212,6 +212,8 @@ class DownloadService : Service() {
             }
             if (job.cache) { runCacheJob(id, job, net); finishedOk++; lastDoneTitle = Store.get(id)?.title.orEmpty(); return }
             if (job.art) { runArtJob(id, job); finishedOk++; return }
+            // one copy per video: saved already (a download, or a cache that completed) -> nothing to fetch
+            Saved.find(this, job.videoId, job.kind)?.let { have -> alreadySaved(id, have); finishedOk++; return }
             val skip = HashSet<String>()
             var membersTries = 0
             while (true) {
@@ -238,6 +240,16 @@ class DownloadService : Service() {
             try { wake.release() } catch (_: Exception) {}
             try { wifiLock?.release() } catch (_: Exception) {}
         }
+    }
+
+    /** The job's video is saved already: the job finishes pointing at that file (no second copy, no "Title (2)"). */
+    private fun alreadySaved(id: Long, f: Saved.File) {
+        deleteParts(id)
+        Store.update(id) {
+            it.state = State.DONE; it.uri = f.uri; it.fileName = f.name; it.relPath = f.relPath
+            it.finished = System.currentTimeMillis(); it.error = null; it.phase = Phase.DOWNLOAD; it.media = Media.OK
+        }
+        lastDoneTitle = f.name.orEmpty()
     }
 
     private fun failed(id: Long, e: Exception) {
@@ -323,6 +335,10 @@ class DownloadService : Service() {
                 if (album != null) Store.update(id) { it.album = album }
             }
             val rel = Naming.relativePath(j.kind, channel, album)
+            // saved meanwhile (a cache completed while this downloaded), or before 3.3 with only the mark: keep that one
+            (Saved.find(this, j.videoId, j.kind) ?: Saved.adopt(cr, j.videoId, j.kind, rel, j.title, t.out.ext))?.let { have ->
+                alreadySaved(id, have); finishedOk++; return
+            }
             val name = Naming.unique(Naming.title(j.title), t.out.ext, Saver.takenNames(cr, j.kind, rel))
             stage(if (t.out.converts) Phase.CONVERT else Phase.COPY, 0f)
             // convert into a plain file first (no FUSE); 90 % of the bar is conversion, 10 % the final copy
@@ -350,6 +366,9 @@ class DownloadService : Service() {
             }
             finishedOk++
             lastDoneTitle = shown
+            // the saved file replaces any partial cache of the same thing (no second copy kept)
+            val ck = if (j.kind == Kind.AUDIO) CacheKind.MUSIC else CacheKind.VIDEO
+            try { Store.cache.list(ck).filter { it.videoId == j.videoId && !it.published }.forEach { Store.cache.forget(ck, it.key) } } catch (_: Exception) {}
         } catch (e: Exception) {
             uri?.let { Saver.discard(cr, it) }
             failed(id, if (e is Cancelled) e else IOException(tr("Saving failed: ", "Kaydetme başarısız: ") + (e.message ?: e.javaClass.simpleName), e))
@@ -362,7 +381,7 @@ class DownloadService : Service() {
 
     /**
      * "Cache N": fill the Music cache (Listen items) or the Video cache (HLS, best up to the job's height) like the
-     * player would, without playing; the finished entry is published to Music|Movies/PlainDownload/Cached/.
+     * player would, without playing; the finished entry is saved like a download (Music|Movies/PlainDownload/<Channel>/).
      */
     private fun runCacheJob(id: Long, job: Job, net: android.net.Network?) {
         val info = InnerTube.info(job.videoId, net, order = Clients.PLAY_ORDER)
@@ -379,11 +398,8 @@ class DownloadService : Service() {
             }
             listen = m == PlayMode.LISTEN
         }
-        val kind = if (listen) CacheKind.MUSIC else CacheKind.VIDEO
-        Store.cache.list(kind).firstOrNull { it.videoId == job.videoId && it.published && CachePublisher.exists(this, it) }?.let { m ->
-            Store.update(id) { it.state = State.DONE; it.uri = m.publicUri; it.fileName = m.fileName; it.relPath = m.relPath; it.finished = System.currentTimeMillis() }
-            return
-        }
+        // saved already (as what this would cache): nothing to fetch
+        Saved.find(this, job.videoId, if (listen) Kind.AUDIO else Kind.VIDEO)?.let { have -> alreadySaved(id, have); return }
         val calls = Calls()
         val album = if (listen) Albums.pick(if (info.author.trim().endsWith(" - Topic")) WebApi.remixAlbum(this, calls, calls.gen, job.videoId) else null,
             info.author.trim().endsWith(" - Topic"), job.album) else null
@@ -399,11 +415,9 @@ class DownloadService : Service() {
         val started = System.currentTimeMillis()
         Store.update(id) { it.done = it.total; it.error = null; it.phase = Phase.COPY }
         notifyProgress(id, force = true)
-        if (!CachePublisher.publish(this, m)) throw IOException(tr("Couldn't write the cached file", "Önbellek dosyası yazılamadı"))
+        CachePublisher.publish(this, m, id) ?: throw IOException(tr("Couldn't write the file", "Dosya yazılamadı"))
         Store.update(id) {
-            it.state = State.DONE; it.uri = m.publicUri; it.fileName = m.fileName; it.relPath = m.relPath; it.finished = System.currentTimeMillis()
             it.saveMs = System.currentTimeMillis() - started; it.savedConverted = !(m.kind == CacheKind.MUSIC && m.ext == "m4a" && Store.originalAudio)
-            it.phase = Phase.DOWNLOAD
         }
     }
 

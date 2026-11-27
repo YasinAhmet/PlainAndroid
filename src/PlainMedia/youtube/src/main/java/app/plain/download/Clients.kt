@@ -71,6 +71,7 @@ object Clients {
     const val REMIX_URL = "https://music.youtube.com/youtubei/v1/player?prettyPrint=false"
     const val REMIX_NEXT_URL = "https://music.youtube.com/youtubei/v1/next?prettyPrint=false" // album of a track
     const val REMIX_BROWSE_URL = "https://music.youtube.com/youtubei/v1/browse?prettyPrint=false" // artist pages (Music tab)
+    const val REMIX_SEARCH_URL = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false" // Spotify matching
     const val REMIX_NAME = "WEB_REMIX"
     const val REMIX_ID = 67
     const val REMIX_VERSION = "1.20260707.12.00" // yt-dlp 'web_music'

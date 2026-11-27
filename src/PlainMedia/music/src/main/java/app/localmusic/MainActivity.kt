@@ -612,8 +612,25 @@ class MainActivity : Activity() {
     /** Play [list] from [i]; a video opens now playing when the picture is wanted. */
     private fun playFrom(list: List<Song>, i: Int) {
         hideKeyboard()
-        Player.playList(list.map { it.id }, i)
-        if (list[i].isVideo && videoOn()) openNowPlaying()
+        askResume(list[i]) { at ->
+            Player.playList(list.map { it.id }, i, at)
+            if (list[i].isVideo && videoOn()) openNowPlaying()
+        }
+    }
+
+    /**
+     * 3.3: a song / video left in the middle asks "Continue from last session?" (Continue = from there, From the
+     * beginning = 0). Not asked for the song that is playing right now.
+     */
+    private fun askResume(s: Song, go: (Long) -> Unit) {
+        val at = SongResume.get(s)
+        if (at <= 0 || (Player.playing && Player.current?.id == s.id)) { go(0); return }
+        android.app.AlertDialog.Builder(this, R.style.mus_Dialog)
+            .setTitle(tr("Continue from last session?", "Son oturumdan devam edilsin mi?"))
+            .setMessage(s.title + "\n" + tr("You stopped at ${SongResume.clock(at)}.", "${SongResume.clock(at)} noktasında kalmıştınız."))
+            .setPositiveButton(tr("Continue", "Devam et")) { _, _ -> go(at) }
+            .setNegativeButton(tr("From the beginning", "Baştan başla")) { _, _ -> SongResume.clear(s.id); go(0) }
+            .show()
     }
 
     private fun songCard(list: List<Song>, i: Int, sub: String? = null): Card {
@@ -971,8 +988,10 @@ class MainActivity : Activity() {
         when (r) {
             is SongRow -> if (r.mode == SongRow.Mode.NORMAL) {
                 hideKeyboard()
-                Player.playList(r.list.map { it.id }, r.index)
-                if (r.song.isVideo && Store.prefs.getBoolean("video", true)) openNowPlaying() // a video: show it
+                askResume(r.song) { at ->
+                    Player.playList(r.list.map { it.id }, r.index, at)
+                    if (r.song.isVideo && Store.prefs.getBoolean("video", true)) openNowPlaying() // a video: show it
+                }
             }
             is GroupRow -> r.onClick()
             is EmptyRow -> r.action?.second?.invoke()

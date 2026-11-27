@@ -6,5 +6,5 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "PlainCamera"
-include(":app", ":camera", ":gallery", ":shared")
+include(":app", ":camera", ":gallery", ":voice", ":shared")
 project(":shared").projectDir = file("../PlainShared")

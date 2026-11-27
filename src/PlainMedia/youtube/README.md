@@ -22,6 +22,26 @@ flights), like the free YouTube-download websites do, but on the phone and witho
 The release APK (`app/build/outputs/apk/release/app-release.apk`, copied to `PlainDownload.apk`) is minified and signed
 with the local debug key. `local.properties` must use forward slashes (`sdk.dir=C:/Users/.../Android/Sdk`).
 
+## One library, resume, passive (3.3)
+
+- **Cached = downloaded.** A stream that is played (or "Cache"d) to completion is saved like a download into
+  `Music|Movies/PlainDownload/<Channel>/…` and listed with the downloads — there is no `Cached/` folder any more.
+  Only unfinished streams stay private ("Partly cached" in the Download tab, still under the cache limits).
+- **One copy per video and kind** (`Saved.kt`): `Store` keeps a `videoId:A|V -> content://` index
+  (`files/downloaded.txt`, lines `key<TAB>uri`). Download refuses a second copy ("Already downloaded: <path>"), a queued
+  job whose video got saved meanwhile finishes pointing at that file, a completed cache of something saved is
+  dropped, and the player plays the saved file (offline) instead of streaming. Older "marked but no uri" entries
+  adopt their file by name instead of writing "Title (2)". Trashed / deleted files are forgotten and can be
+  downloaded again.
+- **Migration**, once per Youtube tab start (off the main thread, `CachePublisher.publishAll`): old
+  `…/PlainDownload/Cached/…` files move to their channel folder (same file, RELATIVE_PATH update) or, when they
+  duplicate a download, are deleted; stale `.pending-…` entries of a killed save are deleted. It no longer runs at
+  every app start, so the Music tab alone never touches it.
+- **Continue from last session?** (`Resume.kt`, prefs `resume`): the position of each video is kept when the player
+  pauses, closes or moves on (no timer); opening it again asks Continue / From the beginning. Kept only between
+  15 s from the start and 15 s before the end; played to the end = forgotten. Queue auto-advance doesn't ask.
+- **Passive**: nothing on the network unless the user taps something (feeds, Spotify sync, downloads, playback).
+
 ## Features
 
 - Two tabs at the top: **Download** (paste a link, options, the downloads list) and **Search** (below). The last tab
@@ -623,11 +643,11 @@ page: Feed | Search | Following | Channel | Playlist, each a list with "Load mor
   (⋮ → Cache limits, default 20 GB each). While incomplete, an entry lives privately in the app's cache storage
   (`Android/data/app.plain.download/cache/stream/{video,music}`). Least recently played entries go first; caching
   stops reading ahead (and the partial entry is dropped on close) when free storage would fall below 3 GB.
-- **Complete = public** (1.3): when a cached entry is complete it is remuxed / joined (no re-encoding, same code as
-  Save) through MediaStore into
-  - `Music/PlainDownload/Cached/<Channel>/[<Album>/]<Title>.m4a` (or `.ogg`) — so LocalMusic lists it, or
-  - `Movies/PlainDownload/Cached/<Channel>/<Title>.mp4`
-  and the private copy is deleted. This happens when the player closes (the player may still be reading the private
+- **Complete = saved** (3.3; 1.3–3.2 used a temporary `…/PlainDownload/Cached/` tree): when a cached entry is
+  complete it is remuxed / joined (no re-encoding, same code as Save) through MediaStore into the normal download
+  folder, `Music/PlainDownload/<Channel>/[<Album>/]<Title>.m4a` (or `.ogg`) or `Movies/PlainDownload/<Channel>/<Title>.mp4`,
+  added to the downloads list, and the private copy and the cache entry are deleted (see "One library" above). The
+  rest of this paragraph describes the pre-3.3 behaviour: This happens when the player closes (the player may still be reading the private
   copy before that), before an offline replay, and once at app start for older complete entries (migration, off the
   main thread). The cache index keeps the public uri; limits count the public file's size; replays play the public
   file offline. The app owns these files, so LRU eviction, Remove and Clear delete them without prompts; if Android
@@ -652,14 +672,14 @@ A contract with LocalMusic (artist = channel folder, album = folder below it) �
 |---|---|---|
 | Saved audio | `MediaStore.Audio` (`IS_MUSIC=1`) | `Music/PlainDownload/<Channel>/[<Album>/]<Title>.m4a` (or `.ogg`) |
 | Saved video | `MediaStore.Video` | `Movies/PlainDownload/<Channel>/<Title>.mp4` |
-| Fully cached audio | `MediaStore.Audio` | `Music/PlainDownload/Cached/<Channel>/[<Album>/]<Title>.m4a` (temporary) |
-| Fully cached video | `MediaStore.Video` | `Movies/PlainDownload/Cached/<Channel>/<Title>.mp4` (temporary) |
+| Fully cached audio / video | as saved (3.3) | the same folders as saved files (before 3.3: `…/PlainDownload/Cached/…`) |
 
 - Channel = uploader name with `" - Topic"` stripped (YouTube Music auto channels). A channel named exactly
   "Cached" (any case) becomes "Cached (channel)" so it can't clash with the cache root.
 - The album level exists only when an album is known (see Albums above); video never has one.
 - Names are made safe (`/ \ : * ? " < > |`, control characters, leading dots) and cut to 120 UTF-8 bytes.
-- Never overwrites: `Title (2).m4a`, `Title (3).m4a`… (MediaStore also renames on a clash with other apps' files).
+- Never overwrites: `Title (2).m4a`, `Title (3).m4a`… for a *different* video with the same title (MediaStore also
+  renames on a clash with other apps' files). The same video is never saved twice (3.3).
 - Written through MediaStore with `IS_PENDING=1` while muxing, published at the end; a failed or cancelled file is
   deleted. No storage permission is needed (Android 10+ apps can create their own media entries).
 - Partial streams live in `noBackupFilesDir/parts/<jobId>_<itag>_<size>.part` until the file is saved.
@@ -834,3 +854,36 @@ Takeout csv/zip variants, the feed cache and the bulk plan. `PlayerLogicTest.kt`
 folder, the Watch/Listen decision, HLS master/media parsing (captured IOS_PRODUCER manifests), ID3 stripping and the
 proxy's HTTP parsing. Tests use `org.json` and `kxml2` (test-only; the app uses
 the framework's).
+
+## Spotify playlists (3.2; no sign-in since 3.4)
+
+Search tab → **Spotify** chip. Spotify's audio is never used; only public playlist lists are read, and every song is
+played from YouTube. There is no Spotify account in the app any more (3.4 deletes the old `spotify_account.bin` and
+its Keystore key once).
+
+- **Find** (`SpotifySync.find`): type a profile link (Profile → ⋯ → Share → Copy link), a `spotify:user:` uri, a
+  username, or a playlist link. A profile is read from its public pages by `SpotifyWeb`: an unmodified-except-UA
+  WebView in a small "Reading Spotify…" card (the page must be on screen to render its lists), ~1000 CSS px wide and
+  reporting a desktop Chrome user agent with the WebView's own Chrome version — the phone layout shows only 20
+  playlists / 30 songs (the user chose the desktop page on 2026-11-27, for these public pages only). Our script
+  (`PROFILE_JS`) collects `/playlist/` links (footer and nav excluded), then the profile's "Show all" page. Cookies
+  and storage are wiped after each read. The user ticks which playlists to convert (Convert & sync).
+  A display name isn't a username: names that don't resolve say so and point to the profile link.
+- **Sync** (only on Find's Convert & sync / Sync / "Try the not-found songs again"; one background thread):
+  1. each chosen playlist's embed page (`open.spotify.com/embed/playlist/<id>`, plain HTTP, Wi-Fi only applies):
+     its `__NEXT_DATA__` lists up to 100 tracks (artists joined by ",\u00A0"); a playlist with 100 is read from its
+     full public page by `SpotifyWeb` (`PLAYLIST_JS`: scrolls row by row with `scrollIntoView`, since rows exist only
+     near the view, until the "N songs" total). Snapshot = hash of the track ids. Unreadable (private / removed)
+     playlists keep their last synced songs. Pre-3.4 "Liked Songs" is private: kept as last synced.
+  2. Matching (3 at a time): YouTube Music search (WEB_REMIX `search`, Songs filter, then Videos) for
+     "artist title", scored by `SpMatcher`: title words (feat./remaster notes removed), **artist must match**,
+     length within 20 s, live/remix/slowed/cover versions penalised unless Spotify's title says so.
+     Matches are kept per Spotify track id, so a song in several playlists is searched once.
+  Everything is in `files/spotify.json` (`profile`, `user`, playlists, tracks, matches; saved as it goes).
+- **Pages:** the Spotify page lists the playlists ("42 of 45 found · 3 not found"); hold for Listen all /
+  Download all / Cache all / Copy to my lists. A playlist page shows the found songs under Spotify's title and artist
+  (so downloads go to `Music/PlainDownload/<Artist>/<Playlist>/`); tap a song to listen from there. Hold a song →
+  "Wrong song? Find another version" (that video is never picked again) or "Search YouTube for it".
+  **Not found (N)** lists the songs YouTube Music didn't have; tap one to search YouTube.
+- **⋮**: Choose playlists of <profile>… (Find again), Try the not-found songs again, Forget the Spotify playlists
+  (downloaded songs stay). Hold a playlist → Remove from here.

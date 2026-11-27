@@ -133,6 +133,13 @@ The release APK (`app/build/outputs/apk/release/app-release.apk`) is minified an
   (also after the app was closed, via a media-button receiver), audio focus (pause/duck), pause on headphone
   disconnect (`ACTION_AUDIO_BECOMING_NOISY`).
 
+## Continue from last session (3.3)
+
+Tapping a song or video that was left in the middle asks "Continue from last session?" (Continue / From the
+beginning). Positions are kept per MediaStore id in prefs `resume` (`SongResume.kt`), written when the player
+pauses, seeks or loads another song — no timer. Only between 15 s from the start and 15 s before the end; a song
+played to the end is forgotten. Not asked for the song playing now, for "Play all", or on auto-advance.
+
 ## Power
 
 - MediaPlayer's partial wake lock is held only while audio plays.

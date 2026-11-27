@@ -60,12 +60,13 @@ class SearchScreen(private val act: MainActivity) {
         return true
     }
 
-    private fun baseIndex(p: ListPage) = when (p) { searchPage -> 1; listsPage -> 2; else -> 0 }
+    private fun baseIndex(p: ListPage) = when (p) { searchPage -> 1; listsPage -> 2; spotifyPage -> 3; else -> 0 }
 
-    fun showBaseIndex(i: Int) = showBase(when (i) { 1 -> searchPage; 2 -> listsPage; else -> feedPage }, record = false)
+    fun showBaseIndex(i: Int) = showBase(when (i) { 1 -> searchPage; 2 -> listsPage; 3 -> spotifyPage; else -> feedPage }, record = false)
     private val feedChip: Chip
     private val searchChip: Chip
     private val listsChip: Chip
+    private val spotifyChip: Chip
     private val selCount = act.text("", 15f, C.TEXT, bold = true)
     private val selGo: TextView
     private lateinit var selMore: View
@@ -73,10 +74,14 @@ class SearchScreen(private val act: MainActivity) {
     private val feedPage = FeedPage()
     private val searchPage = SearchPage()
     private val listsPage = ListsPage()
+    private val spotifyPage = SpotifyPage()
     private var base: ListPage = feedPage
     private val stack = ArrayList<ListPage>()
     private val top: ListPage get() = stack.lastOrNull() ?: base
     private var shown = false
+
+    /** Spotify sync progress / results: the Spotify page on screen refreshes. */
+    private val onSpotify: () -> Unit = { (top as? SpotifyRefresh)?.refresh() }
 
     // marks ("✓ Downloaded", "Queued") are redrawn only when downloads finish / the queue changes
     private var markSig = -1
@@ -96,6 +101,9 @@ class SearchScreen(private val act: MainActivity) {
         listsChip = Chip(act, tr("Lists", "Listeler")) { showBase(listsPage) }
         segBar.addView(View(act), lpL(act.dp(8), 1))
         segBar.addView(listsChip)
+        spotifyChip = Chip(act, "Spotify") { showBase(spotifyPage) }
+        segBar.addView(View(act), lpL(act.dp(8), 1))
+        segBar.addView(spotifyChip)
         view.addView(segBar, lpL(MATCH, WRAP))
 
         selBar.addView(act.icon(R.drawable.yt_ic_close, desc = tr("Stop selecting", "Seçimi bitir")) { top.endSelection() })
@@ -109,7 +117,7 @@ class SearchScreen(private val act: MainActivity) {
         view.addView(selBar, lpL(MATCH, WRAP))
         view.addView(host, lpL(MATCH, 0, 1f))
 
-        base = when (Store.prefs.getInt("searchSeg", if (Store.follows().isEmpty()) 1 else 0)) { 1 -> searchPage; 2 -> listsPage; else -> feedPage }
+        base = when (Store.prefs.getInt("searchSeg", if (Store.follows().isEmpty()) 1 else 0)) { 1 -> searchPage; 2 -> listsPage; 3 -> spotifyPage; else -> feedPage }
         attach()
     }
 
@@ -120,6 +128,7 @@ class SearchScreen(private val act: MainActivity) {
         if (shown) return
         shown = true
         Store.addListener(onStore)
+        SpotifySync.listeners += onSpotify
         markSig = Store.marksSig(); activeIds = Store.activeIds()
         top.onShow()
     }
@@ -128,6 +137,7 @@ class SearchScreen(private val act: MainActivity) {
         if (!shown) return
         shown = false
         Store.removeListener(onStore)
+        SpotifySync.listeners -= onSpotify
         cancelNet()
         feedPage.persist()
     }
@@ -142,7 +152,7 @@ class SearchScreen(private val act: MainActivity) {
     private fun cancelNet() {
         calls.cancelAll()
         thumbs.cancel()
-        (stack + feedPage + searchPage + listsPage).forEach { it.onCancelled() }
+        (stack + feedPage + searchPage + listsPage + spotifyPage).forEach { it.onCancelled() }
     }
 
     /** The on-screen ← of a page. */
@@ -160,7 +170,7 @@ class SearchScreen(private val act: MainActivity) {
         cancelNet()
         stack.clear()
         base = p
-        Store.prefs.edit().putInt("searchSeg", when (p) { searchPage -> 1; listsPage -> 2; else -> 0 }).apply()
+        Store.prefs.edit().putInt("searchSeg", when (p) { searchPage -> 1; listsPage -> 2; spotifyPage -> 3; else -> 0 }).apply()
         attach()
         if (shown) top.onShow()
     }
@@ -182,6 +192,7 @@ class SearchScreen(private val act: MainActivity) {
         feedChip.select(base === feedPage)
         searchChip.select(base === searchPage)
         listsChip.select(base === listsPage)
+        spotifyChip.select(base === spotifyPage)
         updateSelBar()
     }
 
@@ -242,7 +253,7 @@ class SearchScreen(private val act: MainActivity) {
         if (vids.isEmpty() || !act.wifiOk()) return
         val active = Store.activeIds()
         val cached = (Store.cache.list(CacheKind.MUSIC) + Store.cache.list(CacheKind.VIDEO)).filter { it.complete }.mapTo(HashSet()) { it.videoId }
-        val todo = vids.filter { it.id !in active && it.id !in cached }
+        val todo = vids.filter { it.id !in active && it.id !in cached && !Store.downloadedAny(it.id) } // saved = nothing to cache (3.3)
         if (todo.isNotEmpty()) {
             val base = Store.newId()
             val batch = if (todo.size > 1) base else 0L
@@ -255,7 +266,7 @@ class SearchScreen(private val act: MainActivity) {
             act.askNotificationsOnce()
             DownloadService.start(act)
         }
-        act.toast(tr("Caching ${todo.size}", "Önbelleğe alınıyor: ${todo.size}") + if (vids.size > todo.size) tr(" (${vids.size - todo.size} already cached or queued)", " (${vids.size - todo.size} tanesi zaten önbellekte ya da sırada)") else "")
+        act.toast(tr("Caching ${todo.size}", "Önbelleğe alınıyor: ${todo.size}") + if (vids.size > todo.size) tr(" (${vids.size - todo.size} already saved or queued)", " (${vids.size - todo.size} tanesi zaten kayıtlı ya da sırada)") else "")
     }
 
     /** From the Download tab / a shared link / the search box. */
@@ -649,7 +660,11 @@ class SearchScreen(private val act: MainActivity) {
             when (i.kind) {
                 IKind.VIDEO, IKind.SHORT -> if (!membersBlocked(i)) act.openVideo(i.id)
                 IKind.CHANNEL -> push(ChannelPage(i.id, i.title))
-                IKind.PLAYLIST -> if (i.id.startsWith("local:")) push(LocalListPage(i.id.removePrefix("local:"))) else push(PlaylistPage(i.id, i.title))
+                IKind.PLAYLIST -> when {
+                    i.id.startsWith("local:") -> push(LocalListPage(i.id.removePrefix("local:")))
+                    i.id.startsWith("spotify:") -> push(SpotifyListPage(i.id.removePrefix("spotify:")))
+                    else -> push(PlaylistPage(i.id, i.title))
+                }
             }
         }
 
@@ -1613,6 +1628,244 @@ class SearchScreen(private val act: MainActivity) {
             tr("Remove from this list", "Bu listeden kaldır") to { Store.setLists(VideoLists.removeItem(Store.lists(), listId, i.id)); fill() })
     }
 
+    // ---- Spotify playlists, converted to YouTube (3.2) ----
+
+    interface SpotifyRefresh { fun refresh() }
+
+    private fun ago(t: Long): String {
+        if (t <= 0) return tr("never", "hiç")
+        val m = (System.currentTimeMillis() - t) / 60000
+        return when {
+            m < 1 -> tr("just now", "az önce")
+            m < 60 -> tr("$m min ago", "$m dk önce")
+            m < 48 * 60 -> tr("${m / 60} h ago", "${m / 60} sa önce")
+            else -> tr("${m / 1440} days ago", "${m / 1440} gün önce")
+        }
+    }
+
+    /**
+     * The Spotify chip (3.4, no sign-in): type a Spotify profile link / username (or a playlist link), Find reads its
+     * public playlists and asks which to convert; Sync reads them again and matches new songs. Nothing is fetched
+     * unless the user taps Find / Sync / Try again.
+     */
+    inner class SpotifyPage : ListPage(), SpotifyRefresh {
+        private val info = act.text("", 13f, C.DIM, lines = 4)
+        private val input = android.widget.EditText(act).apply {
+            hint = tr("Spotify profile link, username or playlist link", "Spotify profil bağlantısı, kullanıcı adı ya da liste bağlantısı")
+            setTextColor(C.TEXT); setHintTextColor(C.LABEL); textSize = 14f
+            isSingleLine = true
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            background = act.outline(act.dpf(10))
+            setPadding(act.dp(12), act.dp(8), act.dp(12), act.dp(8))
+            setOnEditorActionListener { _, _, _ -> findNow(); true }
+        }
+        private val findBtn = act.pill(tr("Find", "Bul"), C.ACCENT, C.ACCENT) { findNow() }
+        private val sync = act.pill(tr("Sync", "Eşitle"), C.ACCENT, C.ACCENT) { SpotifySync.start(act); refresh() }
+        private val stop = act.pill(tr("Stop", "Durdur")) { SpotifySync.stop() }
+        private val more = act.icon(R.drawable.yt_ic_more, desc = tr("More", "Diğer")) { menu() }
+
+        init {
+            head.addView(info.apply { setPadding(0, act.dp(4), 0, act.dp(4)) }, lpL(MATCH, WRAP))
+            val ask = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(2), 0, act.dp(4)) }
+            ask.addView(input, lpL(0, WRAP, 1f))
+            ask.addView(View(act), lpL(act.dp(8), 1))
+            ask.addView(findBtn)
+            head.addView(ask, lpL(MATCH, WRAP))
+            val row = LinearLayout(act).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, act.dp(2), 0, act.dp(6)) }
+            row.addView(sync)
+            row.addView(View(act), lpL(act.dp(8), 1))
+            row.addView(stop)
+            row.addView(View(act), lpL(0, 1, 1f))
+            row.addView(more)
+            head.addView(row, lpL(MATCH, WRAP))
+        }
+
+        private fun findNow() {
+            val q = input.text?.toString().orEmpty().trim()
+            if (q.isEmpty()) { act.toast(tr("Type a Spotify profile link or username first", "Önce bir Spotify profil bağlantısı ya da kullanıcı adı yazın")); return }
+            act.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(input.windowToken, 0)
+            SpotifySync.find(act, q) { f -> choose(f) }
+            refresh()
+        }
+
+        /** Which of the found playlists to convert (all ticked at first; the ones already converted stay ticked). */
+        private fun choose(f: SpotifySync.Found) {
+            if (act.isDestroyed) return
+            if (f.lists.isEmpty()) { act.message("Spotify", tr("${f.name} has no public playlists.", "${f.name} adlı profilin herkese açık çalma listesi yok.")); return }
+            val d = SpotifySync.data()
+            if (f.profile.isEmpty()) { SpotifySync.choose(f, f.lists); SpotifySync.start(act); refresh(); return } // a playlist link: add it
+            // playlists added by link before stay offered (ticked)
+            val have = d.playlists.map { it.id }.toSet()
+            val extra = if (d.profile == f.profile || d.profile.isEmpty()) d.playlists.filter { p -> f.lists.none { it.id == p.id } }.map { SpotifyPublic.Ref(it.id, it.name) } else emptyList()
+            val all = f.lists + extra
+            val first = d.profile != f.profile || have.isEmpty()
+            val ticks = BooleanArray(all.size) { i -> first || all[i].id in have }
+            android.app.AlertDialog.Builder(act)
+                .setTitle(tr("${f.name}: ${f.lists.size} public playlists", "${f.name}: ${f.lists.size} herkese açık liste"))
+                .setMultiChoiceItems(all.map { it.name }.toTypedArray(), ticks) { _, i, on -> ticks[i] = on }
+                .setPositiveButton(tr("Convert & sync", "Dönüştür ve eşitle")) { _, _ ->
+                    val picked = all.filterIndexed { i, _ -> ticks[i] }
+                    if (picked.isEmpty()) { act.toast(tr("Nothing picked", "Hiçbiri seçilmedi")); return@setPositiveButton }
+                    SpotifySync.choose(f, picked)
+                    SpotifySync.start(act)
+                    refresh()
+                }
+                .setNegativeButton(tr("Cancel", "İptal"), null)
+                .show()
+        }
+
+        override val canRetry get() = false
+        override fun firstLoad() { loadedOnce = true; refresh() }
+        override fun onShow() { loadedOnce = true; refresh(); refreshFooter() }
+
+        override fun refresh() {
+            SpotifySync.init(act)
+            val d = SpotifySync.data()
+            if (input.text.isNullOrEmpty() && d.profile.isNotEmpty() && !input.hasFocus()) input.setText(d.profile)
+            val busy = SpotifySync.running
+            findBtn.visibility = if (busy) View.GONE else View.VISIBLE
+            sync.visibility = if (!busy && d.playlists.isNotEmpty()) View.VISIBLE else View.GONE
+            stop.visibility = if (busy) View.VISIBLE else View.GONE
+            more.visibility = if (d.playlists.isNotEmpty() || d.profile.isNotEmpty()) View.VISIBLE else View.GONE
+            info.text = if (d.playlists.isEmpty()) tr(
+                "Type a Spotify profile (its link: Profile → ⋯ → Share → Copy link, or the username) and tap Find: its public playlists are read without signing in. Each song is found on YouTube Music, so the playlists play, download and cache like any other list. Spotify's own audio isn't used.",
+                "Bir Spotify profili yazın (bağlantısı: Profil → ⋯ → Paylaş → Bağlantıyı kopyala, ya da kullanıcı adı) ve Bul'a dokunun: herkese açık listeleri oturum açmadan okunur. Her şarkı YouTube Music'te bulunur; listeler diğer listeler gibi oynatılır, indirilir ve önbelleğe alınır. Spotify'ın kendi sesi kullanılmaz.")
+            else listOfNotNull(
+                if (d.user.isNotEmpty()) "Spotify: ${d.user}" else null,
+                tr("synced ${ago(d.synced)}", "eşitlendi: ${ago(d.synced)}"),
+            ).joinToString(" · ")
+            items.clear()
+            d.playlists.forEach { p ->
+                val ok = d.matched(p); val miss = d.missing(p).size; val pend = d.pending(p)
+                val state = if (p.trackIds.isEmpty() && p.snapshot.isEmpty()) tr("not synced yet", "henüz eşitlenmedi") else listOfNotNull(
+                    tr("$ok of ${p.trackIds.size} found", "${p.trackIds.size} şarkıdan $ok bulundu"),
+                    if (miss > 0) tr("$miss not found", "$miss bulunamadı") else null,
+                    if (pend > 0) tr("$pend to match", "$pend eşleşecek") else null,
+                ).joinToString(" · ")
+                items += Item(IKind.PLAYLIST, "spotify:" + p.id, p.name, channel = p.owner, count = "${p.trackIds.size}",
+                    age = state, thumbId = d.items(p).firstOrNull()?.id)
+            }
+            adapter.notifyDataSetChanged()
+            val err = SpotifySync.lastError
+            when {
+                busy -> setStatus(SpotifySync.progress ?: tr("Working…", "Çalışıyor…"))
+                err != null -> setStatus(err, true)
+                else -> setStatus(null)
+            }
+        }
+
+        private fun menu() {
+            val d = SpotifySync.data()
+            act.menu("Spotify", listOfNotNull(
+                if (d.profile.isNotEmpty()) tr("Choose playlists of ${d.user.ifEmpty { d.profile }}…", "${d.user.ifEmpty { d.profile }} listelerini seç…") to {
+                    SpotifySync.find(act, d.profile) { f -> choose(f) }; refresh()
+                } else null,
+                if (d.playlists.isNotEmpty()) tr("Try the not-found songs again", "Bulunamayan şarkıları yeniden dene") to { SpotifySync.start(act, onlyMatch = true, retryMissing = true); refresh() } else null,
+                tr("Forget the Spotify playlists", "Spotify listelerini unut") to {
+                    android.app.AlertDialog.Builder(act)
+                        .setMessage(tr("Remove the profile and the converted playlists from this phone? Songs you downloaded stay.",
+                            "Profil ve dönüştürülen listeler bu telefondan kaldırılsın mı? İndirdiğiniz şarkılar kalır."))
+                        .setPositiveButton(tr("Forget", "Unut")) { _, _ -> SpotifySync.forget(); input.setText(""); refresh() }
+                        .setNegativeButton(tr("Cancel", "İptal"), null).show()
+                },
+            ))
+        }
+
+        override fun onLongTap(i: Item) {
+            val id = i.id.removePrefix("spotify:")
+            val d = SpotifySync.data()
+            val p = d.playlists.firstOrNull { it.id == id } ?: return
+            val its = d.items(p)
+            act.menu(p.name, listOf(
+                tr("Open", "Aç") to { push(SpotifyListPage(id)) },
+                tr("Listen all", "Tümünü dinle") to { playAll(its, PlayMode.LISTEN, p.name) },
+                tr("Download all…", "Tümünü indir…") to { bulk(its, p.name, p.name, music = true) },
+                tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(its, p.name, music = true, title = p.name) },
+                tr("Copy to my lists", "Listelerime kopyala") to {
+                    val (all, l) = VideoLists.create(Store.lists(), p.name, System.currentTimeMillis())
+                    Store.setLists(VideoLists.add(all, l.id, its).first)
+                    act.toast(tr("Copied to Lists: ${p.name}", "Listelere kopyalandı: ${p.name}"))
+                },
+                tr("Remove from here", "Buradan kaldır") to { SpotifySync.remove(id); refresh() },
+            ))
+        }
+    }
+
+    /** One converted playlist: its found songs (Spotify's title and artist); tap a song to listen from there. */
+    inner class SpotifyListPage(private val playlistId: String) : ListPage(), SpotifyRefresh {
+        private val titleV = act.text("", 18f, C.TEXT, bold = true, lines = 2)
+        private val subV = act.text("", 13f, C.DIM, lines = 2)
+        private val missBtn = act.pill("") { showMissing() }
+        private fun pl() = SpotifySync.data().playlists.firstOrNull { it.id == playlistId }
+
+        init {
+            head.addView(titleV.apply { setPadding(0, act.dp(4), 0, 0) })
+            head.addView(subV.apply { setPadding(0, act.dp(2), 0, act.dp(4)) })
+            val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle"), C.ACCENT, C.ACCENT) { playAll(items, PlayMode.LISTEN, pl()?.name) })
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { playAll(items, null, pl()?.name) })
+            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, pl()?.name, pl()?.name, music = true) })
+            flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, pl()?.name, music = true, title = pl()?.name) })
+            flow.addView(missBtn)
+            head.addView(flow, lpL(MATCH, WRAP))
+        }
+
+        override val canRetry get() = false
+        override val albumHint: String? get() = pl()?.name
+        override val musicDefault: Boolean get() = true
+        override fun firstLoad() { loadedOnce = true; refresh() }
+        override fun onShow() { loadedOnce = true; refresh(); refreshFooter() }
+
+        override fun refresh() {
+            val d = SpotifySync.data()
+            val p = pl()
+            titleV.text = p?.name ?: tr("Playlist gone (removed on Spotify)", "Liste yok (Spotify'da kaldırıldı)")
+            items.clear(); if (p != null) items += d.items(p)
+            val miss = if (p == null) 0 else d.missing(p).size
+            val pend = if (p == null) 0 else d.pending(p)
+            subV.text = if (p == null) "" else listOfNotNull("Spotify · ${p.owner}",
+                tr("${items.size} of ${p.trackIds.size} found", "${p.trackIds.size} şarkıdan ${items.size} bulundu"),
+                if (pend > 0) tr("$pend to match", "$pend eşleşecek") else null).joinToString(" · ")
+            missBtn.text = tr("Not found ($miss)", "Bulunamayan ($miss)")
+            missBtn.visibility = if (miss > 0) View.VISIBLE else View.GONE
+            adapter.notifyDataSetChanged()
+            setStatus(if (SpotifySync.running) SpotifySync.progress
+                else if (items.isEmpty() && pend > 0) tr("Not matched yet: Sync on the Spotify page", "Henüz eşleşmedi: Spotify sayfasında Eşitle") else null)
+        }
+
+        /** Tap a song: listen to the playlist from that song. */
+        override fun onTap(i: Item) {
+            if (selecting) { toggle(i); return }
+            val k = items.indexOfFirst { it.id == i.id }.coerceAtLeast(0)
+            Store.setQueue(PlayQueue().replace(items.map { PlayQueue.of(it, PlayMode.LISTEN, pl()?.name) }, k))
+            PlayerActivity.queue(act)
+        }
+
+        override fun videoExtras(i: Item) = listOf<Pair<String, () -> Unit>>(
+            tr("Wrong song? Find another version", "Yanlış şarkı mı? Başka sürüm bul") to {
+                val p = pl()
+                val t = p?.let { SpotifySync.data().trackFor(it, i.id) }
+                if (t != null) { SpotifySync.reject(act, t, i.id); refresh() }
+            },
+            tr("Search YouTube for it", "YouTube'da ara") to { val t = spTrack(i.id); showBase(searchPage); searchPage.searchFor(t?.query ?: i.title) },
+        )
+
+        private fun spTrack(videoId: String): SpTrack? {
+            val d = SpotifySync.data(); val p = pl() ?: return null
+            return d.trackFor(p, videoId)?.let { d.tracks[it] }
+        }
+
+        /** Songs YouTube Music didn't have: tap one to search YouTube for it. */
+        private fun showMissing() {
+            val d = SpotifySync.data(); val p = pl() ?: return
+            val miss = d.missing(p).mapNotNull { d.tracks[it] }
+            if (miss.isEmpty()) return
+            act.menu(tr("Not found on YouTube Music — tap to search", "YouTube Music'te bulunamadı — aramak için dokunun"),
+                miss.take(60).map { t -> "${t.artist} — ${t.title}" to { showBase(searchPage); searchPage.searchFor(t.query) } })
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------------------
     // rows
 
@@ -1695,7 +1948,11 @@ class SearchScreen(private val act: MainActivity) {
                 }
                 IKind.PLAYLIST -> {
                     channel.text = i.channel
-                    meta.text = if (i.id.startsWith("local:")) tr("Local list", "Yerel liste") else tr("Playlist", "Çalma listesi")
+                    meta.text = when {
+                        i.id.startsWith("local:") -> tr("Local list", "Yerel liste")
+                        i.id.startsWith("spotify:") -> i.age.ifEmpty { "Spotify" }
+                        else -> tr("Playlist", "Çalma listesi")
+                    }
                     badge.text = i.count
                 }
                 else -> {

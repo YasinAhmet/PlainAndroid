@@ -1,6 +1,6 @@
 import java.util.Properties
 
-// Plain Camera 2.0+: one app with two tabs, Camera (:camera) and Gallery (:gallery, was Plain Gallery).
+// Plain Camera 2.0+: one app with tabs: Camera (:camera), Gallery (:gallery, was Plain Gallery) and Record Voice (:voice).
 // Keeps Plain Camera's package, so installed copies update in place; old Plain Gallery data is copied on request.
 plugins {
     id("com.android.application")
@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.camera"
         minSdk = 29
         targetSdk = 35
-        versionCode = 7
-        versionName = "2.1"
+        versionCode = 8
+        versionName = "2.2"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).
@@ -57,5 +57,6 @@ dependencies {
     implementation(project(":shared"))
     implementation(project(":camera"))
     implementation(project(":gallery"))
+    implementation(project(":voice"))
     testImplementation("junit:junit:4.13.2")
 }

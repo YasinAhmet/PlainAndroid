@@ -28,6 +28,7 @@ object Store {
     private lateinit var feedFile: AtomicFile
     private lateinit var doneFile: File
     private val done = HashSet<String>() // "videoId:A" / "videoId:V" ever saved (survives the 200-entry history trim)
+    private val savedUris = HashMap<String, String>() // same keys -> content:// of the saved file (3.3: one copy per video)
 
     fun init(ctx: Context) {
         if (::prefs.isInitialized) return
@@ -47,8 +48,21 @@ object Store {
         val loaded = try { JobCodec.decode(String(file.readFully(), Charsets.UTF_8)) } catch (_: Exception) { ArrayList() }
         JobCodec.afterRestart(loaded)
         jobs.addAll(loaded)
-        try { if (doneFile.exists()) doneFile.forEachLine { if (it.isNotBlank()) done += it.trim() } } catch (_: Exception) {}
-        for (j in loaded) if (j.state == State.DONE && j.media == Media.OK && !j.cache) done += doneKey(j.videoId, j.kind)
+        try {
+            if (doneFile.exists()) doneFile.forEachLine { l ->
+                // "key" (before 3.3) or "key<TAB>uri"; a later line wins, "-key" drops the uri
+                val t = l.trim()
+                if (t.startsWith("-")) { savedUris.remove(t.substring(1)); return@forEachLine }
+                val k = t.substringBefore('\t'); val u = t.substringAfter('\t', "")
+                if (k.isNotEmpty()) { done += k; if (u.isNotEmpty()) savedUris[k] = u }
+            }
+        } catch (_: Exception) {}
+        // finished jobs (3.3: completed caches are saved downloads too, so "cache" jobs with a file count)
+        // (not the pre-3.3 "Cache" jobs that still point into Cached/: the one-time merge decides about those)
+        for (j in loaded.asReversed()) if (j.state == State.DONE && j.media == Media.OK && !j.art && j.uri != null &&
+            !(j.cache && j.relPath.orEmpty().contains("/Cached/"))) {
+            val k = doneKey(j.videoId, j.kind); done += k; savedUris[k] = j.uri!!
+        }
     }
 
     // ---- watch / listen cache (temporary, app cache storage) ----
@@ -199,8 +213,30 @@ object Store {
     private fun doneKey(id: String, kind: Kind) = id + ":" + (if (kind == Kind.AUDIO) "A" else "V")
 
     @Synchronized fun downloaded(id: String, kind: Kind) = doneKey(id, kind) in done
+
+    /** content:// of the saved file of [id] as [kind], when known (not checked: see [Saved.find]). */
+    @Synchronized fun savedUri(id: String, kind: Kind): String? = savedUris[doneKey(id, kind)]
+
+    /** Remember the one saved file of [id] as [kind] (a download, or a cache that completed). */
+    @Synchronized fun setSaved(id: String, kind: Kind, uri: String) {
+        val k = doneKey(id, kind)
+        if (savedUris[k] == uri && k in done) return
+        done += k; savedUris[k] = uri
+        try { doneFile.appendText("$k\t$uri\n") } catch (_: Exception) {}
+    }
+
+    /** The saved file is gone (deleted / trashed elsewhere): it can be downloaded again. */
+    fun forgetSaved(id: String, kind: Kind, uri: String?) {
+        synchronized(this) {
+            val k = doneKey(id, kind)
+            if (uri != null && savedUris[k] != null && savedUris[k] != uri) return // another copy is the saved one
+            if (done.remove(k) or (savedUris.remove(k) != null)) rewriteDone()
+        }
+        notifyListeners()
+    }
     @Synchronized fun downloadedAny(id: String) = doneKey(id, Kind.AUDIO) in done || doneKey(id, Kind.VIDEO) in done
     @Synchronized fun queued(id: String) = jobs.any { it.active && it.videoId == id }
+    @Synchronized fun queued(id: String, kind: Kind) = jobs.any { it.active && it.videoId == id && it.kind == kind && !it.art }
 
     /** Ids queued/running right now. */
     @Synchronized fun activeIds(): Set<String> = jobs.filter { it.active }.mapTo(HashSet()) { it.videoId }
@@ -213,17 +249,25 @@ object Store {
                 val j = jobs.firstOrNull { it.id == f.jobId } ?: continue
                 j.media = f.media; j.relPath = f.relPath; j.fileName = f.fileName
                 val k = doneKey(j.videoId, j.kind)
-                if (f.media == Media.OK) markDone(j) else if (!j.cache && done.remove(k)) rewriteDone()
+                if (f.media == Media.OK) markDone(j)
+                else if (savedUris[k] == null || savedUris[k] == j.uri) { // only when it was the saved copy
+                    if (done.remove(k) or (savedUris.remove(k) != null)) rewriteDone()
+                }
             }
             save()
         }
         notifyListeners()
     }
 
-    private fun rewriteDone() { try { doneFile.writeText(done.joinToString("\n", postfix = "\n")) } catch (_: Exception) {} }
+    private fun rewriteDone() {
+        try { doneFile.writeText(done.joinToString("\n", postfix = "\n") { k -> savedUris[k]?.let { "$k\t$it" } ?: k }) } catch (_: Exception) {}
+    }
 
     private fun markDone(j: Job) {
-        if (j.cache || j.art || j.media != Media.OK) return // cached / art-only / trashed: not "downloaded"
+        if (j.art || j.media != Media.OK) return // art-only / trashed: not "downloaded"
+        val u = j.uri
+        if (u != null) { setSaved(j.videoId, j.kind, u); return }
+        if (j.cache) return
         val k = doneKey(j.videoId, j.kind)
         if (done.add(k)) try { doneFile.appendText(k + "\n") } catch (_: Exception) {}
     }
@@ -365,6 +409,14 @@ object Store {
 
     fun remove(id: Long) {
         synchronized(this) { if (jobs.removeAll { it.id == id && !it.active }) deleteParts(id); save() }
+        notifyListeners()
+    }
+
+    @Synchronized fun hasJobWithUri(uri: String) = jobs.any { it.uri == uri && it.state == State.DONE }
+
+    /** History rows of a file that was deleted as a duplicate (the pre-3.3 Cached/ copies). */
+    fun dropJobsWithUri(uri: String) {
+        synchronized(this) { if (jobs.removeAll { it.uri == uri && !it.active }) save() }
         notifyListeners()
     }
 

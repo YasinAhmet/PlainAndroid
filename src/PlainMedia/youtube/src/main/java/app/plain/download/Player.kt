@@ -411,12 +411,12 @@ class StreamProxy(private val source: CachedSource) {
 }
 
 /**
- * Cached streams in public storage. A complete entry is remuxed / joined (no re-encoding) into
- *   Music/PlainDownload/Cached/<Channel>/[<Album>/]<Title>.m4a (.ogg)   or   Movies/PlainDownload/Cached/<Channel>/<Title>.mp4
- * through MediaStore (so LocalMusic shows it), and the private partial copy is deleted. "Save" then only moves the
- * file to the permanent <Channel>/ folder (RELATIVE_PATH update, no copy). The app owns these files, so the cache
- * limits, Remove and Clear delete them without prompts; a refused delete (e.g. after a reinstall) is collected for
- * a system trash request. Runs off the main thread.
+ * 3.3: a cache that completes is SAVED, like a download: remuxed / joined (no re-encoding) into
+ *   Music/PlainDownload/<Channel>/[<Album>/]<Title>.m4a (.ogg)   or   Movies/PlainDownload/<Channel>/<Title>.mp4
+ * through MediaStore, listed with the downloads (a finished job), and the private copy and its cache entry go. If
+ * that video is already saved as that kind, the cached copy is just dropped: one file per video (see [Saved]).
+ * Entries published by older versions under …/PlainDownload/Cached/ move into the channel folder (same file) or,
+ * when they duplicate a download, are deleted. Runs off the main thread.
  */
 object CachePublisher {
     class Result(val saved: Boolean, val message: String)
@@ -424,62 +424,102 @@ object CachePublisher {
     private fun kindOf(m: CacheMeta) = if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO
     private fun fmtOf(m: CacheMeta) = if (m.ext == "webm") AudioFmt.OPUS else AudioFmt.M4A
 
-    /** Complete private entry -> public Cached/ file. True when published (or already was). */
-    @Synchronized fun publish(ctx: Context, m: CacheMeta): Boolean {
-        if (m.published) return true
-        if (!m.complete) return false
-        val cr = ctx.contentResolver
-        val dir = Store.cache.entryDir(m.kind, m.key)
-        val kind = kindOf(m)
-        val fmt = fmtOf(m)
-        val rel = Naming.relativePath(kind, Naming.channel(m.channel), m.album, cached = true)
-        val ext = if (kind == Kind.AUDIO) fmt.ext else "mp4"
-        val mime = if (kind == Kind.AUDIO) fmt.mime else "video/mp4"
-        val name = Naming.unique(Naming.title(m.title), ext, Saver.takenNames(cr, kind, rel))
-        val tmpV = File(Store.partsDir, "pub_${m.key}_video.ts")
-        val tmpA = File(Store.partsDir, "pub_${m.key}_audio.aac")
-        val tmpOut = File(Store.partsDir, "pub_${m.key}.$ext")
-        var uri: Uri? = null
-        try {
-            // build the file in app storage (no FUSE), then one copy in 1 MB blocks into MediaStore
-            val src = if (kind == Kind.AUDIO) {
-                val plan = SavePlan.audio(fmt, Store.originalAudio)
-                if (plan.mode == SavePlan.Mode.COPY) File(dir, "data.bin") // YouTube's original .m4a, as-is
-                else { Mux.audio(File(dir, "data.bin"), tmpOut, fmt == AudioFmt.OPUS, { false }); tmpOut }
-            } else if (m.ext == "mp4") {
-                File(dir, "data.bin") // members-only progressive MP4 (itag 18): as-is
-            } else {
-                val hasA = File(dir, "a_0.aac").exists()
-                tmpV.outputStream().use { o -> for (i in 0 until m.total) File(dir, "v_$i.ts").inputStream().use { x -> x.copyTo(o, 1 shl 20) } }
-                if (hasA) tmpA.outputStream().use { o -> for (i in 0 until m.total) o.write(Id3.strip(File(dir, "a_$i.aac").readBytes())) }
-                Mux.mergeTs(tmpV, if (hasA) tmpA else null, tmpOut) { false }
-                tmpOut
-            }
-            val u = Saver.create(cr, kind, rel, name, mime, m.title)
-            uri = u
-            // music: tags + cover art in the file (Plain Music reads art only from the files)
-            val tags = if (kind == Kind.AUDIO) TagSet(m.title, Naming.channel(m.channel), m.album, Art.fetch(ctx, m.videoId, null, Store.artQuality)) else null
-            Art.saveTagged(cr, u, src, ext == "ogg", tags, { false }) {}
-            Saver.publish(cr, u)
-        } catch (e: Throwable) {
-            uri?.let { Saver.discard(cr, it) }
-            return false
-        } finally {
-            tmpV.delete(); tmpA.delete(); tmpOut.delete()
-        }
-        val uri2 = uri!!
-        m.publicUri = uri2.toString()
-        m.relPath = rel
-        m.fileName = Saver.displayName(cr, uri2) ?: name
-        m.size = try { cr.openFileDescriptor(uri2, "r")?.use { it.statSize } ?: m.size } catch (_: Exception) { m.size }
-        Store.cache.save(m)
-        dir.listFiles()?.forEach { if (it.name != "meta.json") it.deleteRecursively() } // the private copy goes
-        return true
+    private fun done(j: Job, f: Saved.File, started: Long = 0) {
+        j.state = State.DONE; j.uri = f.uri; j.fileName = f.name; j.relPath = f.relPath; j.finished = System.currentTimeMillis()
+        j.error = null; j.phase = Phase.DOWNLOAD; j.media = Media.OK
+        if (started > 0) j.saveMs = System.currentTimeMillis() - started
     }
 
-    /** Publish every complete private entry (startup migration, after the player closes). */
+    /** A duplicate of an already saved file: the cached copy goes, [jobId] (if any) points at the saved one. */
+    private fun dropDuplicate(ctx: Context, m: CacheMeta, have: Saved.File, jobId: Long): Saved.File {
+        if (m.published) { deletePublic(ctx, m); Store.dropJobsWithUri(m.publicUri!!) }
+        Store.cache.forget(m.kind, m.key)
+        if (jobId != 0L) Store.update(jobId) { done(it, have) }
+        return have
+    }
+
+    /**
+     * Complete entry -> saved file (see above). [jobId]: the "Cache" job to finish with it (else a finished job is
+     * added to the downloads list). Null when incomplete or the write failed (then the entry stays).
+     */
+    @Synchronized fun publish(ctx: Context, m: CacheMeta, jobId: Long = 0): Saved.File? {
+        if (!m.complete) return null
+        val kind = kindOf(m)
+        val cr = ctx.contentResolver
+        val started = System.currentTimeMillis()
+        // already saved (a download, or this video cached before): this copy is a duplicate
+        Saved.find(ctx, m.videoId, kind)?.takeIf { it.uri != m.publicUri }?.let { return dropDuplicate(ctx, m, it, jobId) }
+        val fmt = fmtOf(m)
+        val channel = Naming.channel(m.channel)
+        val rel = Naming.relativePath(kind, channel, m.album)
+        val ext = if (m.published) (m.fileName ?: "").substringAfterLast('.', if (kind == Kind.AUDIO) fmt.ext else "mp4")
+            else if (kind == Kind.AUDIO) fmt.ext else "mp4"
+        Saved.adopt(cr, m.videoId, kind, rel, m.title, ext)?.let { return dropDuplicate(ctx, m, it, jobId) }
+        val name = Naming.unique(Naming.title(m.title), ext, Saver.takenNames(cr, kind, rel))
+        val uri: Uri
+        if (m.published) {
+            // published by an older version under Cached/: the same file moves into the channel folder
+            uri = Uri.parse(m.publicUri)
+            val n = try {
+                cr.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, rel); put(MediaStore.MediaColumns.DISPLAY_NAME, name) }, null, null)
+            } catch (_: Exception) { -1 }
+            if (n == 0) { Store.cache.forget(m.kind, m.key); return null } // deleted elsewhere meanwhile
+            if (n < 0) return null
+        } else {
+            val dir = Store.cache.entryDir(m.kind, m.key)
+            val mime = if (kind == Kind.AUDIO) fmt.mime else "video/mp4"
+            val tmpV = File(Store.partsDir, "pub_${m.key}_video.ts")
+            val tmpA = File(Store.partsDir, "pub_${m.key}_audio.aac")
+            val tmpOut = File(Store.partsDir, "pub_${m.key}.$ext")
+            var u0: Uri? = null
+            try {
+                // build the file in app storage (no FUSE), then one copy in 1 MB blocks into MediaStore
+                val src = if (kind == Kind.AUDIO) {
+                    val plan = SavePlan.audio(fmt, Store.originalAudio)
+                    if (plan.mode == SavePlan.Mode.COPY) File(dir, "data.bin") // YouTube's original .m4a, as-is
+                    else { Mux.audio(File(dir, "data.bin"), tmpOut, fmt == AudioFmt.OPUS, { false }); tmpOut }
+                } else if (m.ext == "mp4") {
+                    File(dir, "data.bin") // members-only progressive MP4 (itag 18): as-is
+                } else {
+                    val hasA = File(dir, "a_0.aac").exists()
+                    tmpV.outputStream().use { o -> for (i in 0 until m.total) File(dir, "v_$i.ts").inputStream().use { x -> x.copyTo(o, 1 shl 20) } }
+                    if (hasA) tmpA.outputStream().use { o -> for (i in 0 until m.total) o.write(Id3.strip(File(dir, "a_$i.aac").readBytes())) }
+                    Mux.mergeTs(tmpV, if (hasA) tmpA else null, tmpOut) { false }
+                    tmpOut
+                }
+                val u = Saver.create(cr, kind, rel, name, mime, m.title)
+                u0 = u
+                // music: tags + cover art in the file (Plain Music reads art only from the files)
+                val tags = if (kind == Kind.AUDIO) TagSet(m.title, channel, m.album, Art.fetch(ctx, m.videoId, null, Store.artQuality)) else null
+                Art.saveTagged(cr, u, src, ext == "ogg", tags, { false }) {}
+                Saver.publish(cr, u)
+            } catch (e: Throwable) {
+                u0?.let { Saver.discard(cr, it) }
+                return null
+            } finally {
+                tmpV.delete(); tmpA.delete(); tmpOut.delete()
+            }
+            uri = u0!!
+        }
+        val f = Saved.File(uri.toString(), rel, Saver.displayName(cr, uri) ?: name, kind == Kind.AUDIO)
+        Store.setSaved(m.videoId, kind, f.uri)
+        if (jobId != 0L) Store.update(jobId) { done(it, f, started) }
+        else if (!Store.hasJobWithUri(f.uri)) Store.add(Job(
+            id = Store.newId(), videoId = m.videoId, title = m.title, channel = channel, durationSec = m.durationSec, kind = kind,
+            audioFmt = fmt, audioQ = AudioQ.HIGH, height = if (kind == Kind.VIDEO) m.quality else 0, codec = VCodec.AVC,
+            state = State.DONE, uri = f.uri, fileName = f.name, relPath = rel, finished = System.currentTimeMillis(), album = m.album,
+        ))
+        Store.cache.forget(m.kind, m.key)
+        return f
+    }
+
+    /**
+     * Once per Youtube tab start, off the main thread: complete entries become saved files (also the pre-3.3
+     * Cached/ ones: moved, or deleted as duplicates), and stale unfinished MediaStore entries go.
+     */
     fun publishAll(ctx: Context) {
-        for (k in CacheKind.values()) for (m in Store.cache.list(k)) if (m.complete && !m.published) publish(ctx, m)
+        for (k in CacheKind.values()) for (m in Store.cache.list(k)) if (m.complete) try { publish(ctx, m) } catch (_: Exception) {}
+        try { Saved.dropStalePending(ctx) } catch (_: Exception) {}
     }
 
     fun exists(ctx: Context, m: CacheMeta): Boolean {
@@ -497,13 +537,12 @@ object CachePublisher {
         } catch (_: Exception) { true }
     }
 
-    /**
-     * Save: a complete entry moves from Cached/ to the permanent folder (published first if needed) and leaves the
-     * cache; an incomplete one goes to the normal download queue.
-     */
+    /** Save: complete = saved now (see [publish]); incomplete = a normal download, unless it is saved already. */
     fun save(ctx: Context, m: CacheMeta): Result {
         val kind = kindOf(m)
+        Saved.find(ctx, m.videoId, kind)?.let { return Result(true, tr("Already saved: ${it.where}", "Zaten kayıtlı: ${it.where}")) }
         if (!m.complete) {
+            if (Store.queued(m.videoId)) return Result(false, tr("Already in the download queue", "Zaten indirme sırasında"))
             Store.add(Job(
                 id = Store.newId(), videoId = m.videoId, title = m.title, channel = "", durationSec = m.durationSec, kind = kind,
                 audioFmt = fmtOf(m), audioQ = AudioQ.HIGH, height = if (kind == Kind.VIDEO) m.quality else 0, codec = VCodec.AVC,
@@ -512,29 +551,8 @@ object CachePublisher {
             DownloadService.start(ctx)
             return Result(false, tr("Not fully cached yet (${(m.fraction * 100).toInt()}%): queued as a normal download", "Henüz tamamen önbellekte değil (%${(m.fraction * 100).toInt()}): normal indirme olarak sıraya alındı"))
         }
-        if (!publish(ctx, m)) return Result(false, tr("Couldn't write the file", "Dosya yazılamadı"))
-        val cr = ctx.contentResolver
-        val uri = Uri.parse(m.publicUri)
-        val channel = Naming.channel(m.channel)
-        val rel = Naming.relativePath(kind, channel, m.album)
-        val ext = (m.fileName ?: "").substringAfterLast('.', if (kind == Kind.AUDIO) fmtOf(m).ext else "mp4")
-        val name = Naming.unique(Naming.title(m.title), ext, Saver.takenNames(cr, kind, rel))
-        try {
-            val n = cr.update(uri, ContentValues().apply {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, rel); put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            }, null, null)
-            if (n < 1) return Result(false, tr("Couldn't move the file (it may have been deleted)", "Dosya taşınamadı (silinmiş olabilir)"))
-        } catch (e: Exception) {
-            return Result(false, tr("Couldn't move the file: ${e.message}", "Dosya taşınamadı: ${e.message}"))
-        }
-        val shown = Saver.displayName(cr, uri) ?: name
-        Store.add(Job(
-            id = Store.newId(), videoId = m.videoId, title = m.title, channel = channel, durationSec = m.durationSec, kind = kind,
-            audioFmt = fmtOf(m), audioQ = AudioQ.HIGH, height = if (kind == Kind.VIDEO) m.quality else 0, codec = VCodec.AVC,
-            state = State.DONE, uri = uri.toString(), fileName = shown, relPath = rel, finished = System.currentTimeMillis(), album = m.album,
-        ))
-        Store.cache.forget(m.kind, m.key) // the file lives on as a normal download
-        return Result(true, tr("Saved to $rel$shown", "Kaydedildi: $rel$shown"))
+        val f = publish(ctx, m) ?: return Result(false, tr("Couldn't write the file", "Dosya yazılamadı"))
+        return Result(true, tr("Saved to ${f.where}", "Kaydedildi: ${f.where}"))
     }
 }
 

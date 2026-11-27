@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Plain Media: Music, Youtube and Spotify tabs (the tab modules bring their activities, services and permissions).
+  Plain Media: Music and Youtube tabs (Spotify playlists live in the Youtube tab) (the tab modules bring their activities, services and permissions).
   The Music tab itself never goes online; the network is used only by the Youtube tab, when the user fetches,
   plays or downloads something.
 -->
@@ -32,12 +32,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- placeholder tab (Plain Spotify comes later) -->
-        <activity
-            android:name=".SpotifyActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
-            android:exported="false"
-            android:launchMode="singleTop" />
         <!-- intents from other apps: handed to the tab inside the app's one task (app.plain.hub.ForwardActivity) -->
         <activity
             android:name="app.plain.hub.ForwardActivity"

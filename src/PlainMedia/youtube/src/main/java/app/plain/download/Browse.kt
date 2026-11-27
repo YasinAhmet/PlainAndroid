@@ -61,12 +61,18 @@ object Browse {
     fun page(o: JSONObject): Page {
         val acc = Acc()
         for (k in ROOTS) o.opt(k)?.let { walk(it, acc) }
-        return Page(acc.items.values.toList(), acc.token)
+        return Page(acc.items.values.toList(), acc.listToken ?: acc.token)
     }
 
     private class Acc {
         val items = LinkedHashMap<String, Item>() // kind+id -> item, first one wins, order kept
         var token: String? = null
+        /**
+         * The continuation that closes a list of results (the first list that has one). Playlists carry a second
+         * one after their video list — the "more playlists" shelf (2026-11) — and the last token seen was that one,
+         * so every playlist stopped at 100 videos.
+         */
+        var listToken: String? = null
         fun add(i: Item?) {
             if (i == null || i.id.isEmpty()) return
             items.putIfAbsent(i.kind.name + i.id, i)
@@ -75,7 +81,16 @@ object Browse {
 
     private fun walk(v: Any?, acc: Acc) {
         when (v) {
-            is JSONArray -> for (i in 0 until v.length()) walk(v.opt(i), acc)
+            is JSONArray -> {
+                val before = acc.items.size
+                for (i in 0 until v.length()) {
+                    val e = v.opt(i)
+                    val ct = (e as? JSONObject)?.let { x -> (x.optJSONObject("continuationItemRenderer") ?: x.optJSONObject("continuationItemViewModel"))?.let { token(it) } }
+                    if (ct == null) { walk(e, acc); continue }
+                    if (acc.listToken == null && acc.items.size > before) acc.listToken = ct
+                    acc.token = ct
+                }
+            }
             is JSONObject -> {
                 val keys = v.keys()
                 while (keys.hasNext()) {

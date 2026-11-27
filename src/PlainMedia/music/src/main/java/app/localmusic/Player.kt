@@ -88,6 +88,7 @@ object Player {
         if (::app.isInitialized) return
         app = ctx.applicationContext
         Store.init(app)
+        SongResume.init(app)
         session = MediaSession(app, "LocalMusic").apply {
             setCallback(callback, main)
             setSessionActivity(openAppIntent(app))
@@ -318,10 +319,11 @@ object Player {
     }
 
     /** Play [ids] starting at [index] (keeps the current shuffle mode). */
-    fun playList(ids: List<Long>, index: Int) {
+    /** Play [ids] from [index]; [startAt] = where that song was left ("Continue from last session?", 3.3). */
+    fun playList(ids: List<Long>, index: Int, startAt: Long = 0) {
         if (ids.isEmpty()) return
         queue.set(ids, index, queue.shuffle)
-        prepareCurrent(0, play = true)
+        prepareCurrent(startAt, play = true)
     }
 
     fun shufflePlay(ids: List<Long>) {
@@ -422,6 +424,7 @@ object Player {
     /** Load the queue's current song. Unplayable files are skipped (and dropped from the queue). */
     private fun prepareCurrent(startAt: Long, play: Boolean): Boolean {
         if (startAt == 0L) listenRestart() else listenStop() // the previous song (or this one from the start again)
+        rememberLoaded()
         dropVanished()
         releasePlayers()
         var tries = queue.size
@@ -433,6 +436,7 @@ object Player {
                     val p = createPlayer(s)
                     if (startAt > 0 && startAt < s.durationMs) p.seekTo(startAt.toInt())
                     mp = p
+                    loadedId = id
                     attachVideo(p)
                     restorePosition = startAt
                     break
@@ -478,12 +482,15 @@ object Player {
 
     private fun onCompletion(done: MediaPlayer) {
         if (done !== mp) return
+        if (loadedId != Long.MIN_VALUE) SongResume.clear(loadedId) // played to the end: next time from the start
+        loadedId = Long.MIN_VALUE
         listenRestart()
         val np = nextMp
         if (np != null && nextPos >= 0) { // the framework already started the next player
             queue.jump(nextPos)
             dropVanished()
             mp = np; nextMp = null; nextPos = -1
+            loadedId = queue.current() ?: Long.MIN_VALUE
             if (videoOn === done) videoOn = null
             done.release()
             attachVideo(np)
@@ -604,6 +611,18 @@ object Player {
     fun savePosition(pos: Long = position()) {
         if (!::app.isInitialized) return
         Store.prefs.edit().putLong("position", pos).apply()
+        current?.let { if (it.id == loadedId) SongResume.put(it.id, pos, it.durationMs) }
+    }
+
+    /** The song the player holds now ([mp]); its position is kept per song when another one is loaded (3.3). */
+    private var loadedId = Long.MIN_VALUE
+
+    private fun rememberLoaded() {
+        val id = loadedId
+        if (id == Long.MIN_VALUE || mp == null) return
+        val s = songOf(id) ?: return
+        val pos = if (playing) mp?.let { runCatching { it.currentPosition.toLong() }.getOrNull() } ?: restorePosition else restorePosition
+        SongResume.put(id, pos, s.durationMs)
     }
 
     private fun saveQueue() {

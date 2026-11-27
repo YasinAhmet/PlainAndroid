@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Fully offline: no INTERNET or network permission at all. Writes only its own recordings (MediaStore, no storage permission). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- recording goes on with the screen off or in another tab: a microphone foreground service, only while recording -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- the "Recording…" notification with its Stop button (Android 13+ asks) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <application>
+
+        <activity
+            android:theme="@style/voc_AppTheme"
+            android:name=".VoiceActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:launchMode="singleTop"
+            android:exported="false" />
+
+        <service
+            android:name=".RecorderService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+    </application>
+</manifest>

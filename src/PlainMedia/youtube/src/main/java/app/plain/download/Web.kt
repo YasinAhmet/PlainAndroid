@@ -19,6 +19,9 @@ import app.plain.lang.tr
 
 class NotFound(msg: String) : IOException(msg)
 
+/** A final 4xx from a non-YouTube API (Spotify): the caller decides (401 = signed out, 429 = slow down). */
+class HttpStatus(val code: Int, val retryAfter: Long = -1, val reason: String = "") : IOException("HTTP $code" + (if (reason.isNotEmpty()) " ($reason)" else ""))
+
 /**
  * In-flight requests of one screen. [cancelAll] disconnects every open connection (so a blocked read returns at once)
  * and bumps [gen]; results of older generations are dropped by the callers.
@@ -136,6 +139,16 @@ object WebApi {
         return s
     }
 
+    /** YouTube Music search (WEB_REMIX `search`) with a filter ([RemixSearch.SONGS] / [RemixSearch.VIDEOS]). */
+    fun remixSearch(ctx: Context, calls: Calls, g: Int, query: String, params: String): String {
+        val body = JSONObject().put("context", JSONObject().put("client", JSONObject()
+            .put("clientName", Clients.REMIX_NAME).put("clientVersion", Clients.REMIX_VERSION).put("hl", "en")))
+            .put("query", query).put("params", params).toString()
+        val h = mapOf("Content-Type" to "application/json", "User-Agent" to Clients.WEB_UA, "Origin" to "https://music.youtube.com",
+            "X-YouTube-Client-Name" to Clients.REMIX_ID.toString(), "X-YouTube-Client-Version" to Clients.REMIX_VERSION)
+        return String(request(ctx, calls, g, Clients.REMIX_SEARCH_URL, body, h, 6 shl 20), Charsets.UTF_8)
+    }
+
     /** YouTube Music album of a track (WEB_REMIX `next`, ~20 KB), or null. */
     fun remixAlbum(ctx: Context, calls: Calls, g: Int, videoId: String): String? = try {
         val body = JSONObject().put("context", JSONObject().put("client", JSONObject()
@@ -184,7 +197,8 @@ object WebApi {
      * (404 -> [NotFound]); network errors and 5xx are retried. Connections are not disconnected after a good answer,
      * so the pool can reuse them (fewer handshakes).
      */
-    private fun request(ctx: Context, calls: Calls, g: Int, url: String, body: String?, headers: Map<String, String>, limit: Int): ByteArray {
+    private fun request(ctx: Context, calls: Calls, g: Int, url: String, body: String?, headers: Map<String, String>, limit: Int,
+                        httpError: ((Int, HttpURLConnection) -> IOException)? = null): ByteArray {
         var last: IOException? = null
         for (attempt in 0 until 6) {
             calls.check(g)
@@ -200,6 +214,7 @@ object WebApi {
                     con.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 }
                 val code = con.responseCode
+                if (code in 400..499 && httpError != null) throw httpError(code, con)
                 if (code == 404) throw NotFound(tr("Not found", "Bulunamadı"))
                 if (code in 400..499) throw YtError(tr("YouTube answered HTTP $code", "YouTube yanıtı: HTTP $code"), false)
                 if (code !in 200..299) throw IOException("HTTP $code")
@@ -208,7 +223,7 @@ object WebApi {
                 return bytes
             } catch (e: IOException) {
                 calls.check(g) // cancelled: the disconnect caused this
-                if (e is NotFound || e is NoWifi) throw e
+                if (e is NotFound || e is NoWifi || e is HttpStatus) throw e
                 last = e
                 Thread.sleep(300L * (attempt + 1))
             } finally {

@@ -115,7 +115,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             videoId = l.id; title = l.title; channel = l.channel; localUri = l.uri?.let { Uri.parse(it) }; localAudio = l.audio
             forced = l.mode; albumHint = l.album; musicLink = false; channelId = null
         }
-        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; pubFile = null; listenItag = 0
         resumeMs = l.pos
         mode = l.mode; itemMode = l.mode
         playWhenReady = false
@@ -185,7 +185,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     }
 
     /** Streaming a video (not a saved file, a published or complete cache): costs video bytes while hidden. */
-    private fun streaming() = localUri == null && pubMeta == null && source?.meta?.complete != true
+    private fun streaming() = localUri == null && pubFile == null && source?.meta?.complete != true
 
     private fun runBg(acts: List<BgAct>) {
         for (a in acts) when (a) {
@@ -216,9 +216,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 val wanted = playWhenReady
                 releaseAll()
                 mode = m
-                resumeMs = pos; playWhenReady = wanted; pubMeta = null; prepared = false
+                resumeMs = pos; playWhenReady = wanted; pubFile = null; prepared = false
                 r.fold({ src ->
-                    if (src is CacheMeta) { pubMeta = src; preparePlayer(Uri.parse(src.publicUri)) } else startSource(src as CachedSource)
+                    if (src is Saved.File) { pubFile = src; preparePlayer(Uri.parse(src.uri)) } else startSource(src as CachedSource)
                 }, { e -> status(errText(e), true) })
             }
         }
@@ -375,7 +375,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private var holder: SurfaceHolder? = null
     private var fullscreen = false
     private var saveOnClose: CacheMeta? = null // Save pressed while a private cache is being served
-    private var pubMeta: CacheMeta? = null // playing a published cached file
+    private var pubFile: Saved.File? = null // playing the saved file (a download, or a cache that completed)
     private var albumHint: String? = null
     private var seq = 0
     private var dragging = false
@@ -409,10 +409,28 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
     }
 
-    /** Start playing [r] (from a row, the downloads list, the Cached folder, the queue): the player opens full. */
+    /**
+     * Start playing [r] (from a row, the downloads list, the queue): the player opens full. Left in the middle last
+     * time (3.3)? "Continue from last session?" first: Continue = from there, Start over = from the beginning.
+     */
     fun open(r: PlayReq) {
         val e = if (r.queue) Store.queue().current else null
         if (r.queue && e == null) { toast(tr("The play queue is empty", "Çalma sırası boş")); return }
+        val key = (e?.id ?: r.id).ifEmpty { (e?.localUri ?: r.uri).orEmpty() }
+        val at = Resume.get(key)
+        val a = ui
+        if (at <= 0 || a == null || a.isFinishing) { openAt(r, 0); return }
+        android.app.AlertDialog.Builder(a)
+            .setTitle(tr("Continue from last session?", "Son oturumdan devam edilsin mi?"))
+            .setMessage(tr("You stopped at ${ResumeRule.clock(at.toLong())}.", "${ResumeRule.clock(at.toLong())} noktasında kalmıştınız."))
+            .setPositiveButton(tr("Continue", "Devam et")) { _, _ -> openAt(r, at) }
+            .setNegativeButton(tr("From the beginning", "Baştan başla")) { _, _ -> Resume.clear(key); openAt(r, 0) }
+            .show()
+    }
+
+    private fun openAt(r: PlayReq, startMs: Int) {
+        val e = if (r.queue) Store.queue().current else null
+        if (r.queue && e == null) return
         releaseAll()
         queueMode = r.queue
         if (e != null) setEntry(e) else {
@@ -420,7 +438,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             localUri = r.uri?.let { Uri.parse(it) }; localAudio = r.audio
             forced = r.mode; musicLink = r.musicLink; albumHint = r.album; channelId = null
         }
-        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = startMs; pubFile = null; listenItag = 0
         height = Store.watchP
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
@@ -955,7 +973,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (bg.startHidden(itemMode == PlayMode.WATCH && localUri == null)) { mode = PlayMode.LISTEN; forced = PlayMode.LISTEN }
         val my = ++seq
         prepared = false
-        pubMeta = null
+        pubFile = null
         localUri?.let { preparePlayer(it); return }
         status(tr("Loading…", "Yükleniyor…"))
         val g = calls.gen
@@ -965,7 +983,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             main.post {
                 if (my != seq || isDestroyed) { (r.getOrNull() as? CachedSource)?.close(); return@post }
                 r.fold({ src ->
-                    if (src is CacheMeta) { pubMeta = src; preparePlayer(Uri.parse(src.publicUri)) } // offline, public file
+                    if (src is Saved.File) { pubFile = src; preparePlayer(Uri.parse(src.uri)) } // offline, the saved file
                     else startSource(src as CachedSource)
                 }, { e -> status(errText(e), true) })
                 showAudio()
@@ -981,26 +999,33 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         else -> tr("Couldn't start: ${e.message ?: e.javaClass.simpleName}", "Başlatılamadı: ${e.message ?: e.javaClass.simpleName}")
     }
 
-    /** Background thread: pick the mode, prefer complete caches (no network), else ask YouTube. */
+    /**
+     * Background thread: pick the mode; play the saved file when there is one (a download or a completed cache —
+     * offline, and never a second copy), else complete caches, else ask YouTube.
+     */
     private fun resolve(g: Int, wanted: PlayMode): Any {
-        // published entries whose public file was deleted elsewhere leave the cache index
-        fun live(k: CacheKind) = Store.cache.list(k).filter { it.videoId == videoId }.filter { m ->
-            if (m.published && !CachePublisher.exists(this, m)) { Store.cache.forget(k, m.key); false } else true
-        }
-        val music = live(CacheKind.MUSIC)
-        val video = live(CacheKind.VIDEO)
+        // completed caches are saved first (3.3: one library), so below only the saved file or a partial cache remains
+        for (k in CacheKind.values()) for (c in Store.cache.list(k)) if (c.videoId == videoId && c.complete) try { CachePublisher.publish(this, c) } catch (_: Exception) {}
+        val music = Store.cache.list(CacheKind.MUSIC).filter { it.videoId == videoId }
+        val video = Store.cache.list(CacheKind.VIDEO).filter { it.videoId == videoId }
         var m: PlayMode? = forced ?: Store.mode(videoId)
+        val savedA = Saved.find(this, videoId, Kind.AUDIO)
+        val savedV = Saved.find(this, videoId, Kind.VIDEO)
         if (m == null) {
-            val mc = music.any { it.complete }; val vc = video.any { it.complete }
-            if (mc && !vc) m = PlayMode.LISTEN else if (vc && !mc) m = PlayMode.WATCH
+            if (savedA != null && savedV == null) m = PlayMode.LISTEN else if (savedV != null && savedA == null) m = PlayMode.WATCH
         }
         if (m == null && wanted != PlayMode.WATCH) m = wanted
-        // offline replays
+        // offline: the saved file (Listen also plays a saved video, without its picture). Another audio language than
+        // the original isn't in the saved file: then it streams.
+        if (audioLang == null && !triedOpus) {
+            val f = when (m) { PlayMode.LISTEN -> savedA ?: savedV; PlayMode.WATCH -> savedV; null -> savedV ?: savedA }
+            if (f != null) { setMode(m ?: if (f.audio) PlayMode.LISTEN else PlayMode.WATCH); return f }
+        }
         if (m == PlayMode.LISTEN) music.filter { it.complete && it.langMatches(audioLang) && (!triedOpus || it.ext == "webm") }.maxByOrNull { it.lastUsed }?.let {
-            setMode(m); touch(it); CachePublisher.publish(this, it); return if (it.published) it else musicSource(it, null)
+            setMode(m); touch(it); return musicSource(it, null)
         }
         if (m == PlayMode.WATCH) video.filter { it.complete && it.langMatches(audioLang) }.let { l -> (l.firstOrNull { it.quality == height } ?: Hls.pickMeta(l, height)) }
-            ?.let { setMode(m); touch(it); CachePublisher.publish(this, it); return if (it.published) it else if (it.ext == "mp4") ProgressiveSource(this, it, null, "", null) else hlsOffline(it) }
+            ?.let { setMode(m); touch(it); return if (it.ext == "mp4") ProgressiveSource(this, it, null, "", null) else hlsOffline(it) }
 
         calls.check(g)
         val net = Net.network(this, Store.wifiOnly)
@@ -1143,6 +1168,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             status(cacheText())
         }
         p.setOnCompletionListener {
+            if (my == seq) Resume.clear(resumeKey()) // watched to the end: next time starts from the beginning
             if (my == seq && queueMode && Store.queue().hasNext) main.post { step(1) } // auto-advance (also in the background); no prefetch
             else if (my == seq) {
                 // the end: nothing keeps running (no foreground service, focus given back, released when in the background)
@@ -1171,7 +1197,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     }
 
     private fun cacheText(): String {
-        if (pubMeta != null) return tr("Cached: ", "Önbellekte: ") + "${pubMeta?.relPath ?: ""}" + tr(" · plays offline", " · çevrimdışı oynar")
+        pubFile?.let { return tr("Saved: ", "Kayıtlı: ") + it.relPath.orEmpty() + tr(" · plays offline", " · çevrimdışı oynar") }
         val m = source?.meta ?: return if (localUri != null) tr("Saved file", "Kayıtlı dosya") else ""
         val what = if (m.kind == CacheKind.MUSIC) tr("Music", "Müzik") else "Video"
         return if (m.complete) tr("Cached ($what) · plays offline", "Önbellekte ($what) · çevrimdışı oynar") else tr("Caching while you watch · ${(m.fraction * 100).toInt()}% · ${Text.size(m.size)}", "İzlerken önbelleğe alınıyor · %${(m.fraction * 100).toInt()} · ${Text.size(m.size)}")
@@ -1181,7 +1207,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val err = source?.error
         when {
             err is NoWifi -> status(errText(err), true)
-            localUri != null || pubMeta != null -> status(tr("This file can't be played ($what/$extra)", "Bu dosya oynatılamıyor ($what/$extra)"), true)
+            localUri != null || pubFile != null -> status(tr("This file can't be played ($what/$extra)", "Bu dosya oynatılamıyor ($what/$extra)"), true)
             mode == PlayMode.WATCH && !watchFailed -> {
                 watchFailed = true
                 toast(tr("This phone couldn't play the video stream: playing the audio instead", "Bu telefon video akışını oynatamadı: yerine ses oynatılıyor"))
@@ -1195,7 +1221,17 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
     }
 
+    /** Where this item was left (3.3 "Continue from last session?"): at pause, close and item changes, no timer. */
+    private fun resumeKey() = videoId.ifEmpty { localUri?.toString().orEmpty() }
+
+    private fun rememberPos() {
+        val p = mp ?: return
+        if (!prepared) return
+        try { Resume.put(resumeKey(), p.currentPosition.toLong(), p.duration.toLong()) } catch (_: Exception) {}
+    }
+
     private fun releaseAll() {
+        rememberPos()
         seq++
         main.removeCallbacks(tick)
         screenOn(false)
@@ -1209,9 +1245,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (p != null || s != null) Thread({
             p?.close() ?: s?.close() // stops the filler; the partial cache stays for next time
             val m = s?.meta
-            // complete now: becomes a public file under Music|Movies/PlainDownload/Cached/ (LocalMusic sees it)
-            if (m != null && m.complete && !m.published) CachePublisher.publish(app, m)
-            if (sv != null) CachePublisher.save(app, sv)
+            // complete now: saved like a download, Music|Movies/PlainDownload/<Channel>/ (one copy; Plain Music sees it)
+            if (m != null && m.complete) try { CachePublisher.publish(app, m) } catch (_: Exception) {}
+            if (sv != null && sv !== m) try { CachePublisher.save(app, sv) } catch (_: Exception) {}
         }, "player-close").start()
         saveOnClose = null
         updatePlayBtn()
@@ -1239,6 +1275,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun pause(keepFocus: Boolean = false) {
         mp?.takeIf { prepared && it.isPlaying }?.pause()
+        rememberPos()
         playWhenReady = false
         screenOn(false)
         main.removeCallbacks(tick)
@@ -1308,7 +1345,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
      */
     private fun showAudio() {
         if (!::audioBtn.isInitialized) return
-        val m = source?.meta ?: pubMeta
+        val m = source?.meta
         val legacy = m != null && !m.langKnown
         audioBtn.visibility = if (localUri == null && (tracks.size > 1 || legacy)) View.VISIBLE else View.GONE
         val playing = if (legacy) null else m?.lang?.ifEmpty { null } ?: audioLang ?: tracks.firstOrNull { it.original }?.lang
@@ -1335,7 +1372,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             }
             return
         }
-        val m = source?.meta ?: pubMeta
+        val m = source?.meta
         val playing = if (m != null && !m.langKnown) null else m?.lang?.ifEmpty { null } ?: audioLang ?: tracks.firstOrNull { it.original }?.lang
         ui?.menu(tr("Audio language", "Ses dili"), tracks.map { t ->
             (if (t.lang == playing) "✓ " else "   ") + t.label(PlainLang.locale) to {
@@ -1371,9 +1408,10 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     }
 
     private fun save() {
-        val pm = pubMeta
-        val m = pm ?: source?.meta ?: run { toast(tr("Nothing cached yet", "Henüz önbellekte bir şey yok")); return }
-        if (pm == null && m.complete && !m.published) {
+        pubFile?.let { f -> ui?.message(tr("Save", "Kaydet"), tr("Already saved: ${f.where}", "Zaten kayıtlı: ${f.where}")); return }
+        if (localUri != null) { toast(tr("This is a saved file", "Bu kayıtlı bir dosya")); return }
+        val m = source?.meta ?: run { toast(tr("Nothing cached yet", "Henüz önbellekte bir şey yok")); return }
+        if (m.complete) {
             // the player still reads the private copy: it is published and moved when the player closes
             saveOnClose = m
             ui?.message(tr("Save", "Kaydet"), tr("Fully cached: it will be saved to ${Naming.relativePath(if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO, Naming.channel(m.channel), m.album)} when you close the player.", "Tamamen önbellekte: oynatıcıyı kapattığınızda kaydedilecek. Konum: ${Naming.relativePath(if (m.kind == CacheKind.MUSIC) Kind.AUDIO else Kind.VIDEO, Naming.channel(m.channel), m.album)}"))
@@ -1437,7 +1475,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun playEntry(e: QEntry, autoplay: Boolean) {
         releaseAll()
         setEntry(e)
-        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubMeta = null; listenItag = 0
+        info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = 0; pubFile = null; listenItag = 0
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
         itemMode = mode

@@ -1,7 +1,7 @@
 import java.util.Properties
 
 // Plain Media 3.0+ (was Plain Youtube): tabs Music (:music, was LocalMusic / Plain Music), Youtube (:youtube) and
-// Spotify (placeholder). Keeps Plain Youtube's package (app.plain.download), so it updates in place with its caches.
+// Spotify playlists (converted to YouTube, in the Youtube tab). Keeps Plain Youtube's package (app.plain.download), so it updates in place with its caches.
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.download"
         minSdk = 30
         targetSdk = 35
-        versionCode = 26
-        versionName = "3.1"
+        versionCode = 29
+        versionName = "3.4"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).
