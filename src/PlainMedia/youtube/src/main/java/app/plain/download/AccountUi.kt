@@ -71,22 +71,23 @@ class AccountUi(private val act: MainActivity) {
     }
 
     private fun menu(signed: Boolean) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
         val title = when {
-            !signed -> tr("Account: not signed in", "Hesap: oturum açılmadı")
-            Account.expired -> tr("Account expired — import new cookies", "Hesabın süresi doldu — yeni çerezleri içe aktarın")
+            !signed -> tr("Not signed in", "Oturum açılmadı")
+            Account.expired -> tr("Account expired", "Hesabın süresi doldu")
             else -> tr("Signed in", "Oturum açık") + (Account.name?.let { tr(" as $it", ": $it") } ?: "")
         }
-        if (signed && !Account.expired) {
-            items += tr("Sync subscriptions", "Abonelikleri eşitle") to { syncSubs() }
-            items += tr("Test the account", "Hesabı test et") to { test() }
-        }
-        items += tr("Sign in to YouTube (on this phone)…", "YouTube'da oturum aç (bu telefonda)…") to { act.startActivityForResult(Intent(act, SignInActivity::class.java), REQ_SIGNIN) }
-        items += tr("Import cookies.txt…", "cookies.txt içe aktar…") to { pickFile() }
-        items += tr("How to get cookies.txt…", "cookies.txt nasıl alınır…") to { howTo() }
-        if (signed) items += tr("Sign out (delete the account data)", "Oturumu kapat (hesap verilerini sil)") to { signOut() }
-        items += tr("What is the account used for?", "Hesap ne için kullanılır?") to { act.message(tr("Account", "Hesap"), WHAT) }
-        act.menu(title, items)
+        val sheet = app.plain.ui.Sheet(act, C.ACCENT).header(tr("YouTube account", "YouTube hesabı"), title +
+            if (Account.expired) tr(" — import new cookies", " — yeni çerezleri içe aktarın") else "")
+        if (signed && !Account.expired) sheet
+            .item(app.plain.ui.Ic.SYNC, tr("Sync subscriptions", "Abonelikleri eşitle")) { syncSubs() }
+            .item(app.plain.ui.Ic.CHECK, tr("Test the account", "Hesabı test et")) { test() }
+        sheet.section(tr("Sign in", "Oturum aç"))
+            .item(app.plain.ui.Ic.ACCOUNT, tr("Sign in to YouTube", "YouTube'da oturum aç"), sub = tr("On this phone", "Bu telefonda"), more = true) { act.startActivityForResult(Intent(act, SignInActivity::class.java), REQ_SIGNIN) }
+            .item(app.plain.ui.Ic.UPLOAD, tr("Import cookies.txt", "cookies.txt içe aktar"), more = true) { pickFile() }
+            .item(app.plain.ui.Ic.HELP, tr("How to get cookies.txt", "cookies.txt nasıl alınır")) { howTo() }
+            .item(app.plain.ui.Ic.INFO, tr("What is the account used for?", "Hesap ne için kullanılır?")) { act.message(tr("Account", "Hesap"), WHAT) }
+        if (signed) sheet.item(app.plain.ui.Ic.LOGOUT, tr("Sign out", "Oturumu kapat"), sub = tr("Deletes the account data from this phone", "Hesap verilerini bu telefondan siler"), danger = true) { signOut() }
+        sheet.show()
     }
 
     private fun howTo() = act.message(tr("Get cookies.txt", "cookies.txt edinme"), HOW_PHONE + "\n\n" + HOW_PC +

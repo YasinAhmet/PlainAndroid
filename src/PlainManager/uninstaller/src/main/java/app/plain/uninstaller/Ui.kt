@@ -121,7 +121,9 @@ fun Context.scrollOf(child: View) = ScrollView(this).apply {
     addView(child, FrameLayout.LayoutParams(MATCH, WRAP))
 }
 
+/** A list of actions: a bottom sheet (app.plain.ui.Sheet) like the other Plain menus. */
 fun Context.menu(title: String?, items: List<Pair<String, () -> Unit>>) {
+    if (this is android.app.Activity) { app.plain.ui.Sheet.list(this, title, items, C.ACCENT); return }
     val b = AlertDialog.Builder(this)
     if (title != null) b.setTitle(title)
     b.setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()

@@ -116,7 +116,9 @@ fun Context.icon(res: Int, sizeDp: Int = 44, padDp: Int = 10, tint: Int = C.TEXT
     }
 }
 
+/** Any list menu: a bottom sheet (app.plain.ui.Sheet) like the app's other menus. */
 fun Context.menu(title: String?, items: List<Pair<String, () -> Unit>>) {
+    if (this is android.app.Activity) { app.plain.ui.Sheet.list(this, title, items, C.ACCENT); return }
     val b = AlertDialog.Builder(this)
     if (title != null) b.setTitle(title)
     b.setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()

@@ -87,7 +87,9 @@ fun Context.confirm(title: String, msg: String, ok: String, cb: () -> Unit) {
         .setNegativeButton(tr("Cancel", "İptal"), null).show()
 }
 
+/** A list of actions: a bottom sheet (app.plain.ui.Sheet) like the other Plain menus. */
 fun Context.choose(title: String, items: List<Pair<String, () -> Unit>>) {
+    if (this is android.app.Activity) { app.plain.ui.Sheet.list(this, title, items, C.TRACK); return }
     AlertDialog.Builder(this).setTitle(title)
         .setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
         .show()

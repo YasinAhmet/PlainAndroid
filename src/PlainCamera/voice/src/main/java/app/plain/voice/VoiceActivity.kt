@@ -42,6 +42,8 @@ import android.widget.Toast
 import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.Executors
@@ -516,16 +518,14 @@ class VoiceActivity : Activity() {
 
     // ------------------------------------------------------------------ share / rename / delete
 
-    private fun options(r: Rec, anchor: View) {
-        val m = PopupMenu(this, anchor)
-        m.menu.add(0, 0, 0, tr("Share", "Paylaş"))
-        m.menu.add(0, 1, 1, tr("Rename", "Yeniden adlandır"))
-        m.menu.add(0, 2, 2, tr("Delete", "Sil"))
-        m.setOnMenuItemClickListener {
-            when (it.itemId) { 0 -> share(r); 1 -> rename(r); 2 -> confirmDelete(r) }
-            true
-        }
-        m.show()
+    private fun options(r: Rec, @Suppress("UNUSED_PARAMETER") anchor: View) {
+        Sheet(this, ACCENT).header(r.name, tr("Voice recording", "Ses kaydı"))
+            .actions(
+                Sheet.Action(Ic.SHARE, tr("Share", "Paylaş")) { share(r) },
+                Sheet.Action(Ic.EDIT, tr("Rename", "Yeniden adlandır")) { rename(r) },
+            )
+            .item(Ic.DELETE, tr("Delete", "Sil"), danger = true) { confirmDelete(r) }
+            .show()
     }
 
     private fun share(r: Rec) {

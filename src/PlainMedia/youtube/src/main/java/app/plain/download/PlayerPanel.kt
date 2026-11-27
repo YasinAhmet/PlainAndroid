@@ -34,6 +34,7 @@ import java.util.concurrent.Executors
 import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
+import app.plain.ui.Sheet
 
 /**
  * In-app player (MediaPlayer, no libraries). Streams go through [StreamProxy] so what is watched is cached at the
@@ -909,7 +910,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private fun syncVolumeBar() { if (volBar.progress != vol.level) volBar.progress = vol.level }
 
     private fun speedMenu() {
-        ui?.menu(tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { s -> (if (s == speed) "✓ " else "   ") + Speeds.label(s) to { setSpeed(s) } })
+        val a = ui as? android.app.Activity ?: return
+        Sheet.choose(a, tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { Speeds.label(it) }, Speeds.ALL.indexOf(speed), C.ACCENT) { setSpeed(Speeds.ALL[it]) }
     }
 
     private fun setSpeed(s: Float) {
@@ -1374,8 +1376,10 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
         val m = source?.meta
         val playing = if (m != null && !m.langKnown) null else m?.lang?.ifEmpty { null } ?: audioLang ?: tracks.firstOrNull { it.original }?.lang
-        ui?.menu(tr("Audio language", "Ses dili"), tracks.map { t ->
-            (if (t.lang == playing) "✓ " else "   ") + t.label(PlainLang.locale) to {
+        val a = ui as? android.app.Activity ?: return
+        val sheet = Sheet(a, C.ACCENT).header(tr("Audio language", "Ses dili"))
+        tracks.forEach { t ->
+            sheet.choice(t.label(PlainLang.locale), t.lang == playing) {
                 // an entry cached before 2.8 (maybe a dub) is left by picking any language, the original included:
                 // an explicit language never matches those entries, so the pick is stored as that language
                 val leaveLegacy = m != null && !m.langKnown
@@ -1386,25 +1390,28 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                     restartAt(mode, remember = true)
                 }
             }
-        })
+        }
+        sheet.show()
     }
 
     private fun qualityMenu() {
         val cached = Store.cache.list(CacheKind.VIDEO).filter { it.videoId == videoId && it.langMatches(audioLang) }.associateBy { it.quality }
         val hs = (choices.map { it.height } + cached.keys).distinct().sortedDescending()
         if (hs.isEmpty()) { toast(tr("No other quality known yet", "Henüz başka kalite bilinmiyor")); return }
-        ui?.menu(tr("Quality", "Kalite"), hs.map { h ->
+        val a = ui as? android.app.Activity ?: return
+        val sheet = Sheet(a, C.ACCENT).header(tr("Quality", "Kalite"))
+        hs.forEach { h ->
             val c = cached[h]
-            val label = "${h}p" + (if (h == height) "  ✓" else "") +
-                (if (c?.complete == true) tr("  · cached", "  · önbellekte") else if (c != null) tr("  · ${(c.fraction * 100).toInt()}% cached", "  · %${(c.fraction * 100).toInt()} önbellekte") else "")
-            label to {
+            val sub = if (c?.complete == true) tr("Cached", "Önbellekte") else if (c != null) tr("${(c.fraction * 100).toInt()}% cached", "%${(c.fraction * 100).toInt()} önbellekte") else null
+            sheet.choice("${h}p", h == height, sub) {
                 if (h != height) {
                     height = h
                     Store.watchP = h
                     restartAt(PlayMode.WATCH, remember = true)
                 }
             }
-        })
+        }
+        sheet.show()
     }
 
     private fun save() {

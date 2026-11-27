@@ -33,6 +33,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -468,26 +470,19 @@ class GalleryActivity : Activity() {
     }
 
     // ------------------------------------------------------------------ menu
-    private fun showMenu(anchor: View) {
-        val m = PopupMenu(this, anchor)
-        if (screen != Screen.FOLDERS) m.menu.add(0, 1, 0, tr("Select", "Seç"))
-        if (screen == Screen.FOLDERS) m.menu.add(0, 4, 0, tr("New category…", "Yeni kategori…"))
-        m.menu.add(0, 2, 1, tr("Categories", "Kategoriler")).setCheckable(true).isChecked = catsOn
-        m.menu.add(0, 3, 2, tr("Hold to delete", "Basılı tutarak sil")).setCheckable(true).isChecked = holdDelete
-        m.menu.add(0, 6, 3, PlainLang.label())
-        m.menu.add(0, 5, 4, PlainUpdate.label(this))
-        m.setOnMenuItemClickListener {
-            when (it.itemId) {
-                1 -> startSelect()
-                2 -> setCats(!catsOn)
-                3 -> setHoldDelete(!holdDelete)
-                4 -> Categories.askName(this, tr("New category", "Yeni kategori"), "") { n -> Categories.get(this).create(n); Categories.save(this); refresh() }
-                5 -> PlainUpdate.check(this)
-                6 -> PlainLang.choose(this, anchor)
-            }
-            true
+    private fun showMenu(@Suppress("UNUSED_PARAMETER") anchor: View) {
+        val s = Sheet(this, ACCENT).header(tr("Gallery", "Galeri"), tr("Photos and videos on this phone", "Bu telefondaki fotoğraf ve videolar"))
+        if (screen != Screen.FOLDERS) s.item(Ic.SELECT, tr("Select", "Seç"), sub = tr("Pick several to share, categorize or delete", "Paylaşmak, kategorilemek ya da silmek için birkaçını seçin")) { startSelect() }
+        if (screen == Screen.FOLDERS) s.item(Ic.ADD, tr("New category", "Yeni kategori")) {
+            Categories.askName(this, tr("New category", "Yeni kategori"), "") { n -> Categories.get(this).create(n); Categories.save(this); refresh() }
         }
-        m.show()
+        s.section(tr("View", "Görünüm"))
+            .toggle(Ic.FOLDER, tr("Categories", "Kategoriler"), catsOn, sub = tr("Your own categories, shown as folders", "Kendi kategorileriniz, klasör olarak")) { on -> setCats(on) }
+            .toggle(Ic.DELETE, tr("Hold to delete", "Basılı tutarak sil"), holdDelete, sub = tr("A long press moves the photo to the trash", "Uzun basış fotoğrafı çöpe taşır")) { on -> setHoldDelete(on) }
+            .section(tr("App", "Uygulama"))
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, ACCENT) }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
+            .show()
     }
 
     private fun setCats(on: Boolean) {
@@ -598,11 +593,11 @@ class GalleryActivity : Activity() {
 
     /** Hold a category folder: rename or delete it (its photos stay in the gallery). */
     private fun folderOptions(name: String) {
-        AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf(tr("Rename", "Yeniden adlandır"), tr("Delete category", "Kategoriyi sil"))) { _, w ->
-                val t = Categories.get(this)
-                if (w == 0) Categories.askName(this, tr("Rename category", "Kategoriyi yeniden adlandır"), name) { n -> t.rename(name, n); Categories.save(this); refresh() }
-                else AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
+        val t = Categories.get(this)
+        Sheet(this, ACCENT).header(name, tr("Category", "Kategori"))
+            .item(Ic.EDIT, tr("Rename", "Yeniden adlandır")) { Categories.askName(this, tr("Rename category", "Kategoriyi yeniden adlandır"), name) { n -> t.rename(name, n); Categories.save(this); refresh() } }
+            .item(Ic.CLOSE, tr("Delete category", "Kategoriyi sil"), sub = tr("The photos and videos stay in the gallery", "Fotoğraf ve videolar galeride kalır"), danger = true) {
+                AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
                     .setMessage(tr("Only the category goes. The photos and videos stay in the gallery.", "Yalnızca kategori silinir. Fotoğraf ve videolar galeride kalır."))
                     .setPositiveButton(tr("Delete", "Sil")) { _, _ -> t.delete(name); Categories.save(this); refresh() }
                     .setNegativeButton(tr("Cancel", "İptal"), null)

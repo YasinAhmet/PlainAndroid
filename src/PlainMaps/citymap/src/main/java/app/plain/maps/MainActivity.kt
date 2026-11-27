@@ -28,6 +28,8 @@ import android.widget.TextView
 import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.util.Calendar
 import java.util.concurrent.Executors
 
@@ -797,16 +799,15 @@ open class MainActivity : Activity() {
     }
 
     private fun chooseVariant(s: Screen.LineS, d: LineData) {
-        val items = d.others.map { o -> "→ ${o.headsign} · " + tr("${o.stops.size} stops", "${o.stops.size} durak") +
-            (if (o.ntrips > 0) tr(" · ${o.ntrips} trips/week", " · haftada ${o.ntrips} sefer") else "") }
-        android.app.AlertDialog.Builder(this).setTitle(tr(d.v.ref + " variants", d.v.ref + " · güzergâhlar"))
-            .setItems(items.toTypedArray()) { _, i ->
-                val o = d.others[i]
-                bg.execute {
-                    val f = nearestStopIn(o, d.stops[s.focus])
-                    main.post { s.variant = o.id; s.focus = f; render() }
-                }
-            }.show()
+        val sheet = Sheet(this, C.ACCENT).header(tr(d.v.ref + " variants", d.v.ref + " · güzergâhlar"), tr("Other routes this line runs", "Bu hattın diğer güzergâhları"))
+        for (o in d.others) sheet.item(Ic.ROUTE, "→ ${o.headsign}", sub = tr("${o.stops.size} stops", "${o.stops.size} durak") +
+            (if (o.ntrips > 0) tr(" · ${o.ntrips} trips/week", " · haftada ${o.ntrips} sefer") else "")) {
+            bg.execute {
+                val f = nearestStopIn(o, d.stops[s.focus])
+                main.post { s.variant = o.id; s.focus = f; render() }
+            }
+        }
+        sheet.show()
     }
 
     private fun fitGeom(g: List<DoubleArray>) {
@@ -1021,33 +1022,26 @@ open class MainActivity : Activity() {
     /** The list of packs: tap one to search it, long-press to edit or delete. */
     private fun packsDialog() {
         val l = packs()
-        val items = l.map { it.name + "\n   " + it.terms.joinToString(", ") } + tr("+ New pack…", "+ Yeni paket…")
-        val dlg = android.app.AlertDialog.Builder(this).setTitle(tr("Query packs", "Arama paketleri"))
-            .setItems(items.toTypedArray()) { _, i -> if (i < l.size) runPack(l[i]) else editPack(null) }
-            .setNegativeButton(tr("Close", "Kapat"), null)
-            .create()
-        dlg.listView.setOnItemLongClickListener { _, _, i, _ ->
-            if (i < l.size) { dlg.dismiss(); packMenu(l[i]) }
-            true
-        }
-        dlg.show()
-        if (l.isNotEmpty()) android.widget.Toast.makeText(this, tr("Long-press a pack to edit it", "Düzenlemek için pakete basılı tutun"), android.widget.Toast.LENGTH_SHORT).show()
+        val sheet = Sheet(this, C.ACCENT).header(tr("Query packs", "Arama paketleri"), tr("Several searches in one tap. Hold a pack to edit or delete it.", "Tek dokunuşta birkaç arama. Düzenlemek ya da silmek için pakete basılı tutun."))
+            .item(Ic.ADD, tr("New pack", "Yeni paket")) { editPack(null) }
+        if (l.isNotEmpty()) sheet.section(tr("Your packs", "Paketleriniz"))
+        for (p in l) sheet.item(Ic.SEARCH, p.name, sub = p.terms.joinToString(", "), onLong = { packMenu(p) }) { runPack(p) }
+        sheet.show()
     }
 
     private fun packMenu(p: Pack) {
-        android.app.AlertDialog.Builder(this).setTitle(p.name)
-            .setItems(arrayOf(tr("Search", "Ara"), tr("Edit", "Düzenle"), tr("Delete", "Sil"))) { _, k ->
-                when (k) {
-                    0 -> runPack(p)
-                    1 -> editPack(p)
-                    else -> android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"))
-                        .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
-                            savePacks(packs().filterNot { it.name == p.name })
-                            if ((stack.lastOrNull() as? Screen.Search)?.pack == p.name) back()
-                        }
-                        .setNegativeButton(tr("Cancel", "İptal"), null).show()
-                }
-            }.show()
+        Sheet(this, C.ACCENT).header(p.name, p.terms.joinToString(", "))
+            .item(Ic.SEARCH, tr("Search", "Ara")) { runPack(p) }
+            .item(Ic.EDIT, tr("Edit", "Düzenle")) { editPack(p) }
+            .item(Ic.DELETE, tr("Delete", "Sil"), danger = true) {
+                android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"))
+                    .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
+                        savePacks(packs().filterNot { it.name == p.name })
+                        if ((stack.lastOrNull() as? Screen.Search)?.pack == p.name) back()
+                    }
+                    .setNegativeButton(tr("Cancel", "İptal"), null).show()
+            }
+            .show()
     }
 
     /** Create ([old] = null) or change a pack. [add] pre-fills one more name (from "Add to pack"). */
@@ -1086,15 +1080,14 @@ open class MainActivity : Activity() {
     /** Adds a typed search to a pack (or a new one). */
     private fun addToPack(q: String) {
         val l = packs()
-        val items = l.map { it.name } + tr("+ New pack…", "+ Yeni paket…")
-        android.app.AlertDialog.Builder(this).setTitle(tr("Add “$q” to…", "“$q” şuna ekle…"))
-            .setItems(items.toTypedArray()) { _, i ->
-                if (i >= l.size) { editPack(null, q); return@setItems }
-                val p = l[i]
-                savePacks(l.map { if (it === p) Pack(p.name, (p.terms + q).distinct()) else it })
-                android.widget.Toast.makeText(this, tr("Added to ${p.name}", "${p.name} paketine eklendi"), android.widget.Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(tr("Cancel", "İptal"), null).show()
+        val sheet = Sheet(this, C.ACCENT).header(tr("Add “$q” to…", "“$q” şuna ekle…"))
+            .item(Ic.ADD, tr("New pack", "Yeni paket")) { editPack(null, q) }
+        if (l.isNotEmpty()) sheet.section(tr("Your packs", "Paketleriniz"))
+        for (p in l) sheet.item(Ic.SEARCH, p.name, sub = p.terms.joinToString(", ")) {
+            savePacks(l.map { if (it === p) Pack(p.name, (p.terms + q).distinct()) else it })
+            android.widget.Toast.makeText(this, tr("Added to ${p.name}", "${p.name} paketine eklendi"), android.widget.Toast.LENGTH_SHORT).show()
+        }
+        sheet.show()
     }
 
     // a getter, so the names follow the language chosen after the activity was created
@@ -1408,22 +1401,16 @@ open class MainActivity : Activity() {
                 "Henüz kayıtlı rota yok. Bir rota seçeneğini açıp “Rotalarıma kaydet” düğmesine dokunun."), android.widget.Toast.LENGTH_LONG).show()
             return
         }
-        android.app.AlertDialog.Builder(this).setTitle(tr("My routes", "Rotalarım"))
-            .setItems(l.map { it.name + "\n   " + it.lines.replace(">", " › ") }.toTypedArray()) { _, i ->
-                val f = l[i]
-                android.app.AlertDialog.Builder(this).setTitle(f.name)
-                    .setItems(arrayOf(tr("Open", "Aç"), tr("Delete", "Sil"))) { _, k ->
-                        if (k == 0) {
-                            from = f.a; to = f.b; prefer = f.lines; picking = 0
-                            if (stack.lastOrNull() is Screen.Route) render() else show(Screen.Route)
-                        } else {
-                            android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${f.name}”?", "“${f.name}” silinsin mi?"))
-                                .setPositiveButton(tr("Delete", "Sil")) { _, _ -> saveFavs(favs().filterNot { it.name == f.name }) }
-                                .setNegativeButton(tr("Cancel", "İptal"), null).show()
-                        }
-                    }.show()
-            }
-            .setNegativeButton(tr("Close", "Kapat"), null).show()
+        val sheet = Sheet(this, C.ACCENT).header(tr("My routes", "Rotalarım"), tr("Hold a route to delete it", "Silmek için rotaya basılı tutun"))
+        for (f in l) sheet.item(Ic.ROUTE, f.name, sub = f.lines.replace(">", " › "), onLong = {
+            android.app.AlertDialog.Builder(this).setTitle(tr("Delete “${f.name}”?", "“${f.name}” silinsin mi?"))
+                .setPositiveButton(tr("Delete", "Sil")) { _, _ -> saveFavs(favs().filterNot { it.name == f.name }) }
+                .setNegativeButton(tr("Cancel", "İptal"), null).show()
+        }) {
+            from = f.a; to = f.b; prefer = f.lines; picking = 0
+            if (stack.lastOrNull() is Screen.Route) render() else show(Screen.Route)
+        }
+        sheet.show()
     }
 
     private fun pick(h: Store.Hit) {
@@ -1544,7 +1531,7 @@ open class MainActivity : Activity() {
         views.add(button(app.plain.update.PlainUpdate.label(this), C.CARD) { app.plain.update.PlainUpdate.check(this) })
         // Language (shared helper, app/plain/lang/PlainLang.kt): a dropdown under the row; a change recreates the
         // activity, which then reopens these settings (see onSaveInstanceState / openStore).
-        val lang = button(PlainLang.label(), C.CARD) { v -> PlainLang.choose(this, v) }
+        val lang = button(PlainLang.label(), C.CARD) { Sheet.language(this, C.ACCENT) }
         lang.layoutParams = lpL(MATCH, WRAP).apply { topMargin = dp(8) }
         langRow = lang
         views.add(lang)

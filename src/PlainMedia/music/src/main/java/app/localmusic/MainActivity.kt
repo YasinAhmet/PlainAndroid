@@ -30,6 +30,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 
 sealed class Row
 class HeaderRow(val title: String, val sub: String?, val actions: List<Pair<String, () -> Unit>>, val accent: Int = 0) : Row()
@@ -310,6 +312,7 @@ class MainActivity : Activity() {
         val app = applicationContext
         Thread {
             Library.load(app)
+            runCatching { LinkedPlaylists.prepare?.invoke(app) }
             runOnUiThread {
                 loading = false
                 runCatching { LinkedPlaylists.sync(this, Library.index) } // downloaded YouTube / Spotify playlists
@@ -887,12 +890,10 @@ class MainActivity : Activity() {
         val cur = sortOf(kind, suffix)
         return tr("Sort: ${cur.label}", "Sırala: ${cur.label}") to {
             val opts = Sorting.options(kind)
-            android.app.AlertDialog.Builder(this, R.style.mus_Dialog).setTitle(tr("Sort by", "Sıralama"))
-                .setSingleChoiceItems(opts.map { it.label }.toTypedArray(), opts.indexOfFirst { it.id == cur.id }) { d, i ->
-                    d.dismiss()
-                    Store.prefs.edit().putString(kind.pref + suffix, opts[i].id).apply()
-                    render(resetScroll = true)
-                }.show()
+            Sheet.choose(this, tr("Sort by", "Sıralama"), opts.map { it.label }, opts.indexOfFirst { it.id == cur.id }, C.ACCENT) { i ->
+                Store.prefs.edit().putString(kind.pref + suffix, opts[i].id).apply()
+                render(resetScroll = true)
+            }
         }
     }
 
@@ -933,13 +934,20 @@ class MainActivity : Activity() {
 
     /** Long-press on an artist/album/genre/folder: play it without opening it, or erase it ([kind]: "album", "artist"...). */
     private fun groupMenu(g: Group, kind: String = "", strong: Boolean = false) {
-        menu(g.title, listOf(
-            tr("Play", "Oynat") to { Player.playList(g.songs.map { it.id }, 0) },
-            tr("Shuffle", "Karıştır") to { Player.shufflePlay(g.songs.map { it.id }) },
-            tr("Play next", "Sonra çal") to { Player.playNext(g.songs); toast(tr("Plays next", "Sonra çalacak")) },
-            tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(g.songs); toast(tr("Added ${g.songs.size} to queue", "${g.songs.size} şarkı sıraya eklendi")) },
-            tr("Add to playlist…", "Çalma listesine ekle…") to { addToPlaylist(g.songs) },
-        ) + (if (kind.isEmpty()) emptyList() else listOf(eraseItem(g.songs, kind, g.title, strong))))
+        val sub = listOfNotNull(g.artist.ifBlank { null }, g.stats).joinToString(" · ")
+        val sheet = Sheet(this, C.ACCENT).header(g.title, sub) { iv -> Art.intoAny(iv, ArtPick.album(g.songs).map { it.id }, dp(104)) { iv.setImageResource(R.drawable.mus_ic_note); iv.tint(C.FAINT); iv.scaleType = ImageView.ScaleType.CENTER } }
+            .actions(
+                Sheet.Action(Ic.PLAY, tr("Play", "Oynat")) { Player.playList(g.songs.map { it.id }, 0) },
+                Sheet.Action(Ic.SHUFFLE, tr("Shuffle", "Karıştır")) { Player.shufflePlay(g.songs.map { it.id }) },
+                Sheet.Action(Ic.PLAY_NEXT, tr("Play next", "Sonra çal")) { Player.playNext(g.songs); toast(tr("Plays next", "Sonra çalacak")) },
+                Sheet.Action(Ic.QUEUE, tr("Add to queue", "Sıraya ekle")) { Player.addToQueue(g.songs); toast(tr("Added ${g.songs.size} to queue", "${g.songs.size} şarkı sıraya eklendi")) },
+            )
+            .section(null)
+            .item(Ic.ADD_LIST, tr("Add to playlist…", "Çalma listesine ekle…"), more = true) { addToPlaylist(g.songs) }
+        if (kind.isNotEmpty()) eraseItem(g.songs, kind, g.title, strong).let { (label, fn) ->
+            sheet.item(Ic.DELETE, label, sub = tr("Moves the files to the trash", "Dosyaları çöp kutusuna taşır"), danger = true, fn = fn)
+        }
+        sheet.show()
     }
 
     /** "Erase album (12 songs)…" → confirmation with count and size → one trash request. */
@@ -1097,31 +1105,45 @@ class MainActivity : Activity() {
     }
 
     fun songMenu(s: Song, playlist: Playlist? = null, selectable: Boolean = false) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        if (selectable && selection == null && nowPlaying == null && overlays.isEmpty()) items += tr("Select", "Seç") to { startSelection(s) }
-        items += tr("Play next", "Sonra çal") to { Player.playNext(listOf(s)); toast(tr("Plays next", "Sonra çalacak")) }
-        items += tr("Add to queue", "Sıraya ekle") to { Player.addToQueue(listOf(s)); toast(tr("Added to queue", "Sıraya eklendi")) }
-        items += tr("Add to playlist…", "Çalma listesine ekle…") to { addToPlaylist(listOf(s)) }
-        if (playlist != null) items += tr("Remove from this playlist", "Bu listeden kaldır") to {
+        val shareable = s.externalUri == null && s.id >= 0 || s.externalUri?.startsWith("content://") == true
+        val sheet = Sheet(this, C.ACCENT).header(s.title, s.subtitle.ifBlank { null }) { iv -> songArt(iv, s) }
+            .actions(
+                Sheet.Action(Ic.PLAY_NEXT, tr("Play next", "Sonra çal")) { Player.playNext(listOf(s)); toast(tr("Plays next", "Sonra çalacak")) },
+                Sheet.Action(Ic.QUEUE, tr("Add to queue", "Sıraya ekle")) { Player.addToQueue(listOf(s)); toast(tr("Added to queue", "Sıraya eklendi")) },
+                Sheet.Action(Ic.ADD_LIST, tr("Add to playlist", "Listeye ekle")) { addToPlaylist(listOf(s)) },
+                if (shareable) Sheet.Action(Ic.SHARE, tr("Share", "Paylaş")) { shareFile(s) } else null,
+            )
+        val lib = Library.index
+        val album = lib.albumOf(s); val artist = lib.artistOf(s)
+        if (album != null || artist != null) {
+            sheet.section(tr("Go to", "Git"))
+            album?.let { a -> sheet.item(Ic.ALBUM, a.title, sub = tr("Album · ${Text.count(a.count, "song")}", "Albüm · ${Text.count(a.count, "song")}"), more = true) { closeNowPlaying(); openAlbum(a) } }
+            artist?.let { a -> sheet.item(Ic.ARTIST, a.title, sub = tr("Artist · ${Text.count(a.count, "song")}", "Sanatçı · ${Text.count(a.count, "song")}"), more = true) { closeNowPlaying(); openArtist(a) } }
+        }
+        sheet.section(tr("More", "Diğer"))
+        if (selectable && selection == null && nowPlaying == null && overlays.isEmpty())
+            sheet.item(Ic.SELECT, tr("Select", "Seç"), sub = tr("Pick several songs to play, add or erase together", "Birlikte çalmak, eklemek ya da silmek için birkaç şarkı seçin")) { startSelection(s) }
+        sheet.item(Ic.INFO, tr("Details", "Ayrıntılar"), sub = listOf(Text.time(s.durationMs), Text.bytes(s.size), s.path.substringAfterLast('.', "").uppercase()).filter { it.isNotEmpty() }.joinToString(" · ")) { songDetails(s) }
+        if (playlist != null) sheet.item(Ic.CLOSE, tr("Remove from “${playlist.name}”", "“${playlist.name}” listesinden kaldır"), sub = tr("The file stays", "Dosya kalır")) {
             val idx = playlist.entries.indexOfFirst { it.songId == s.id }
             if (idx >= 0) { playlist.entries.removeAt(idx); Store.savePlaylists(); render() }
         }
-        items += tr("Go to album", "Albüme git") to { closeNowPlaying(); Library.index.albumOf(s)?.let { openAlbum(it) } }
-        items += tr("Go to artist", "Sanatçıya git") to { closeNowPlaying(); Library.index.artistOf(s)?.let { openArtist(it) } }
-        if (s.externalUri == null && s.id >= 0 || s.externalUri?.startsWith("content://") == true)
-            items += (if (s.isVideo) tr("Share video…", "Videoyu paylaş…") else tr("Share file…", "Dosyayı paylaş…")) to { shareFile(s) }
-        items += tr("Details", "Ayrıntılar") to {
-            confirm(s.title, listOf(
-                tr("Artist: ", "Sanatçı: ") + (s.inferredArtist?.let { tr("$it (from the folder)", "$it (klasörden)") } ?: s.artist.ifBlank { "—" }),
-                tr("Album: ", "Albüm: ") + s.album.ifBlank { "—" }, tr("Genre: ", "Tür: ") + s.genre.ifBlank { "—" },
-                tr("Length: ", "Süre: ") + Text.time(s.durationMs), tr("Size: ", "Boyut: ") + Text.bytes(s.size), tr("File: ", "Dosya: ") + s.path,
-            ).let { if (s.isVideo) it + tr("Type: video (plays as audio unless “Video” is on in Now playing)", "Biçim: video (Şimdi çalınan ekranında “Video” açık değilse ses olarak çalar)") else it }
-                .let { if (s.cached) it + tr("Cached by Plain Youtube: it may remove this file later", "Plain Youtube önbelleğinde: bu dosyayı daha sonra kaldırabilir") else it }.joinToString("\n"), tr("OK", "Tamam")) {}
-        }
-        if (s.externalUri == null && s.id >= 0) items += (if (s.isVideo) tr("Erase video…", "Videoyu sil…") else tr("Erase…", "Sil…")) to {
+        if (s.externalUri == null && s.id >= 0) sheet.item(Ic.DELETE, if (s.isVideo) tr("Erase video…", "Videoyu sil…") else tr("Erase file…", "Dosyayı sil…"),
+            sub = tr("Moves it to the trash", "Çöp kutusuna taşır"), danger = true) {
             eraser.confirm(EraseSet.of(listOf(s)), if (s.isVideo) tr("video “${s.title}”", "video “${s.title}”") else "“${s.title}”")
         }
-        menu(s.title, items)
+        sheet.show()
+    }
+
+    private fun songArt(iv: ImageView, s: Song) = Art.into(iv, s.id, dp(104)) { iv.setImageResource(R.drawable.mus_ic_note); iv.tint(C.FAINT); iv.scaleType = ImageView.ScaleType.CENTER }
+
+    private fun songDetails(s: Song) {
+        confirm(s.title, listOf(
+            tr("Artist: ", "Sanatçı: ") + (s.inferredArtist?.let { tr("$it (from the folder)", "$it (klasörden)") } ?: s.artist.ifBlank { "—" }),
+            tr("Album: ", "Albüm: ") + s.album.ifBlank { "—" }, tr("Genre: ", "Tür: ") + s.genre.ifBlank { "—" },
+            tr("Length: ", "Süre: ") + Text.time(s.durationMs), tr("Size: ", "Boyut: ") + Text.bytes(s.size), tr("File: ", "Dosya: ") + s.path,
+        ).let { if (s.isVideo) it + tr("Type: video (plays as audio unless “Video” is on in Now playing)", "Biçim: video (Şimdi çalınan ekranında “Video” açık değilse ses olarak çalar)") else it }
+            .let { if (s.cached) it + tr("Cached by Plain Youtube: it may remove this file later", "Plain Youtube önbelleğinde: bu dosyayı daha sonra kaldırabilir") else it }.joinToString("\n"), tr("OK", "Tamam")) {}
     }
 
     /**
@@ -1143,11 +1165,19 @@ class MainActivity : Activity() {
     }
 
     fun addToPlaylist(songs: List<Song>) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items += tr("＋ New playlist…", "＋ Yeni çalma listesi…") to { newPlaylist(songs) }
-        for (p in Store.playlists) items += p.name to { Store.addToPlaylist(p, songs); toast(tr("Added to ${p.name}", "Eklendi: ${p.name}")); render() }
-        val what = if (songs.size == 1) "“${songs[0].title}”" else tr("${songs.size} songs", "${songs.size} şarkı")
-        menu(tr("Add $what to", "Ekle: $what"), items)
+        val what = if (songs.size == 1) songs[0].title else tr("${songs.size} songs", "${songs.size} şarkı")
+        val sheet = Sheet(this, C.ACCENT).header(tr("Add to playlist", "Çalma listesine ekle"), what)
+            .item(Ic.ADD, tr("New playlist…", "Yeni çalma listesi…")) { newPlaylist(songs) }
+        if (Store.playlists.isNotEmpty()) sheet.section(tr("Your playlists", "Listeleriniz"))
+        for (p in Store.playlists) {
+            val ids = p.entries.mapTo(HashSet()) { it.songId }
+            val all = songs.all { it.id in ids }
+            sheet.item(Ic.QUEUE, p.name, sub = Text.count(p.entries.size, "song"), value = if (all) tr("Added", "Ekli") else null) {
+                if (all) toast(tr("Already in ${p.name}", "Zaten ${p.name} içinde"))
+                else { Store.addToPlaylist(p, songs.filter { it.id !in ids }); toast(tr("Added to ${p.name}", "Eklendi: ${p.name}")); render() }
+            }
+        }
+        sheet.show()
     }
 
     private fun newPlaylist(songs: List<Song>?) {
@@ -1159,57 +1189,78 @@ class MainActivity : Activity() {
     }
 
     private fun playlistMenu(p: Playlist) {
-        menu(p.name, listOf(
-            tr("Rename", "Yeniden adlandır") to { askText(tr("Rename playlist", "Listeyi yeniden adlandır"), p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill[drill.size - 1] = Drill(it, drill.last().rows); render() } },
-            tr("Edit order / remove songs", "Sırayı düzenle / şarkı kaldır") to { if (drill.isEmpty()) openPlaylist(p); editPlaylist = p; render() },
-            tr("Erase songs in playlist (files)…", "Listedeki şarkıları sil (dosyalar)…") to {
-                val lib = Library.index
-                eraser.confirm(EraseSet.of(p, lib.byId, lib.byPath), tr("the songs in playlist “${p.name}” (the playlist stays)", "“${p.name}” listesindeki şarkılar (liste kalır)"), strong = true)
-            },
-            tr("Delete playlist (keeps songs)", "Listeyi sil (şarkılar kalır)") to {
+        val lib = Library.index
+        val songs = p.resolve(lib.byId, lib.byPath)
+        val source = when {
+            p.source?.startsWith("spotify:") == true -> tr("From Spotify, filled as songs download", "Spotify'dan, şarkılar indikçe dolar")
+            p.source?.startsWith("yt:") == true -> tr("From a YouTube playlist, filled as songs download", "YouTube listesinden, şarkılar indikçe dolar")
+            p.source?.startsWith("list:") == true -> tr("From a Youtube-tab list, filled as songs download", "Youtube sekmesindeki listeden, şarkılar indikçe dolar")
+            else -> null
+        }
+        Sheet(this, C.ACCENT).header(p.name, listOfNotNull(Text.count(songs.size, "song") + " · " + Text.longTime(songs.sumOf { it.durationMs }), source).joinToString("\n")) { iv ->
+            Art.intoAny(iv, songs.take(8).map { it.id }, dp(104)) { iv.setImageResource(R.drawable.mus_ic_note); iv.tint(C.FAINT); iv.scaleType = ImageView.ScaleType.CENTER }
+        }
+            .actions(
+                Sheet.Action(Ic.PLAY, tr("Play", "Oynat")) { Player.playList(songs.map { it.id }, 0) },
+                Sheet.Action(Ic.SHUFFLE, tr("Shuffle", "Karıştır")) { Player.shufflePlay(songs.map { it.id }) },
+                Sheet.Action(Ic.QUEUE, tr("Add to queue", "Sıraya ekle")) { Player.addToQueue(songs); toast(tr("Added ${songs.size} to queue", "${songs.size} şarkı sıraya eklendi")) },
+            )
+            .section(tr("Playlist", "Liste"))
+            .item(Ic.EDIT, tr("Rename", "Yeniden adlandır")) { askText(tr("Rename playlist", "Listeyi yeniden adlandır"), p.name) { p.name = it; Store.savePlaylists(); if (drill.isNotEmpty()) drill[drill.size - 1] = Drill(it, drill.last().rows); render() } }
+            .item(Ic.SORT, tr("Reorder or remove songs", "Şarkıları sırala ya da kaldır"), sub = tr("Drag to reorder, ✕ to remove", "Sıralamak için sürükleyin, kaldırmak için ✕")) { if (drill.isEmpty()) openPlaylist(p); editPlaylist = p; render() }
+            .item(Ic.CLOSE, tr("Delete playlist", "Listeyi sil"), sub = tr("Only the list; the songs stay", "Yalnızca liste; şarkılar kalır")) {
                 confirm(tr("Delete “${p.name}”?", "“${p.name}” silinsin mi?"), tr("Only the playlist is deleted, not the songs.", "Yalnızca liste silinir, şarkılar silinmez."), tr("Delete", "Sil")) {
                     Store.playlists.remove(p); Store.savePlaylists()
                     LinkedPlaylists.forget(this, p)
                     Store.prefs.edit().remove(Sorting.Kind.PLAYLIST.pref + p.id).apply()
                     if (drill.isNotEmpty()) popDrill() else render()
                 }
-            },
-        ))
+            }
+            .item(Ic.DELETE, tr("Erase its songs…", "Şarkılarını sil…"), sub = tr("Moves the song files to the trash; the list stays", "Şarkı dosyalarını çöpe taşır; liste kalır"), danger = true) {
+                eraser.confirm(EraseSet.of(p, lib.byId, lib.byPath), tr("the songs in playlist “${p.name}” (the playlist stays)", "“${p.name}” listesindeki şarkılar (liste kalır)"), strong = true)
+            }
+            .show()
     }
 
     private fun mainMenu() {
-        menu(null, listOf(
-            tr("Organize library…", "Kitaplığı düzenle…") to { openOrganizer() },
-            tr("Trash", "Çöp kutusu") to { openTrash() },
-            tr("Sleep timer", "Uyku zamanlayıcısı") to { sleepMenu() },
-            tr("Playback speed: ", "Oynatma hızı: ") + Speeds.label(Player.speed) to { speedMenu() },
-        ) + (if (pipSupported) listOf(
-            (if (pipAuto) tr("Picture-in-picture on Home: on", "Ana ekranda pencere içinde pencere: açık")
-            else tr("Picture-in-picture on Home: off", "Ana ekranda pencere içinde pencere: kapalı")) to {
-                Store.prefs.edit().putBoolean("pip_auto", !pipAuto).apply()
-                updatePip()
-                toast(if (pipAuto) tr("A playing video goes into a small window when you leave the app", "Uygulamadan çıkınca oynayan video küçük pencerede devam eder")
-                else tr("Videos play as audio when you leave the app", "Uygulamadan çıkınca videolar ses olarak devam eder"))
-            },
-        ) else emptyList()) + listOf(
-            tr("Rescan music", "Müziği yeniden tara") to { loadLibrary(); toast(tr("Rescanning…", "Yeniden taranıyor…")) },
-            tr("Clear listening history", "Dinleme geçmişini temizle") to {
-                confirm(tr("Clear listening history?", "Dinleme geçmişi temizlensin mi?"),
-                    tr("Recently listened and Most played start over. Songs and playlists stay.", "Son dinlenenler ve En çok çalınanlar sıfırlanır. Şarkılar ve çalma listeleri kalır."),
-                    tr("Clear", "Temizle")) { Store.clearHistory(); render() }
-            },
-        ) + (if (Build.VERSION.SDK_INT >= 31 && !Eraser.canManage(this)) listOf(
-            tr("Media management (erase without asking)…", "Medya yönetimi (sormadan sil)…") to { runCatching { startActivity(Eraser.manageMediaIntent(this)) }; Unit },
-        ) else emptyList()) + (if (Build.VERSION.SDK_INT >= 33 && Library.hasPermission(this) && !Library.hasVideoPermission(this)) listOf(
-            tr("Show Plain Youtube videos…", "Plain Youtube videolarını göster…") to { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) },
-        ) else emptyList()) + listOf(
-            tr("About", "Hakkında") to {
-                confirm("LocalMusic", tr("Plays only music files stored on this phone.\n\nNo internet permission: the app cannot go online.\nNo background polling: it only works while music plays or while you look at it.\n\n${Library.index.songs.size} songs in the library.",
-                    "Yalnızca bu telefonda kayıtlı müzik dosyalarını çalar.\n\nİnternet izni yok: uygulama çevrimiçi olamaz.\nArka planda yoklama yok: yalnızca müzik çalarken ya da siz ona bakarken çalışır.\n\nKitaplıkta ${Library.index.songs.size} şarkı var."), tr("OK", "Tamam")) {}
-            },
-            PlainLang.label() to { PlainLang.choose(this, menuBtn) { onLanguageChanged() } },
-            PlainUpdate.label(this) to { PlainUpdate.check(this) },
-        ))
+        val lib = Library.index
+        val sheet = Sheet(this, C.ACCENT).header(tr("Music", "Müzik"),
+            tr("${Text.count(lib.songs.size, "song")} on this phone · no internet", "Bu telefonda ${Text.count(lib.songs.size, "song")} · internet yok"))
+        sheet.section(tr("Playback", "Çalma"))
+            .item(Ic.SLEEP, tr("Sleep timer", "Uyku zamanlayıcısı"), value = sleepValue(), more = true) { sleepMenu() }
+            .item(Ic.SPEED, tr("Playback speed", "Oynatma hızı"), value = Speeds.label(Player.speed), more = true) { speedMenu() }
+        if (pipSupported) sheet.toggle(Ic.PIP, tr("Picture-in-picture on Home", "Ana ekranda küçük pencere"), pipAuto,
+            sub = tr("A playing video goes into a small window when you leave the app", "Uygulamadan çıkınca oynayan video küçük pencerede sürer")) { on ->
+            Store.prefs.edit().putBoolean("pip_auto", on).apply()
+            updatePip()
+        }
+        sheet.section(tr("Library", "Kitaplık"))
+            .item(Ic.REFRESH, tr("Rescan music", "Müziği yeniden tara"), sub = tr("New files usually show up by themselves", "Yeni dosyalar genelde kendiliğinden görünür")) { loadLibrary(); toast(tr("Rescanning…", "Yeniden taranıyor…")) }
+            .item(Ic.FOLDER, tr("Organize library", "Kitaplığı düzenle"), sub = tr("Tidy folders and find duplicates; nothing moves until you confirm", "Klasörleri toparla, kopyaları bul; onaylayana dek hiçbir şey taşınmaz"), more = true) { openOrganizer() }
+            .item(Ic.RESTORE, tr("Trash", "Çöp kutusu"), sub = tr("Erased songs, restorable for about 30 days", "Silinen şarkılar, yaklaşık 30 gün geri yüklenebilir"), more = true) { openTrash() }
+        if (Build.VERSION.SDK_INT >= 33 && Library.hasPermission(this) && !Library.hasVideoPermission(this))
+            sheet.item(Ic.VIDEO, tr("Show Plain Youtube videos", "Plain Youtube videolarını göster"), sub = tr("Needs the Videos permission", "Videolar izni gerekir")) { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) }
+        if (Build.VERSION.SDK_INT >= 31 && !Eraser.canManage(this))
+            sheet.item(Ic.SHIELD, tr("Erase without asking each time", "Her seferinde sormadan sil"), sub = tr("Android's “Media management” permission", "Android'in “Medya yönetimi” izni"), more = true) { runCatching { startActivity(Eraser.manageMediaIntent(this)) }; Unit }
+        sheet.item(Ic.HISTORY, tr("Clear listening history", "Dinleme geçmişini temizle"), sub = tr("Recently listened and Most played start over", "Son dinlenenler ve En çok çalınanlar sıfırlanır"), danger = true) {
+            confirm(tr("Clear listening history?", "Dinleme geçmişi temizlensin mi?"),
+                tr("Recently listened and Most played start over. Songs and playlists stay.", "Son dinlenenler ve En çok çalınanlar sıfırlanır. Şarkılar ve çalma listeleri kalır."),
+                tr("Clear", "Temizle")) { Store.clearHistory(); render() }
+        }
+        sheet.section(tr("App", "Uygulama"))
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, C.ACCENT) { onLanguageChanged() } }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
+            .item(Ic.INFO, tr("About", "Hakkında")) {
+                confirm("Plain Media · " + tr("Music", "Müzik"), tr("Plays only music files stored on this phone.\n\nNo internet permission: the app cannot go online.\nNo background polling: it only works while music plays or while you look at it.\n\n${lib.songs.size} songs in the library.",
+                    "Yalnızca bu telefonda kayıtlı müzik dosyalarını çalar.\n\nİnternet izni yok: uygulama çevrimiçi olamaz.\nArka planda yoklama yok: yalnızca müzik çalarken ya da siz ona bakarken çalışır.\n\nKitaplıkta ${lib.songs.size} şarkı var."), tr("OK", "Tamam")) {}
+            }
+        sheet.show()
+    }
+
+    private fun sleepValue(): String = when {
+        Player.sleepAt > 0 -> tr("${Text.time(Player.sleepAt - android.os.SystemClock.elapsedRealtime())} left", "${Text.time(Player.sleepAt - android.os.SystemClock.elapsedRealtime())} kaldı")
+        Player.sleepEndOfSong -> tr("End of song", "Şarkı sonu")
+        else -> tr("Off", "Kapalı")
     }
 
     /**
@@ -1224,16 +1275,13 @@ class MainActivity : Activity() {
     }
 
     fun sleepMenu() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        if (Player.sleepAt > 0 || Player.sleepEndOfSong) items += tr("Turn off timer", "Zamanlayıcıyı kapat") to { Player.setSleepMinutes(0); toast(tr("Sleep timer off", "Uyku zamanlayıcısı kapalı")) }
-        for (m in listOf(15, 30, 45, 60, 90)) items += tr("$m minutes", "$m dakika") to { Player.setSleepMinutes(m); toast(tr("Pausing in $m min", "$m dk sonra duraklar")) }
-        items += tr("End of this song", "Bu şarkının sonunda") to { Player.setSleepEndOfSong(); toast(tr("Pausing after this song", "Bu şarkıdan sonra duraklar")) }
-        val title = when {
-            Player.sleepAt > 0 -> Text.time(Player.sleepAt - android.os.SystemClock.elapsedRealtime()).let { tr("Sleep timer: $it left", "Uyku zamanlayıcısı: $it kaldı") }
-            Player.sleepEndOfSong -> tr("Sleep timer: end of song", "Uyku zamanlayıcısı: şarkı sonu")
-            else -> tr("Sleep timer", "Uyku zamanlayıcısı")
-        }
-        menu(title, items)
+        val on = Player.sleepAt > 0 || Player.sleepEndOfSong
+        val sheet = Sheet(this, C.ACCENT).header(tr("Sleep timer", "Uyku zamanlayıcısı"),
+            if (on) tr("Pauses: ", "Duraklama: ") + sleepValue() else tr("Pause the music after a while", "Müziği bir süre sonra duraklat"))
+        sheet.choice(tr("Off", "Kapalı"), !on) { Player.setSleepMinutes(0); toast(tr("Sleep timer off", "Uyku zamanlayıcısı kapalı")) }
+        for (m in listOf(15, 30, 45, 60, 90)) sheet.choice(tr("$m minutes", "$m dakika"), false) { Player.setSleepMinutes(m); toast(tr("Pausing in $m min", "$m dk sonra duraklar")) }
+        sheet.choice(tr("End of this song", "Bu şarkının sonunda"), Player.sleepEndOfSong) { Player.setSleepEndOfSong(); toast(tr("Pausing after this song", "Bu şarkıdan sonra duraklar")) }
+        sheet.show()
     }
 
     // --- overlays ----------------------------------------------------------------------------
@@ -1259,9 +1307,9 @@ class MainActivity : Activity() {
     // --- playback speed ------------------------------------------------------------------------
 
     fun speedMenu() {
-        menu(tr("Playback speed", "Oynatma hızı"), Speeds.ALL.map { sp ->
-            (if (sp == Player.speed) "✓ " else "    ") + Speeds.label(sp) + (if (sp == 1f) tr("  (normal)", "  (normal)") else "") to { Player.setSpeed(sp) }
-        })
+        val sheet = Sheet(this, C.ACCENT).header(tr("Playback speed", "Oynatma hızı"), tr("Pitch stays the same", "Ses perdesi değişmez"))
+        for (sp in Speeds.ALL) sheet.choice(Speeds.label(sp) + if (sp == 1f) tr("  ·  normal", "  ·  normal") else "", sp == Player.speed) { Player.setSpeed(sp) }
+        sheet.show()
     }
 
     // --- picture-in-picture (videos with the picture on screen) ----------------------------------

@@ -80,3 +80,13 @@ public playlists, pick which to convert, and each song is matched on YouTube Mus
     adds finished downloads to the playlist with the same `source`, in the source playlist's order.
   - The playlist appears once the first song is downloaded and grows as more finish.
   - Songs you remove or reorder stay that way (`got`). Deleting the playlist in the Music tab drops its link.
+
+## 3.6 (vc 31, installed on the phone, not published yet)
+
+- Fix: playlists downloaded before 3.5 had no link, so they never reached the Music tab. A one-time catch-up
+  (`PlaylistLinks.backfillOnce`) now runs on the Music tab's first library load. The app wires it in as
+  `LinkedPlaylists.prepare`.
+  - It links every Spotify playlist and every List in the Youtube tab where at least 2 songs, and at least half the
+    list, are already saved.
+  - Pref `playlist_links/backfill1` makes it run only once.
+- "Download all" on a List in the Youtube tab now creates a Music playlist too (`list:<id>`).

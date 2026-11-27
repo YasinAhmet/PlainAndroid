@@ -19,6 +19,9 @@ class MediaApp : Application() {
             Tab("youtube", "Youtube", "Youtube", "app.plain.download.MainActivity"),
         ))
         YoutubeApp.init(this)
+        // Downloaded YouTube / Spotify playlists and Lists become Music playlists (3.5): the lists saved before that get
+        // their links once, when the Music tab first loads its library.
+        app.localmusic.LinkedPlaylists.prepare = { ctx -> app.plain.download.PlaylistLinks.backfillOnce(ctx) }
         // The music player restores its queue at start; with old Plain Music data still to copy, it starts later
         // (MainActivity / PlaybackService call Player.init themselves), so it never reads an empty state first.
         if (!Migrate.needsDecision(this, Hub.tab("music")!!)) Player.init(this)

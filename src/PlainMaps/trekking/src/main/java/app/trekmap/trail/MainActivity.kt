@@ -22,6 +22,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import kotlin.concurrent.thread
 
 /**
@@ -393,54 +395,40 @@ class MainActivity : Activity() {
 
     /** Settings: the three toggles. [onApplied] runs after any change so screens can react immediately. */
     fun showSettings(onApplied: () -> Unit) {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(6), dp(20), 0) }
-        fun option(key: String, def: Boolean, title: String, desc: String) {
-            val cb = android.widget.CheckBox(this).apply {
-                text = title; textSize = 15f; isChecked = prefs.getBoolean(key, def)
-                setOnCheckedChangeListener { _, v ->
-                    prefs.edit().putBoolean(key, v).apply()
-                    Dev.event("settings", "$key=$v")
-                    onApplied()
+        fun option(sheet: Sheet, icon: Int, key: String, def: Boolean, title: String, desc: String) =
+            sheet.toggle(icon, title, prefs.getBoolean(key, def), sub = desc) { v ->
+                prefs.edit().putBoolean(key, v).apply()
+                Dev.event("settings", "$key=$v")
+                onApplied()
+            }
+        val s = Sheet(this, C.TRACK).header(tr("Settings", "Ayarlar"), tr("Trail recording and the map", "Rota kaydı ve harita"))
+        s.section(tr("Map", "Harita"))
+        option(s, Ic.ROUTE, "snap", true, tr("Snap planned trails to paths", "Planlanan rotaları patikalara oturt"),
+            tr("Each tap of a plan follows OpenStreetMap footpaths and tracks (the dashed paths). Needs Wi-Fi; off = straight lines.",
+                "Plandaki her dokunuş OpenStreetMap patika ve yollarını izler (kesikli yollar). Wi-Fi gerekir; kapalıysa düz çizgi."))
+        option(s, Ic.EYE_OFF, "dim", false, tr("Dim map", "Haritayı karart"),
+            tr("Darker map, bright track, plan and position. Darker pixels use less power on AMOLED.",
+                "Koyu harita; iz, plan ve konum parlak kalır. AMOLED'de koyu pikseller daha az güç harcar."))
+        option(s, Ic.LAYERS, "land", true, tr("Show private land", "Özel araziyi göster"),
+            tr("On maps with the private-land layer: fields & orchards (amber), houses & yards (red), military zones (hatched). A guide, not the land registry.",
+                "Özel arazi katmanlı haritalarda: tarla ve bahçeler (turuncu), evler ve avlular (kırmızı), askeri bölgeler (taralı). Tapu kaydı değil, bir rehber."))
+        option(s, Ic.INFO, "stats", false, tr("Statistics overlay", "İstatistik katmanı"),
+            tr("GPS accuracy, satellites, heading, speed and how detailed the map is where you are.",
+                "GPS doğruluğu, uydular, yön, hız ve bulunduğunuz yerde haritanın ayrıntısı."))
+        s.section(tr("Recording", "Kayıt"))
+        option(s, Ic.BATTERY, "longHike", false, tr("Long hike mode", "Uzun yürüyüş modu"),
+            tr("In your pocket GPS takes a fix every 5 s instead of 2 s and hands them over every 2 minutes, so the phone sleeps more. Still a point every ~7 m.",
+                "Cepteyken GPS 2 sn yerine 5 sn'de bir konum alır ve 2 dakikada bir iletir; telefon daha çok uyur. Yine ~7 m'de bir nokta."))
+        s.section(tr("App", "Uygulama"))
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) {
+                // a change rebuilds the screens in place (never touches a recording)
+                Sheet.language(this, C.TRACK) {
+                    Dev.event("settings", "language=${PlainLang.choice}")
+                    languageChanged()
                 }
             }
-            box.addView(cb)
-            box.addView(text(desc, 12f, C.DIM).apply { setPadding(dp(32), 0, 0, dp(10)) })
-        }
-        option("snap", true, tr("Snap planned trails to paths", "Planlanan rotaları patikalara oturt"),
-            tr("While drawing a plan, each tap is routed along OpenStreetMap footpaths and tracks — the dashed paths on the topo map. Needs Wi-Fi; off = straight lines.",
-                "Plan çizerken her dokunuş OpenStreetMap patika ve yollarını izler (topo haritadaki kesikli yollar). Wi-Fi gerekir; kapalıysa düz çizgi."))
-        option("longHike", false, tr("Long hike mode", "Uzun yürüyüş modu"),
-            tr("In your pocket GPS takes a fix every 5 s instead of 2 s and hands them over every 2 minutes, so the GPS chip and phone sleep more. Tracks stay detailed: a point every ~7 m at walking pace.",
-                "Cepteyken GPS 2 sn yerine 5 sn'de bir konum alır ve bunları 2 dakikada bir iletir; böylece GPS yongası ve telefon daha çok uyur. İz yine ayrıntılı kalır: yürüme hızında ~7 m'de bir nokta."))
-        option("dim", false, tr("Dim map", "Haritayı karart"),
-            tr("Darkens the map but keeps your track, plan and position bright. Your screen is AMOLED, so darker pixels use less power.",
-                "Haritayı karartır ama izinizi, planınızı ve konumunuzu parlak tutar. Ekranınız AMOLED; koyu pikseller daha az güç harcar."))
-        option("land", true, tr("Show private land", "Özel araziyi göster"),
-            tr("Colours land you'd better not cross on maps downloaded with the private-land layer: fields & orchards (amber), " +
-                "houses & yards (red), military zones (hatched). From OpenStreetMap and ESA satellite land cover — a guide, not the land registry.",
-                "Özel arazi katmanıyla indirilen haritalarda girmemeniz gereken yerleri boyar: tarla ve bahçeler (turuncu), " +
-                "evler ve avlular (kırmızı), askeri bölgeler (taralı). OpenStreetMap ve ESA uydu arazi örtüsünden — tapu kaydı değil, yalnızca bir rehber."))
-        option("stats", false, tr("Statistics overlay", "İstatistik katmanı"),
-            tr("Thin text on the map: GPS accuracy, satellites, the direction you face, speed, and how detailed the map really is where you are.",
-                "Harita üzerinde ince yazı: GPS doğruluğu, uydular, baktığınız yön, hız ve bulunduğunuz yerde haritanın gerçek ayrıntısı."))
-        // language: a dropdown under this row; a change rebuilds the screens (never touches a recording)
-        val lang = text(PlainLang.label(), 15f).apply {
-            setPadding(dp(4), dp(12), dp(4), dp(12))
-            background = ripple(roundRect(0x00000000, dpf(6)))
-        }
-        box.addView(lang, lpL(MATCH, WRAP))
-        val d = AlertDialog.Builder(this).setTitle(tr("Settings", "Ayarlar"))
-            .setView(android.widget.ScrollView(this).apply { addView(box) })
-            .setPositiveButton(tr("Done", "Bitti"), null)
-            .setNeutralButton(PlainUpdate.label(this)) { _, _ -> PlainUpdate.check(this) }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .show()
-        lang.setOnClickListener {
-            PlainLang.choose(this, lang) {
-                Dev.event("settings", "language=${PlainLang.choice}")
-                d.dismiss()
-                languageChanged()
-            }
-        }
     }
 
     /**

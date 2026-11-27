@@ -76,6 +76,8 @@ import android.widget.Toast
 import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import app.plain.update.PlainUpdate
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -1673,7 +1675,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 })
                 // language: a dropdown under the row; the activity is recreated and comes back to this panel
                 lateinit var langRow: View
-                langRow = optionRow("", listOf(PlainLang.label()), { false }) { if (!recording) PlainLang.choose(this, langRow) }
+                langRow = optionRow("", listOf(PlainLang.label()), { false }) { if (!recording) Sheet.language(this, ACCENT) }
                 add(langRow)
                 add(optionRow("", listOf(PlainUpdate.label(this)), { false }) { PlainUpdate.check(this) })
             }
@@ -1764,15 +1766,18 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     /** Hold a profile: rename or delete it. */
     private fun profileOptions(name: String) {
-        AlertDialog.Builder(this).setTitle(name)
-            .setItems(arrayOf(tr("Rename", "Yeniden adlandır"), tr("Delete", "Sil"))) { _, w ->
-                if (w == 0) askName(tr("Rename profile", "Profili yeniden adlandır"), name) { n ->
+        Sheet(this, ACCENT).header(name, tr("Camera profile", "Kamera profili"))
+            .item(Ic.EDIT, tr("Rename", "Yeniden adlandır")) {
+                askName(tr("Rename profile", "Profili yeniden adlandır"), name) { n ->
                     val l = Profiles.rename(profiles, name, n) ?: run { toast(tr("There is already a profile called “$n”.", "“$n” adında bir profil zaten var.")); return@askName }
                     profiles = l
                     if (activeProfile.equals(name, ignoreCase = true)) activeProfile = n
                     saveProfiles()
                     showPanel("Profiles")
-                } else AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
+                }
+            }
+            .item(Ic.DELETE, tr("Delete", "Sil"), sub = tr("Only the profile; the current settings stay", "Yalnızca profil; geçerli ayarlar kalır"), danger = true) {
+                AlertDialog.Builder(this).setTitle(tr("Delete “$name”?", "“$name” silinsin mi?"))
                     .setMessage(tr("Only the profile goes; the current settings stay as they are.", "Yalnızca profil silinir; geçerli ayarlar olduğu gibi kalır."))
                     .setPositiveButton(tr("Delete", "Sil")) { _, _ ->
                         profiles = Profiles.remove(profiles, name)

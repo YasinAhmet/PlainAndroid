@@ -14,4 +14,19 @@ class PlaylistLinksTest {
         assertEquals(l, PlaylistLinks.decode(PlaylistLinks.encode(l)))
         assertEquals(emptyList<PlaylistLinks.Link>(), PlaylistLinks.decode("not json"))
     }
+
+    @Test fun backfillTakesListsThatAreMostlySaved() {
+        val existing = PlaylistLinks.upsert(emptyList(), "spotify:old", "Old", listOf("x", "y"), 1)
+        val saved = setOf("a", "b", "c", "x", "y", "q")
+        val out = PlaylistLinks.backfill(existing, listOf(
+            Triple("spotify:old", "Old again", listOf("a", "b")), // linked already: untouched
+            Triple("spotify:full", "Full", listOf("a", "b", "c")),
+            Triple("spotify:half", "Half", listOf("a", "b", "m", "n")),
+            Triple("spotify:few", "Few", listOf("a", "m", "n", "o")), // 1 of 4: not a downloaded list
+            Triple("list:one", "One", listOf("q")), // a single saved song is not enough
+        ), { it in saved }, 9)
+        assertEquals(listOf("spotify:old", "spotify:full", "spotify:half"), out.map { it.key })
+        assertEquals("Old", out[0].name)
+        assertEquals(listOf("a", "b", "m", "n"), out[2].ids) // the whole list, so later downloads join in order
+    }
 }

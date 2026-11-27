@@ -100,7 +100,9 @@ fun Context.askText(title: String, initial: String, ok: String = tr("Save", "Kay
     et.requestFocus()
 }
 
+/** Any remaining list menu: a bottom sheet (app.plain.ui.Sheet) like the app's other menus. */
 fun Context.menu(title: String?, items: List<Pair<String, () -> Unit>>) {
+    if (this is android.app.Activity) { app.plain.ui.Sheet.list(this, title, items, C.ACCENT); return }
     val b = AlertDialog.Builder(this)
     if (title != null) b.setTitle(title)
     b.setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()

@@ -22,6 +22,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.util.concurrent.Executors
 
 /**
@@ -222,15 +224,14 @@ class SetupActivity : Activity(), Installer.Listener {
     private fun showOlder(o: Offer) {
         val olds = rollbackChoices(o)
         if (olds.isEmpty()) { say(tr("No older version of ${o.entry.name} to go back to.", "${o.entry.name} için dönülecek eski sürüm yok.")); return }
-        val labels = olds.map {
-            it.entry.versionName + if (it.source == Source.LOCAL) tr("  ·  your previous version (saved on this phone)", "  ·  önceki sürümünüz (bu telefonda kayıtlı)")
-            else Catalog.sizeText(it.entry.size).let { z -> if (z.isEmpty()) tr("  ·  download", "  ·  indir") else tr("  ·  download $z", "  ·  indir $z") }
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle(tr("${o.entry.name}: go back to", "${o.entry.name}: şu sürüme dön"))
-            .setItems(labels) { _, i -> confirmRollback(o, olds[i].entry, olds[i].source) }
-            .setNegativeButton(tr("Cancel", "İptal"), null)
-            .show()
+        val sheet = Sheet(this, C.ACCENT).header(tr("${o.entry.name}: go back to", "${o.entry.name}: şu sürüme dön"),
+            tr("Going back uninstalls the current version first: its data is lost.", "Geri dönmek önce geçerli sürümü kaldırır: verileri silinir."))
+        for (it in olds) {
+            val sub = if (it.source == Source.LOCAL) tr("Your previous version, saved on this phone", "Önceki sürümünüz, bu telefonda kayıtlı")
+            else Catalog.sizeText(it.entry.size).let { z -> if (z.isEmpty()) tr("Download", "İndir") else tr("Download $z", "İndir: $z") }
+            sheet.item(if (it.source == Source.LOCAL) Ic.RESTORE else Ic.DOWNLOAD, it.entry.versionName, sub = sub, more = true) { confirmRollback(o, it.entry, it.source) }
+        }
+        sheet.show()
     }
 
     private fun confirmRollback(o: Offer, old: Entry, src: Source) {
@@ -335,7 +336,7 @@ class SetupActivity : Activity(), Installer.Listener {
             setPadding(dp(12), dp(6), dp(12), dp(6))
             background = outline(0xFF3A3A3A.toInt(), 16)
         }
-        langBtn.setOnClickListener { PlainLang.choose(this, langBtn) }
+        langBtn.setOnClickListener { Sheet.language(this, C.ACCENT) }
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

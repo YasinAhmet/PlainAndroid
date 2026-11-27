@@ -23,6 +23,8 @@ import android.widget.TextView
 import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.util.concurrent.Executors
 import app.plain.lang.tr
 
@@ -466,46 +468,55 @@ class MainActivity : Activity() {
     }
 
     private fun mainMenu() {
-        menu(null, listOf(
-            (if (Store.wifiOnly) tr("✓ Wi-Fi only", "✓ Yalnızca Wi-Fi") else tr("   Wi-Fi only (off: mobile data allowed)", "   Yalnızca Wi-Fi (kapalı: mobil veri serbest)")) to {
-                Store.wifiOnly = !Store.wifiOnly
-                toast(if (Store.wifiOnly) tr("Downloads use Wi-Fi only", "İndirmeler yalnızca Wi-Fi kullanır") else tr("Mobile data allowed", "Mobil veri serbest"))
-            },
-            tr("Play queue (${Store.queue().items.size})", "Çalma sırası (${Store.queue().items.size})") to { if (Store.queue().items.isEmpty()) toast(tr("The play queue is empty", "Çalma sırası boş")) else PlayerActivity.queue(this) },
-            tr("Account: ", "Hesap: ") + (if (!Account.hasAccount) tr("not signed in", "oturum açılmadı") else if (Account.expired) tr("expired", "süresi doldu") else tr("signed in", "oturum açık")) + "…" to { account.show() },
-            tr("Import YouTube subscriptions…", "YouTube aboneliklerini içe aktar…") to { selectTab(1); search.importDialog() },
-            (if (Store.originalAudio) tr("✓ Audio: original format (no conversion)", "✓ Ses: orijinal biçim (dönüştürme yok)") else tr("   Audio: convert to clean M4A", "   Ses: temiz M4A'ya dönüştür")) to {
-                Store.originalAudio = !Store.originalAudio
-                toast(if (Store.originalAudio) tr("Audio is saved as YouTube's original .m4a (no conversion)", "Ses, YouTube'un orijinal .m4a dosyası olarak kaydedilir (dönüştürme yok)") else tr("Audio is converted to a clean .m4a", "Ses temiz bir .m4a dosyasına dönüştürülür"))
-                refreshNote()
-            },
-            tr("Parallel audio downloads: ${Store.parallelAudio}…", "Paralel ses indirme: ${Store.parallelAudio}…") to {
-                menu(tr("Parallel audio downloads (bulk music)", "Paralel ses indirme (toplu müzik)"), (1..4).map { n -> (if (n == Store.parallelAudio) "✓ $n" else "   $n") to { Store.parallelAudio = n } })
-            },
-            tr("Cover art: ${Store.artQuality.label}…", "Kapak resmi: ${Store.artQuality.label}…") to { artMenu() },
-            (if (Store.pipAuto) tr("✓ Picture-in-picture when leaving with Home", "✓ Ana ekrana dönünce pencere içinde pencere") else tr("   Picture-in-picture when leaving with Home (off)", "   Ana ekrana dönünce pencere içinde pencere (kapalı)")) to {
-                Store.pipAuto = !Store.pipAuto
-                player.updatePip(force = true)
-                toast(if (Store.pipAuto) tr("A playing video goes picture-in-picture when you press Home", "Ana ekran tuşuna basınca oynayan video küçük pencereye geçer") else tr("Home pauses the video", "Ana ekran tuşu videoyu duraklatır"))
-            },
-            tr("Add missing cover art…", "Eksik kapak resimlerini ekle…") to { offerArt(force = true) },
-            tr("Trash", "Çöp kutusu") + " (${trashCount}${if (trashBytes > 0) " · " + Text.size(trashBytes) else ""})…" to { trashView() },
-            tr("Retry all failed", "Başarısızların tümünü yeniden dene") to {
-                if (wifiOk()) {
-                    val n = Store.retryAllFailed()
-                    if (n > 0) DownloadService.start(this)
-                    toast(if (n > 0) tr("Retrying $n", "$n yeniden deneniyor") else tr("Nothing failed", "Başarısız olan yok"))
-                }
-            },
-            tr("Cancel all queued", "Sıradakilerin tümünü iptal et") to { Store.cancelQueued() },
-            tr("Cache limits (video ${Store.videoCapGb} GB, music ${Store.musicCapGb} GB)…", "Önbellek sınırları (video ${Store.videoCapGb} GB, müzik ${Store.musicCapGb} GB)…") to { cacheLimits() },
-            tr("Region for blocked videos", "Engelli videolar için bölge") + " (${Store.altRegion.ifEmpty { tr("off", "kapalı") }})…" to { regionMenu() },
-            tr("Clear cached videos and music", "Önbellekteki video ve müzikleri temizle") to { io.execute { Store.cache.clear(CacheKind.VIDEO); Store.cache.clear(CacheKind.MUSIC); main.post { refreshCached() } } },
-            tr("Clear finished", "Bitenleri temizle") to { Store.clearFinished() },
-            tr("About & legal", "Hakkında ve yasal") to { about() },
-            PlainLang.label() to { PlainLang.choose(this, moreBtn) { languageChanged() } },
-            PlainUpdate.label(this) to { PlainUpdate.check(this) },
-        ))
+        val q = Store.queue().items.size
+        val acct = if (!Account.hasAccount) tr("Not signed in", "Oturum yok") else if (Account.expired) tr("Expired", "Süresi doldu") else tr("Signed in", "Oturum açık")
+        Sheet(this, C.ACCENT).header("Youtube", tr("Downloads, playback and your account", "İndirmeler, oynatma ve hesabınız"))
+            .actions(
+                Sheet.Action(Ic.QUEUE, tr("Play queue ($q)", "Çalma sırası ($q)")) { if (q == 0) toast(tr("The play queue is empty", "Çalma sırası boş")) else PlayerActivity.queue(this) },
+                Sheet.Action(Ic.REFRESH, tr("Retry failed", "Başarısızları dene")) {
+                    if (wifiOk()) {
+                        val n = Store.retryAllFailed()
+                        if (n > 0) DownloadService.start(this)
+                        toast(if (n > 0) tr("Retrying $n", "$n yeniden deneniyor") else tr("Nothing failed", "Başarısız olan yok"))
+                    }
+                },
+                Sheet.Action(Ic.CLOSE, tr("Cancel queued", "Sıradakileri iptal et")) { Store.cancelQueued() },
+                Sheet.Action(Ic.CHECK, tr("Clear finished", "Bitenleri temizle")) { Store.clearFinished() },
+            )
+            .section(tr("Downloads", "İndirmeler"))
+            .toggle(Ic.WIFI, tr("Wi-Fi only", "Yalnızca Wi-Fi"), Store.wifiOnly, sub = tr("Off: mobile data is used too", "Kapalı: mobil veri de kullanılır")) { on -> Store.wifiOnly = on }
+            .item(Ic.TUNE, tr("Audio format", "Ses biçimi"), value = if (Store.originalAudio) tr("Original", "Orijinal") else tr("Clean M4A", "Temiz M4A"), more = true) { audioFormatMenu() }
+            .item(Ic.SPEED, tr("Parallel audio downloads", "Paralel ses indirme"), sub = tr("For bulk music downloads", "Toplu müzik indirmeleri için"), value = "${Store.parallelAudio}", more = true) {
+                Sheet.choose(this, tr("Parallel audio downloads", "Paralel ses indirme"), (1..4).map { "$it" }, Store.parallelAudio - 1, C.ACCENT,
+                    tr("More is faster on good Wi-Fi; videos always download one at a time", "İyi Wi-Fi'de çoğu daha hızlıdır; videolar her zaman tek tek iner")) { Store.parallelAudio = it + 1 }
+            }
+            .item(Ic.PHOTO, tr("Cover art in audio files", "Ses dosyalarında kapak"), value = Store.artQuality.label, more = true) { artMenu() }
+            .item(Ic.ADD, tr("Add missing cover art", "Eksik kapakları ekle"), sub = tr("For files saved without one", "Kapaksız kaydedilen dosyalar için")) { offerArt(force = true) }
+            .section(tr("Storage", "Depolama"))
+            .item(Ic.CACHE, tr("Cache limits", "Önbellek sınırları"), value = "${Store.videoCapGb} / ${Store.musicCapGb} GB", sub = tr("Video / music", "Video / müzik"), more = true) { cacheLimits() }
+            .item(Ic.RESTORE, tr("Trash", "Çöp kutusu"), value = "$trashCount" + if (trashBytes > 0) " · " + Text.size(trashBytes) else "", more = true) { trashView() }
+            .item(Ic.DELETE, tr("Clear cached videos and music", "Önbellekteki video ve müzikleri temizle"), sub = tr("Downloads stay", "İndirilenler kalır"), danger = true) {
+                io.execute { Store.cache.clear(CacheKind.VIDEO); Store.cache.clear(CacheKind.MUSIC); main.post { refreshCached() } }
+            }
+            .section(tr("Playback", "Oynatma"))
+            .toggle(Ic.PIP, tr("Picture-in-picture on Home", "Ana ekranda küçük pencere"), Store.pipAuto,
+                sub = tr("Off: Home pauses the video", "Kapalı: Ana ekran videoyu duraklatır")) { on -> Store.pipAuto = on; player.updatePip(force = true) }
+            .item(Ic.MAP, tr("Region for blocked videos", "Engelli videolar için bölge"), value = Store.altRegion.ifEmpty { tr("Off", "Kapalı") }, more = true) { regionMenu() }
+            .section(tr("Account", "Hesap"))
+            .item(Ic.ACCOUNT, tr("YouTube account", "YouTube hesabı"), value = acct, more = true) { account.show() }
+            .item(Ic.UPLOAD, tr("Import subscriptions", "Abonelikleri içe aktar"), sub = tr("From a Google Takeout file", "Google Takeout dosyasından"), more = true) { selectTab(1); search.importDialog() }
+            .section(tr("App", "Uygulama"))
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this, C.ACCENT) { languageChanged() } }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
+            .item(Ic.INFO, tr("About & legal", "Hakkında ve yasal")) { about() }
+            .show()
+    }
+
+    private fun audioFormatMenu() {
+        Sheet(this, C.ACCENT).header(tr("Audio format", "Ses biçimi"))
+            .choice(tr("Clean M4A", "Temiz M4A"), !Store.originalAudio, sub = tr("Converted on the phone: tags and cover art, plays everywhere", "Telefonda dönüştürülür: etiketler ve kapak, her yerde çalar")) { Store.originalAudio = false; refreshNote() }
+            .choice(tr("Original format", "Orijinal biçim"), Store.originalAudio, sub = tr("YouTube's file as it is: faster, no conversion", "YouTube'un dosyası olduğu gibi: daha hızlı, dönüştürme yok")) { Store.originalAudio = true; refreshNote() }
+            .show()
     }
 
     /**
@@ -1103,12 +1114,12 @@ class MainActivity : Activity() {
 
     private fun artMenu() {
         val before = Store.artQuality
-        menu(tr("Cover art in audio files", "Ses dosyalarında kapak resmi"), ArtQuality.values().map { q ->
-            (if (q == before) "✓ " else "   ") + q.label to {
-                Store.artQuality = q
-                if (before == ArtQuality.NONE && q != ArtQuality.NONE) offerArt(force = true)
-            }
-        })
+        val all = ArtQuality.values().toList()
+        Sheet.choose(this, tr("Cover art in audio files", "Ses dosyalarında kapak resmi"), all.map { it.label }, all.indexOf(before), C.ACCENT) { i ->
+            val q = all[i]
+            Store.artQuality = q
+            if (before == ArtQuality.NONE && q != ArtQuality.NONE) offerArt(force = true)
+        }
     }
 
     /** Check our audio files for missing art (reads each header), then offer the backfill batch. */
@@ -1330,16 +1341,23 @@ class MainActivity : Activity() {
 
     private fun regionMenu() {
         val regions = listOf("US", "DE", "GB", "NL", "FR", "JP", "CA") // gl codes, not translated
-        menu(tr("Region for blocked videos", "Engelli videolar için bölge"), listOf(tr("Off (show the block)", "Kapalı (engeli göster)") to { Store.altRegion = "" }) +
-            regions.map { r -> (if (Store.altRegion == r) "✓ $r" else r) to { Store.altRegion = r } })
+        Sheet.choose(this, tr("Region for blocked videos", "Engelli videolar için bölge"), listOf(tr("Off (show the block)", "Kapalı (engeli göster)")) + regions,
+            if (Store.altRegion.isEmpty()) 0 else regions.indexOf(Store.altRegion) + 1, C.ACCENT,
+            tr("A video blocked in your country is asked for again as if from this region", "Ülkenizde engelli bir video bu bölgeden istenmiş gibi yeniden istenir")) { i ->
+            Store.altRegion = if (i == 0) "" else regions[i - 1]
+        }
     }
 
     private fun cacheLimits() {
         val gbs = listOf(2, 5, 10, 20, 50, 100)
-        menu(tr("Cache limits", "Önbellek sınırları"), listOf(
-            tr("Video cache: ${Store.videoCapGb} GB…", "Video önbelleği: ${Store.videoCapGb} GB…") to { menu(tr("Video cache limit", "Video önbellek sınırı"), gbs.map { g -> "$g GB" to { Store.videoCapGb = g; trimCaches() } }) },
-            tr("Music cache: ${Store.musicCapGb} GB…", "Müzik önbelleği: ${Store.musicCapGb} GB…") to { menu(tr("Music cache limit", "Müzik önbellek sınırı"), gbs.map { g -> "$g GB" to { Store.musicCapGb = g; trimCaches() } }) },
-        ))
+        Sheet(this, C.ACCENT).header(tr("Cache limits", "Önbellek sınırları"), tr("The oldest cached files go first when a limit is reached", "Sınıra ulaşınca en eski önbellek dosyaları önce silinir"))
+            .item(Ic.VIDEO, tr("Video cache", "Video önbelleği"), value = "${Store.videoCapGb} GB", more = true) {
+                Sheet.choose(this, tr("Video cache limit", "Video önbellek sınırı"), gbs.map { "$it GB" }, gbs.indexOf(Store.videoCapGb), C.ACCENT) { Store.videoCapGb = gbs[it]; trimCaches() }
+            }
+            .item(Ic.QUEUE, tr("Music cache", "Müzik önbelleği"), value = "${Store.musicCapGb} GB", more = true) {
+                Sheet.choose(this, tr("Music cache limit", "Müzik önbellek sınırı"), gbs.map { "$it GB" }, gbs.indexOf(Store.musicCapGb), C.ACCENT) { Store.musicCapGb = gbs[it]; trimCaches() }
+            }
+            .show()
     }
 
     private fun trimCaches() {

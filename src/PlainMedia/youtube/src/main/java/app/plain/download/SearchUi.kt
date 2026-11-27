@@ -1593,7 +1593,7 @@ class SearchScreen(private val act: MainActivity) {
                 tr("Open", "Aç") to { push(LocalListPage(l.id)) },
                 tr("Play all", "Tümünü oynat") to { playAll(l.items, null, l.name) },
                 tr("Listen all", "Tümünü dinle") to { playAll(l.items, PlayMode.LISTEN, l.name) },
-                tr("Download all…", "Tümünü indir…") to { bulk(l.items, l.name) },
+                tr("Download all…", "Tümünü indir…") to { bulk(l.items, l.name, link = "list:${l.id}") },
                 tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(l.items, l.name) },
                 tr("Rename…", "Yeniden adlandır…") to { Hold.rename(act, l) { fill() } },
                 tr("Delete list", "Listeyi sil") to { Store.setLists(VideoLists.delete(Store.lists(), l.id)); fill() },
@@ -1610,7 +1610,7 @@ class SearchScreen(private val act: MainActivity) {
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
             flow.addView(act.pill(tr("Play all", "Tümünü oynat"), C.ACCENT, C.ACCENT) { playAll(items, null, list()?.name) })
             flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { playAll(items, PlayMode.LISTEN, list()?.name) })
-            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, list()?.name) })
+            flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, list()?.name, link = "list:$listId") })
             flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, list()?.name) })
             head.addView(flow, lpL(MATCH, WRAP))
         }

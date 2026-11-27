@@ -39,6 +39,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -380,19 +382,21 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu() {
-        menu(null, listOf(
-            tr("How to declutter", "Nasıl sadeleştirilir") to { showHelp() },
-            tr("Setup for system apps", "Sistem uygulamaları için kurulum") to { showTab(Tab.SETUP) },
-            tr("Restore removed apps", "Kaldırılanları geri yükle") to { showTab(Tab.RESTORE) },
-            PlainUpdate.label(this) to { PlainUpdate.check(this) },
-            // Dropdown under the ⋮ button. A change recreates the activity; tab, filter and
-            // selections come back through onSaveInstanceState. Not while a batch is running.
-            PlainLang.label() to {
-                PlainLang.choose(this, menuBtn) {
+        Sheet(this, C.ACCENT).header(tr("Uninstaller", "Kaldırıcı"), tr("Remove apps you don't use, several at once", "Kullanmadığınız uygulamaları toplu kaldırın"))
+            .item(Ic.HELP, tr("How to declutter", "Nasıl sadeleştirilir")) { showHelp() }
+            .section(tr("System apps", "Sistem uygulamaları"))
+            .item(Ic.SHIELD, tr("Setup for system apps", "Sistem uygulamaları için kurulum"), sub = tr("Needs Shizuku, one time", "Bir kez Shizuku gerekir"), more = true) { showTab(Tab.SETUP) }
+            .item(Ic.RESTORE, tr("Restore removed apps", "Kaldırılanları geri yükle"), more = true) { showTab(Tab.RESTORE) }
+            .section(tr("App", "Uygulama"))
+            // A language change recreates the activity; tab, filter and selections come back through
+            // onSaveInstanceState. Not while a batch is running.
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) {
+                Sheet.language(this, C.ACCENT) {
                     if (busy) toast(tr("The new language shows after this job", "Yeni dil bu işlemden sonra görünür")) else recreate()
                 }
-            },
-        ))
+            }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
+            .show()
     }
 
     private fun showHelp() {

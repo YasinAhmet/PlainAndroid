@@ -24,6 +24,8 @@ import app.plain.hub.Hub
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -444,7 +446,7 @@ class MainActivity : Activity() {
         about.addView(pill(PlainUpdate.label(this), false) { PlainUpdate.check(this) }, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)))
         // Language dropdown under the pill; a change recreates the activity, which reopens on this tab.
         var lang: TextView? = null
-        lang = pill(PlainLang.label(), false) { PlainLang.choose(this, lang) }
+        lang = pill(PlainLang.label(), false) { Sheet.language(this, ACCENT) }
         about.addView(lang, LinearLayout.LayoutParams(WRAP_CONTENT, px(34)).apply { topMargin = px(8) })
     }
 

@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.maps"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "3.1"
+        versionCode = 10
+        versionName = "3.2"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

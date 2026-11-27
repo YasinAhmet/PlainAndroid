@@ -18,6 +18,9 @@ object LinkedPlaylists {
     const val LINKS = "playlist_links.json"
     const val SAVED = "downloaded.txt"
 
+    /** Set by the app (the Youtube tab's one-time catch-up for lists saved before 3.5); run on the library-load thread. */
+    @Volatile var prepare: ((Context) -> Unit)? = null
+
     class Link(val key: String, val name: String, val ids: List<String>)
 
     fun decodeLinks(s: String): List<Link> = try {

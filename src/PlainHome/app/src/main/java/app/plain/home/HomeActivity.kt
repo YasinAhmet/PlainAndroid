@@ -36,6 +36,8 @@ import android.widget.Toast
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import app.plain.update.PlainUpdate
+import app.plain.ui.Ic
+import app.plain.ui.Sheet
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.Executors
@@ -349,33 +351,26 @@ class HomeActivity : Activity() {
         Toast.makeText(this, tr("Can't open that", "Açılamadı"), Toast.LENGTH_SHORT).show(); false
     }
 
-    private fun appMenu(anchor: View, e: AppEntry) {
-        PopupMenu(menuContext(), anchor).apply {
-            menu.add(0, 1, 0, tr("App info", "Uygulama bilgisi"))
-            val move = menu.addSubMenu(0, 3, 1, tr("Move to", "Taşı"))
-            val current = Layout.sectionOf(e, overrides(), phoneDefaults)
-            Layout.TARGETS.forEachIndexed { i, name ->
-                if (name != current) move.add(1, 100 + i, i, sectionName(name))
-            }
-            menu.add(0, 2, 2, tr("Hide", "Gizle"))
-            setOnMenuItemClickListener {
-                if (it.itemId >= 100) {
-                    sectionPrefs.edit().putString(e.key, Layout.TARGETS[it.itemId - 100]).apply()
-                    refreshGrid()
-                    return@setOnMenuItemClickListener true
-                }
-                when (it.itemId) {
-                    1 -> open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}")))
-                    2 -> {
-                        prefs.edit().putStringSet("hidden", hidden() + e.key).apply()
-                        refreshGrid()
-                        Toast.makeText(this@HomeActivity, tr("Hidden. Long-press the clock to bring it back.", "Gizlendi. Geri getirmek için saate uzun basın."), Toast.LENGTH_LONG).show()
-                    }
-                }
-                true
-            }
-            show()
+    private fun appMenu(@Suppress("UNUSED_PARAMETER") anchor: View, e: AppEntry) {
+        val current = Layout.sectionOf(e, overrides(), phoneDefaults)
+        val sheet = Sheet(this).header(e.label, tr("In “${sectionName(current)}”", "“${sectionName(current)}” bölümünde")) { iv ->
+            try { iv.setImageDrawable(packageManager.getActivityIcon(ComponentName(e.pkg, e.cls))) } catch (_: Exception) {}
+            iv.setPadding(dp(6f), dp(6f), dp(6f), dp(6f))
         }
+            .item(Ic.INFO, tr("App info", "Uygulama bilgisi"), more = true) { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}"))) }
+            .item(Ic.EYE_OFF, tr("Hide", "Gizle"), sub = tr("Long-press the clock to bring it back", "Geri getirmek için saate uzun basın")) {
+                prefs.edit().putStringSet("hidden", hidden() + e.key).apply()
+                refreshGrid()
+                Toast.makeText(this@HomeActivity, tr("Hidden. Long-press the clock to bring it back.", "Gizlendi. Geri getirmek için saate uzun basın."), Toast.LENGTH_LONG).show()
+            }
+            .section(tr("Move to", "Taşı"))
+        Layout.TARGETS.forEach { name ->
+            sheet.choice(sectionName(name), name == current) {
+                sectionPrefs.edit().putString(e.key, name).apply()
+                refreshGrid()
+            }
+        }
+        sheet.show()
     }
 
     /**
@@ -387,57 +382,29 @@ class HomeActivity : Activity() {
         val h = hidden()
         val ov = overrides()
         val stockHidden = all.filter { it.pkg != packageName && Layout.isAutoHidden(it, ov, showStock(), phoneDefaults) }
-        if (h.isEmpty() && stockHidden.isEmpty()) {
-            if (!showStock()) {
-                withLanguageRow(AlertDialog.Builder(menuContext())
-                    .setTitle("Plain Home")
-                    .setMessage(tr("Nothing is hidden. Long-press an app to move or hide it.",
-                        "Gizli uygulama yok. Taşımak ya da gizlemek için uygulamaya uzun basın."))
-                    .setPositiveButton(PlainUpdate.label(this)) { _, _ -> PlainUpdate.check(this) }
-                    .setNegativeButton(tr("Close", "Kapat"), null))
-                return
-            }
-            withLanguageRow(AlertDialog.Builder(menuContext())
-                .setMessage(tr("Hide stock apps that aren't in a section again?",
-                    "Bir bölümde olmayan hazır uygulamalar yeniden gizlensin mi?"))
-                .setPositiveButton(tr("Hide", "Gizle")) { _, _ -> prefs.edit().putBoolean("showStock", false).apply(); refreshGrid() }
-                .setNeutralButton(tr("Updates", "Güncellemeler")) { _, _ -> PlainUpdate.check(this) }
-                .setNegativeButton(tr("Cancel", "İptal"), null))
-            return
-        }
         val names = (h.map { k -> all.firstOrNull { it.key == k }?.label ?: k.substringBefore('/') } +
             stockHidden.map { it.label }).distinct().sorted()
-        withLanguageRow(AlertDialog.Builder(menuContext())
-            .setTitle(tr("Hidden apps", "Gizli uygulamalar"))
-            .setMessage(names.joinToString("\n"))
-            .setPositiveButton(tr("Show all", "Tümünü göster")) { _, _ ->
-                prefs.edit().remove("hidden").putBoolean("showStock", true).apply()
-                refreshGrid()
+        val sheet = Sheet(this).header("Plain Home", when {
+            names.isNotEmpty() -> tr("${names.size} hidden apps", "${names.size} gizli uygulama")
+            else -> tr("Nothing is hidden. Long-press an app to move or hide it.", "Gizli uygulama yok. Taşımak ya da gizlemek için uygulamaya uzun basın.")
+        })
+        if (names.isNotEmpty()) {
+            sheet.section(tr("Hidden apps", "Gizli uygulamalar")).note(names.joinToString(", "))
+                .item(Ic.EYE, tr("Show all", "Tümünü göster")) {
+                    prefs.edit().remove("hidden").putBoolean("showStock", true).apply()
+                    refreshGrid()
+                }
+        } else if (showStock()) {
+            sheet.item(Ic.EYE_OFF, tr("Hide stock apps again", "Hazır uygulamaları yeniden gizle"), sub = tr("Those that aren't in a section", "Bir bölümde olmayanlar")) {
+                prefs.edit().putBoolean("showStock", false).apply(); refreshGrid()
             }
-            .setNeutralButton(tr("Updates", "Güncellemeler")) { _, _ -> PlainUpdate.check(this) }
-            .setNegativeButton(tr("Cancel", "İptal"), null))
+        }
+        sheet.section(tr("App", "Uygulama"))
+            .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true) { Sheet.language(this) { recreate() } }
+            .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
+            .show()
     }
 
-    /**
-     * Shows [b] with a "Language: …" row under its message. Tapping the row opens the language
-     * dropdown under it; a change closes the dialog and recreates the home screen in the new language.
-     */
-    private fun withLanguageRow(b: AlertDialog.Builder) {
-        val ctx = menuContext()
-        val attrs = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary, android.R.attr.selectableItemBackground))
-        val row = TextView(ctx).apply {
-            text = PlainLang.label()
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            attrs.getColorStateList(0)?.let { setTextColor(it) }
-            background = attrs.getDrawable(1)
-            setPadding(dp(24f), dp(14f), dp(24f), dp(14f))
-            isClickable = true
-        }
-        attrs.recycle()
-        val d = b.setView(row).create()
-        row.setOnClickListener { PlainLang.choose(this, row) { d.dismiss(); recreate() } }
-        d.show()
-    }
 
     /** Section names are the user's own (and stored as keys); only the fallback "Other" is translated. */
     private fun sectionName(name: String): String = if (name == Layout.OTHER) tr("Other", "Diğer") else name
