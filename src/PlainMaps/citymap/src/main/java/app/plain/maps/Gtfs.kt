@@ -19,17 +19,22 @@ class Transit {
     class Pattern(val route: Int, val stops: IntArray) {
         var dir = 0
         val headsigns = HashMap<String, Int>()
+        /** GTFS shape_id votes of the pattern's trips (plain GTFS feeds; İETT keys shapes by route code instead). */
+        val shapeIds = HashMap<String, Int>()
         /** days mask (bit 0 = Monday … bit 6 = Sunday), start second, duration seconds */
         val trips = ArrayList<IntArray>()
         lateinit var dists: IntArray
 
         fun headsign(): String = headsigns.maxByOrNull { it.value }?.key ?: ""
+
+        /** The shape most of the pattern's trips use ("" when the feed has none). */
+        fun shapeId(): String = shapeIds.maxByOrNull { it.value }?.key ?: ""
     }
 
     val stops = ArrayList<Stop>()
     val routes = ArrayList<Route>()
     val patterns = ArrayList<Pattern>()
-    /** route code (GUZERGAH_KODU) → lon/lat line */
+    /** route code (GUZERGAH_KODU) or GTFS shape_id → lon/lat line */
     val shapes = HashMap<String, List<DoubleArray>>()
     var tripsRead = 0
     var tripsSkipped = 0
@@ -59,6 +64,9 @@ class Transit {
         fun read(
             stopsF: File, routesF: File, tripsF: File, calendarF: File, stopTimesF: File,
             log: (String) -> Unit = {}, cancelled: () -> Boolean = { false },
+            box: BBox = BBox(LON_LO, LAT_LO, LON_HI, LAT_HI),
+            /** Only bus routes (route_type 3, 11, 7xx): rail and ferry lines come from OpenStreetMap. */
+            busOnly: Boolean = false,
         ): Transit {
             val t = Transit()
             // calendar: service id → day mask
@@ -79,8 +87,8 @@ class Transit {
                 val la = c.col("stop_lat"); val lo = c.col("stop_lon")
                 while (true) {
                     val row = c.next() ?: break
-                    val lat = Text.coord(c.get(row, la), LAT_LO, LAT_HI)
-                    val lon = Text.coord(c.get(row, lo), LON_LO, LON_HI)
+                    val lat = Text.coord(c.get(row, la), box.s, box.n)
+                    val lon = Text.coord(c.get(row, lo), box.w, box.e)
                     if (lat == null || lon == null) { t.badStops++; continue }
                     stopIdx[c.get(row, id)] = t.stops.size
                     t.stops.add(Stop(c.get(row, id), c.get(row, code), Text.title(c.get(row, name)), lat, lon))
@@ -92,26 +100,31 @@ class Transit {
             reader(routesF).use { r ->
                 val c = Text.Csv(r, freeText = "route_desc")
                 val id = c.col("route_id"); val sn = c.col("route_short_name"); val ln = c.col("route_long_name")
-                val code = c.col("route_code")
+                val code = c.col("route_code"); val type = c.col("route_type")
                 while (true) {
                     val row = c.next() ?: break
+                    if (busOnly && type >= 0) {
+                        val rt = c.get(row, type).toIntOrNull()
+                        if (rt != null && rt != 3 && rt != 11 && rt !in 700..799) continue
+                    }
                     routeIdx[c.get(row, id)] = t.routes.size
                     t.routes.add(Route(c.get(row, id), c.get(row, sn), Text.title(c.get(row, ln)), if (code >= 0) c.get(row, code) else ""))
                 }
             }
             log(tr("${t.routes.size} routes", "${t.routes.size} hat"))
             // trips
-            class TripInfo(val route: Int, val days: Int, val headsign: String, val dir: Int)
+            class TripInfo(val route: Int, val days: Int, val headsign: String, val dir: Int, val shape: String)
             val trips = HashMap<String, TripInfo>(200_000)
             reader(tripsF).use { r ->
                 val c = Text.Csv(r, freeText = "trip_headsign")
                 val id = c.col("trip_id"); val rid = c.col("route_id"); val sid = c.col("service_id")
-                val hs = c.col("trip_headsign"); val dir = c.col("direction_id")
+                val hs = c.col("trip_headsign"); val dir = c.col("direction_id"); val shp = c.col("shape_id")
                 while (true) {
                     val row = c.next() ?: break
                     val ri = routeIdx[c.get(row, rid)] ?: continue
                     val days = service[c.get(row, sid)] ?: continue
-                    trips[c.get(row, id)] = TripInfo(ri, days, Text.title(c.get(row, hs)), c.get(row, dir).toIntOrNull() ?: 0)
+                    trips[c.get(row, id)] = TripInfo(ri, days, if (hs >= 0) Text.title(c.get(row, hs)) else "", c.get(row, dir).toIntOrNull() ?: 0,
+                        if (shp >= 0) c.get(row, shp).intern() else "")
                 }
             }
             log(tr("${trips.size} trips", "${trips.size} sefer"))
@@ -147,7 +160,10 @@ class Transit {
                     t.patterns.size - 1
                 }
                 val p = t.patterns[pi]
-                p.headsigns.merge(info.headsign, 1, Int::plus)
+                // feeds without headsigns (or with the line's name as headsign in both directions): the last stop's name
+                val hs = info.headsign.takeIf { it.isNotEmpty() && !it.equals(t.routes[info.route].long, true) } ?: t.stops[st.last()].name
+                p.headsigns.merge(hs, 1, Int::plus)
+                if (info.shape.isNotEmpty()) p.shapeIds.merge(info.shape, 1, Int::plus)
                 p.trips.add(intArrayOf(info.days, first, (last - first).coerceAtLeast(0)))
                 t.tripsRead++
                 seqs.clear(); sts.clear(); times.clear()
@@ -205,6 +221,42 @@ class Transit {
                 p.dists = d
             }
             return t
+        }
+
+        /**
+         * Reads a GTFS shapes.txt (rows grouped by shape, in sequence order or not), keeping only the [wanted]
+         * shape ids, simplified to about [tolDeg] degrees.
+         */
+        fun readGtfsShapes(input: InputStream, wanted: Set<String>, tolDeg: Double, into: HashMap<String, List<DoubleArray>>, cancelled: () -> Boolean = { false }) {
+            val r = input.bufferedReader(Charsets.UTF_8)
+            val h = (r.readLine() ?: return).removePrefix("﻿")
+            val d = if (h.count { it == ';' } > h.count { it == ',' }) ';' else ','
+            val cols = Text.split(h, d).map { it.trim().lowercase() }
+            val cI = cols.indexOf("shape_id"); val cA = cols.indexOf("shape_pt_lat"); val cO = cols.indexOf("shape_pt_lon")
+            val cQ = cols.indexOf("shape_pt_sequence")
+            if (cI < 0 || cA < 0 || cO < 0) return
+            val pts = HashMap<String, ArrayList<DoubleArray>>()
+            var n = 0L
+            while (true) {
+                val line = r.readLine() ?: break
+                if (line.isEmpty()) continue
+                val f = Text.split(line, d)
+                if (f.size <= maxOf(cI, cA, cO)) continue
+                val id = f[cI].trim()
+                if (id !in wanted) continue
+                val la = f[cA].trim().toDoubleOrNull() ?: continue
+                val lo = f[cO].trim().toDoubleOrNull() ?: continue
+                val q = if (cQ >= 0) f.getOrNull(cQ)?.trim()?.toDoubleOrNull() ?: 0.0 else n.toDouble()
+                pts.getOrPut(id) { ArrayList() }.add(doubleArrayOf(q, lo, la))
+                if (++n % 200_000 == 0L && cancelled()) throw InterruptedException()
+            }
+            for ((id, l) in pts) {
+                if (l.size < 2) continue
+                l.sortBy { it[0] }
+                val g = DoubleArray(l.size * 2)
+                l.forEachIndexed { i, p -> g[2 * i] = p[1]; g[2 * i + 1] = p[2] }
+                into[id] = listOf(Clip.simplify(g, tolDeg))
+            }
         }
 
         /**

@@ -71,6 +71,21 @@ Lines without an OSM route shape follow the streets: the shortest drivable path 
 
 EGO line codes are grouped by number: 102-1 and 102-2 are two variants of line 102, and the code is shown in the headsign.
 
+## Where the data comes from: İzmir and Kocaeli (since Plain Maps 3.6)
+
+Both publish a plain GTFS feed (`City.Bus.GTFS`, `Sync.gtfsTransit`). Only bus routes are kept (route_type 3, 11, 7xx);
+metro, tram, İZBAN, rail and ferry lines come from the OpenStreetMap extract as in the other cities. The map's area is the
+box around every stop plus 3 km (`fitToStops`), cut from the regional extract while it is read (no Overpass).
+
+| City | Buses | Map and rail |
+|---|---|---|
+| İzmir | ESHOT `https://www.eshot.gov.tr/gtfs/bus-eshot-gtfs.zip` (one zip, about 18 MB: 421 lines, 11.7k stops, 61k trips, shapes.txt) | openstreetmap.fr `aegean-latest.osm.pbf` (about 90 MB) |
+| Kocaeli | Kocaeli BB open data, dataset `e2a87342-…` on `kavisacikveri.kocaeli.bel.tr/api/public/OpenDataPublic/<id>` (CC BY). No zip: each file is an attachment, `…/attachments/<attachmentId>/download`; the ids change when the city re-uploads, so the dataset JSON is read every sync. stop_times.txt is about 100 MB. 404 bus lines, 8.5k stops, 47k trips. | openstreetmap.fr `marmara-latest.osm.pbf` (about 170 MB) |
+
+Quirks: ESHOT's calendar dates run out (the 2026-08 feed ended 2026-10-05) but only the weekday pattern is used, so it
+keeps working; Kocaeli's trip_headsign is the line's name in both directions, so the last stop's name is shown instead;
+shapes.txt rows are not in sequence order (they are sorted). Real-file tests: `ESHOT_ZIP` and `KOCAELI_DIR` in RealDataTest.
+
 ## Build
 
 ```powershell

@@ -28,7 +28,9 @@ object SpotifyLegacy {
  *  2. **Sync** — each chosen playlist's tracks come from its public embed page (one small HTTP request; up to 100
  *     tracks), longer playlists from the full public page;
  *  3. every track without a match is searched on YouTube Music (songs, then videos) and matched by [SpMatcher]
- *     (3 at a time; saved as it goes, so a stopped sync resumes).
+ *     (3 at a time; saved as it goes, so a stopped sync resumes);
+ *  4. (3.10) every saved playlist downloads by itself: the songs not downloaded or queued yet are queued as audio,
+ *     one batch per playlist, and each playlist is linked to its Music-tab playlist ([autoDownload]).
  * One run at a time, in a background thread; progress goes to [listeners] on the main thread. Honours "Wi-Fi only".
  */
 object SpotifySync {
@@ -42,6 +44,9 @@ object SpotifySync {
     @Volatile var progress: String? = null
         private set
     @Volatile var lastError: String? = null
+        private set
+    /** What the last run queued for download (shown under the Spotify page's buttons). */
+    @Volatile var lastNote: String? = null
         private set
     val listeners = ArrayList<() -> Unit>()
 
@@ -165,7 +170,7 @@ object SpotifySync {
         if (running) return
         val app = act.applicationContext
         init(app)
-        running = true; lastError = null
+        running = true; lastError = null; lastNote = null
         say(tr("Starting…", "Başlıyor…"))
         val g = calls.gen
         Thread {
@@ -173,6 +178,7 @@ object SpotifySync {
                 if (retryMissing) update { d -> d.copy(matches = d.matches.filterValues { it.videoId != null || it.rejected.isNotEmpty() }) }
                 val failed = if (onlyMatch) 0 else readPlaylists(act, g)
                 matchAll(app, g)
+                autoDownload(app)
                 if (failed > 0) lastError = tr("$failed playlist(s) couldn't be read (private or removed?): kept as last synced",
                     "$failed çalma listesi okunamadı (gizli ya da kaldırılmış olabilir): son eşitlenen hâli tutuldu")
                 say(null)
@@ -271,8 +277,48 @@ object SpotifySync {
                 say(tr("Looking for another version…", "Başka bir sürüm aranıyor…"))
                 val m = find(app, g, t, rej)
                 update { d -> d.copy(matches = d.matches + (trackId to m)) }
+                autoDownload(app)
             } catch (_: Exception) {
             } finally { running = false; say(null) }
         }.start()
+    }
+
+    /**
+     * Saved = downloaded (3.10): every saved playlist's found songs that aren't downloaded (audio or video) or queued
+     * yet are queued as audio in the user's last audio format / quality, one batch per playlist (named after it), and
+     * each playlist gets its Music-tab playlist link, so it shows up in the library as the songs finish. Runs at the
+     * end of a Sync the user started, so nothing is fetched unasked. Off Wi-Fi (with "Wi-Fi only") the songs stay
+     * queued and start when the app is next opened on Wi-Fi.
+     */
+    private fun autoDownload(ctx: Context) {
+        Store.init(ctx)
+        val d = data()
+        val taken = HashSet<String>()
+        var queued = 0
+        for (p in d.playlists) {
+            val its = d.items(p)
+            if (its.isEmpty()) continue
+            PlaylistLinks.remember(ctx, "spotify:" + p.id, p.name, its)
+            val active = Store.activeIds()
+            val plan = Collect.plan(listOf(p.name to its)) { id -> id in taken || id in active || Store.downloadedAny(id) }
+            if (plan.take.isEmpty()) continue
+            val baseId = Store.newId()
+            val batch = if (plan.take.size > 1) baseId else 0L
+            Store.addAll(plan.take.mapIndexed { i, t ->
+                taken += t.item.id
+                Job(
+                    id = baseId + i, videoId = t.item.id, title = t.item.title, channel = "", durationSec = t.item.durationSec,
+                    kind = Kind.AUDIO, audioFmt = Store.audioFmt, audioQ = Store.audioQ, height = Store.videoP, codec = VCodec.AVC,
+                    album = Albums.pick(null, false, t.album), batch = batch, batchTitle = p.name,
+                )
+            })
+            queued += plan.take.size
+        }
+        if (queued == 0) return
+        lastNote = tr("Downloading $queued new song(s) from your saved playlists: they appear in the Music tab as they finish.",
+            "Kayıtlı listelerinizden $queued yeni şarkı indiriliyor: bittikçe Müzik sekmesinde görünürler.")
+        val wifi = !Store.wifiOnly || runCatching { Net.network(ctx, true) }.isSuccess
+        if (wifi) main.post { try { DownloadService.start(ctx) } catch (_: Exception) {} } // not allowed from the background: starts on next open
+        notifyUi()
     }
 }

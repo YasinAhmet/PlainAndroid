@@ -144,15 +144,23 @@ class Sync(
         openDbs()
         var missing = 0
         try {
-            if (City.ankara) {
-                // EGO's lines first (they decide how big the map is), then the map, then the stops' positions
-                if (!done("egolines")) { egoLines(); mark("egolines") }
-                core()
-                if (!done("transit")) { egoTransit(); mark("transit") }
-            } else {
-                if (!done("transit")) { transit(); mark("transit") }
-                if (!done("area")) { fitToStops(); mark("area") }
-                core()
+            when (City.bus) {
+                City.Bus.EGO -> {
+                    // EGO's lines first (they decide how big the map is), then the map, then the stops' positions
+                    if (!done("egolines")) { egoLines(); mark("egolines") }
+                    core()
+                    if (!done("transit")) { egoTransit(); mark("transit") }
+                }
+                City.Bus.OSM -> {
+                    // the map (its bus routes decide how far it reaches), then the bus lines from those routes
+                    core()
+                    if (!done("transit")) { osmTransit(); mark("transit") }
+                }
+                City.Bus.IETT, City.Bus.GTFS -> {
+                    if (!done("transit")) { if (City.bus == City.Bus.GTFS) gtfsTransit() else transit(); mark("transit") }
+                    if (!done("area")) { fitToStops(); mark("area") }
+                    core()
+                }
             }
             missing = if (City.mapCoversArea) 0 else outskirts()
             build(missing)
@@ -304,6 +312,89 @@ class Sync(
         dl.listFiles()?.forEach { it.delete() }
     }
 
+    // ------------------------------------------------------------------ 1d. OpenStreetMap's bus routes (Kocaeli, Antalya)
+    private fun osmTransit() {
+        TODO()
+    }
+
+    // ------------------------------------------------------------------ 1c. a plain GTFS feed (İzmir: ESHOT, Kocaeli)
+    /**
+     * [City.Def.gtfsUrl] is either one zip (ESHOT) or, for Kocaeli's open-data portal, a dataset whose files come one
+     * by one (`attachments` in its JSON; their ids change when the city uploads new files, so they are read each time).
+     */
+    private fun gtfsTransit() {
+        val op = City.operator
+        val url = City.d.gtfsUrl!!
+        val need = listOf("stops", "routes", "trips", "calendar")
+        val files = HashMap<String, File>()
+        var stopTimes: File
+        var date = ""
+        if (url.endsWith(".zip", true)) {
+            val f = File(dl, "gtfs.zip")
+            retry(tr("$op download", "$op indirmesi")) {
+                Net.download(net, url, f, { d, t ->
+                    val part = if (t > 0) d.toFloat() / t else 0f
+                    say(0.01f + 0.08f * part, tr("$op: downloading timetables (${d / 1048576} MB)", "$op: saatler indiriliyor (${d / 1048576} MB)"))
+                }, { cancel.get() })
+            }
+            java.util.zip.ZipFile(f).use { z ->
+                for (n in need + "shapes") {
+                    val e = z.entries().asSequence().firstOrNull { !it.isDirectory && it.name.substringAfterLast('/').equals("$n.txt", true) } ?: continue
+                    val out = File(dl, "$n.txt")
+                    z.getInputStream(e).use { inp -> out.outputStream().use { inp.copyTo(it) } }
+                    files[n] = out
+                }
+            }
+            stopTimes = f
+        } else {
+            val txt = retry(tr("$op catalogue", "$op kataloğu")) { Net.text(net.n, url) }
+            // (file name, attachment id, uploaded at)
+            val att = try {
+                val arr = org.json.JSONObject(txt).getJSONArray("attachments")
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .map { Triple(it.optString("fileName").lowercase(), it.optString("id"), it.optString("uploadedAt")) }
+            } catch (e: org.json.JSONException) { throw IOException(tr("$op catalogue unreadable", "$op kataloğu okunamadı")) }
+            val base = url.substringBefore("/OpenDataPublic/") + "/OpenDataPublic/attachments/"
+            val want = need + "shapes" + "stop_times"
+            val list = want.mapNotNull { n -> att.firstOrNull { it.first == "$n.txt" }?.let { n to it } }
+            if (list.none { it.first == "stop_times" }) throw IOException(tr("$op feed has no stop_times", "$op verisinde stop_times yok"))
+            list.forEachIndexed { i, (n, a) ->
+                val out = File(dl, "$n.txt")
+                retry(tr("$op download", "$op indirmesi")) {
+                    Net.download(net, base + a.second + "/download", out, { d, t ->
+                        val part = if (t > 0) d.toFloat() / t else 0f
+                        say(0.01f + 0.08f * (i + part) / list.size, tr("$op: downloading $n (${d / 1048576} MB)", "$op: $n indiriliyor (${d / 1048576} MB)"))
+                    }, { cancel.get() })
+                }
+                files[n] = out
+            }
+            stopTimes = files.remove("stop_times")!!
+            date = list.maxOf { it.second.third }.take(10)
+        }
+        for (n in need) if (files[n] == null) throw IOException(tr("$op feed has no $n file", "$op verisinde $n dosyası yok"))
+        say(0.1f, tr("$op: reading timetables", "$op: saatler okunuyor"))
+        if (date.isEmpty()) files["calendar"]!!.bufferedReader().use { r ->
+            // the timetable's first day ("20260805" → "2026-08-05")
+            val c = Text.Csv(r)
+            val col = c.col("start_date")
+            var d = ""
+            while (true) { val row = c.next() ?: break; val v = c.get(row, col); if (v > d) d = v }
+            date = if (d.length == 8) "${d.take(4)}-${d.substring(4, 6)}-${d.takeLast(2)}" else d
+        }
+        val t = Transit.read(files["stops"]!!, files["routes"]!!, files["trips"]!!, files["calendar"]!!, stopTimes,
+            { say(0.12f, "$op: $it") }, { cancel.get() }, City.searchArea, busOnly = true)
+        if (t.patterns.isEmpty()) throw IOException(tr("$op feed has no usable trips", "$op verisinde kullanılabilir sefer yok"))
+        files["shapes"]?.let { f ->
+            say(0.15f, tr("$op: reading route shapes", "$op: güzergâh çizimleri okunuyor"))
+            val wanted = t.patterns.map { it.shapeId() }.filter { it.isNotEmpty() }.toHashSet()
+            f.inputStream().buffered(1 shl 16).use { Transit.readGtfsShapes(it, wanted, 1.2e-5, t.shapes) { cancel.get() } }
+        }
+        say(0.17f, tr("$op: saving ${t.patterns.size} routes", "$op: ${t.patterns.size} güzergâh kaydediliyor"))
+        writeBus(t)
+        setMeta("gtfs_date", date)
+        dl.listFiles()?.forEach { it.delete() }
+    }
+
     private fun oldMeta(f: File, k: String): String? = try {
         SQLiteDatabase.openDatabase(f.path, null, SQLiteDatabase.OPEN_READONLY).use { d ->
             d.rawQuery("SELECT v FROM meta WHERE k=?", arrayOf(k)).use { c -> if (c.moveToFirst()) c.getString(0) else null }
@@ -365,9 +456,11 @@ class Sync(
             t.patterns.forEachIndexed { pi, p ->
                 val r = t.routes[p.route]
                 val vid = pi + 1L
-                val sid = if (r.code.isNotEmpty() && t.shapes.containsKey(r.code)) shapeId.getOrPut(r.code) {
+                // İETT keys shapes by route code, plain GTFS by the trips' shape_id
+                val sk = p.shapeId().ifEmpty { r.code }
+                val sid = if (sk.isNotEmpty() && t.shapes.containsKey(sk)) shapeId.getOrPut(sk) {
                     val id = shapeId.size + 1
-                    sShape.bindLong(1, id.toLong()); sShape.bindBlob(2, Codec.shape(t.shapes[r.code]!!)); sShape.executeInsert()
+                    sShape.bindLong(1, id.toLong()); sShape.bindBlob(2, Codec.shape(t.shapes[sk]!!)); sShape.executeInsert()
                     id
                 } else 0
                 val stopIds = IntArray(p.stops.size) { p.stops[it] + 1 }

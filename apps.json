@@ -1,22 +1,31 @@
 {
   "repo": "YasinAhmet/PlainAndroid",
-  "updated": "2026-11-27T21:50:25Z",
+  "updated": "2026-11-27T22:54:17Z",
   "apps": [
     {
       "key": "setup",
       "name": "Plain Manager",
       "package": "app.plain.setup",
-      "versionCode": 17,
-      "versionName": "2.8",
+      "versionCode": 18,
+      "versionName": "2.9",
       "file": "PlainSetup.apk",
-      "tag": "setup-v2.8",
-      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.8/PlainSetup.apk",
-      "size": 1946465,
-      "sha256": "0efe77996075a0d91f69c305d64166ab44b10db739d1551f5d978bf0bcf002dd",
+      "tag": "setup-v2.9",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.9/PlainSetup.apk",
+      "size": 2144191,
+      "sha256": "5beaaa093177b346197b9b0b888c8017cacad8250fe2779ebdea79c40f4b0607",
       "minSdk": 26,
       "summary": "Installs and updates the Plain apps, plus Battery (battery log) and Uninstaller (bulk removal, also of preinstalled apps with Shizuku) tabs. Formerly Plain Setup.",
       "summary_tr": "Plain uygulamalarını yükler ve günceller; ayrıca Pil (pil günlüğü) ve Kaldırıcı (toplu kaldırma, Shizuku ile hazır yüklü uygulamalar da) sekmeleri. Eski adı Plain Setup.",
       "history": [
+        {
+          "versionCode": 17,
+          "versionName": "2.8",
+          "tag": "setup-v2.8",
+          "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/setup-v2.8/PlainSetup.apk",
+          "size": 1946465,
+          "sha256": "0efe77996075a0d91f69c305d64166ab44b10db739d1551f5d978bf0bcf002dd",
+          "minSdk": 26
+        },
         {
           "versionCode": 16,
           "versionName": "2.7",
@@ -572,6 +581,22 @@
           "minSdk": 29
         }
       ]
+    },
+    {
+      "key": "utility",
+      "name": "Plain Utility",
+      "package": "app.plain.utility",
+      "versionCode": 1,
+      "versionName": "1.0",
+      "file": "PlainUtility.apk",
+      "tag": "utility-v1.0",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/utility-v1.0/PlainUtility.apk",
+      "size": 196376,
+      "sha256": "b4b91c0ac310a55a798809c130796269144e67a16b3046339e74628a5dfb99fa",
+      "minSdk": 29,
+      "summary": "Clock and Notes in tabs: pomodoro focus timer, timer and stopwatch, and quick text or voice notes that remind you at a time you write in them (\"in 20 min\", \"tomorrow 9\"). Offline, nothing runs in the background.",
+      "summary_tr": "Sekmelerde Saat ve Notlar: pomodoro odak sayacı, sayaç ve kronometre, ve içine yazdığınız zamanda (\"20 dk sonra\", \"yarın 9\") hatırlatan hızlı yazılı ya da sesli notlar. İnternetsiz, arka planda hiçbir şey çalışmaz.",
+      "history": []
     },
     {
       "merged_into": "media",

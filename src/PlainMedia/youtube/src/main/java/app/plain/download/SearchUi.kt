@@ -1738,8 +1738,8 @@ class SearchScreen(private val act: MainActivity) {
             stop.visibility = if (busy) View.VISIBLE else View.GONE
             more.visibility = if (d.playlists.isNotEmpty() || d.profile.isNotEmpty()) View.VISIBLE else View.GONE
             info.text = if (d.playlists.isEmpty()) tr(
-                "Type a Spotify profile (its link: Profile → ⋯ → Share → Copy link, or the username) and tap Find: its public playlists are read without signing in. Each song is found on YouTube Music, so the playlists play, download and cache like any other list. Spotify's own audio isn't used.",
-                "Bir Spotify profili yazın (bağlantısı: Profil → ⋯ → Paylaş → Bağlantıyı kopyala, ya da kullanıcı adı) ve Bul'a dokunun: herkese açık listeleri oturum açmadan okunur. Her şarkı YouTube Music'te bulunur; listeler diğer listeler gibi oynatılır, indirilir ve önbelleğe alınır. Spotify'ın kendi sesi kullanılmaz.")
+                "Type a Spotify profile (its link: Profile → ⋯ → Share → Copy link, or the username) and tap Find: its public playlists are read without signing in. Each song is found on YouTube Music and every saved playlist downloads by itself into the Music tab. Spotify's own audio isn't used.",
+                "Bir Spotify profili yazın (bağlantısı: Profil → ⋯ → Paylaş → Bağlantıyı kopyala, ya da kullanıcı adı) ve Bul'a dokunun: herkese açık listeleri oturum açmadan okunur. Her şarkı YouTube Music'te bulunur ve kayıtlı her liste kendiliğinden Müzik sekmesine iner. Spotify'ın kendi sesi kullanılmaz.")
             else listOfNotNull(
                 if (d.user.isNotEmpty()) "Spotify: ${d.user}" else null,
                 tr("synced ${ago(d.synced)}", "eşitlendi: ${ago(d.synced)}"),
@@ -1760,7 +1760,7 @@ class SearchScreen(private val act: MainActivity) {
             when {
                 busy -> setStatus(SpotifySync.progress ?: tr("Working…", "Çalışıyor…"))
                 err != null -> setStatus(err, true)
-                else -> setStatus(null)
+                else -> setStatus(SpotifySync.lastNote)
             }
         }
 

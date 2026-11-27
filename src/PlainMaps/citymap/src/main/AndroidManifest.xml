@@ -46,5 +46,51 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:process=":ankara" />
+
+        <!-- İzmir, Kocaeli and Antalya: the same, each in its own process (files/<id>/, settings "app_<id>"). -->
+        <activity
+            android:name=".IzmirActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:process=":izmir"
+            android:theme="@style/map_AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".IzmirSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:process=":izmir" />
+
+        <activity
+            android:name=".KocaeliActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:process=":kocaeli"
+            android:theme="@style/map_AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".KocaeliSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:process=":kocaeli" />
+
+        <activity
+            android:name=".AntalyaActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:process=":antalya"
+            android:theme="@style/map_AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".AntalyaSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:process=":antalya" />
     </application>
 </manifest>

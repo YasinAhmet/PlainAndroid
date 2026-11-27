@@ -37,23 +37,34 @@ object Saved {
     }
 
     /**
-     * Marked downloaded (before 3.3 only the mark was kept) but no file known: look for our own file of that title in
-     * [rel] and adopt it, so it isn't saved a second time as "Title (2)".
+     * Our own file of that title already in [rel]: adopted, so it isn't saved a second time as "Title (2)".
+     *  - marked downloaded but no file known (before 3.3 only the mark was kept): the name is enough;
+     *  - not marked at all (3.10: the app was reinstalled or its data cleared, which forgets every download while the
+     *    files stay in Music/PlainDownload): the name AND the length ([durationSec], within 2 s) must match.
      */
-    fun adopt(cr: ContentResolver, id: String, kind: Kind, rel: String, title: String, ext: String): File? {
-        if (!Store.downloaded(id, kind) || Store.savedUri(id, kind) != null) return null
+    fun adopt(cr: ContentResolver, id: String, kind: Kind, rel: String, title: String, ext: String, durationSec: Int = 0): File? {
+        if (Store.savedUri(id, kind) != null) return null
+        val marked = Store.downloaded(id, kind)
+        if (!marked && durationSec <= 0) return null
         val name = "${Naming.title(title)}.$ext"
         val b = Bundle().apply {
             putString(ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME}=?")
             putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(rel, name))
         }
         val coll = Saver.collection(kind)
-        val mid = try { cr.query(coll, arrayOf(MediaStore.MediaColumns._ID), b, null)?.use { c -> if (c.moveToFirst()) c.getLong(0) else null } } catch (_: Exception) { null }
-            ?: return null
+        val mid = try {
+            cr.query(coll, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DURATION), b, null)?.use { c ->
+                if (!c.moveToFirst()) null
+                else if (marked || sameLength(c.getLong(1), durationSec)) c.getLong(0) else null
+            }
+        } catch (_: Exception) { null } ?: return null
         val uri = android.content.ContentUris.withAppendedId(coll, mid).toString()
         Store.setSaved(id, kind, uri)
         return File(uri, rel, name, kind == Kind.AUDIO)
     }
+
+    /** A file's length (ms, 0 = unknown) against a video's (s): within 2 s. Unknown never matches. */
+    fun sameLength(fileMs: Long, durationSec: Int): Boolean = fileMs > 0 && durationSec > 0 && kotlin.math.abs(fileMs - durationSec * 1000L) <= 2000
 
     /**
      * Unfinished MediaStore entries of ours (".pending-…" files left by a save that was killed) when nothing is

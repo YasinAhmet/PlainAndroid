@@ -178,12 +178,20 @@ open class MainActivity : Activity() {
     }
 
     /** First visit of a city tab without data: offer the sync once (nothing is downloaded unless the user says so). */
+    /** What the sync brings for buses, in running text. */
+    private fun busWhat() = if (City.timetables) tr("all ${City.operator} bus lines, stops and timetables", "tüm ${City.operator} otobüs hatları, durakları ve saatleri")
+        else tr("the bus lines and stops mapped in OpenStreetMap (${City.operator} publishes no open timetables)",
+            "OpenStreetMap'te çizili otobüs hatları ve durakları (${City.operator} açık saat verisi yayımlamıyor)")
+
+    private fun busWhatAcc() = if (City.timetables) "tüm ${City.operator} otobüs hatlarını, duraklarını ve saatlerini"
+        else "OpenStreetMap'te çizili otobüs hatlarını ve duraklarını"
+
     private fun askFirstSync() {
         android.app.AlertDialog.Builder(this)
             .setTitle(tr("Download ${City.localName} data?", "${City.localName} verisi indirilsin mi?"))
-            .setMessage(tr("The ${City.localName} tab works offline after one sync: the map, places, metro/tram/ferry lines and all ${City.operator} bus lines, stops and timetables. " +
+            .setMessage(tr("The ${City.localName} tab works offline after one sync: the map, places, metro/tram/ferry lines and ${busWhat()}. " +
                 "It needs Wi-Fi and ${City.downloadSize} of download, and takes 10–60 minutes; you can leave the app meanwhile.",
-                "${City.localName} sekmesi tek bir eşitlemeden sonra çevrimdışı çalışır: harita, yerler, metro/tramvay/vapur hatları ve tüm ${City.operator} otobüs hatları, durakları ve saatleri. " +
+                "${City.localName} sekmesi tek bir eşitlemeden sonra çevrimdışı çalışır: harita, yerler, metro/tramvay/vapur hatları ve ${busWhat()}. " +
                 "Wi-Fi ve ${City.downloadSize} indirme gerekir; 10–60 dakika sürer, bu sırada uygulamadan çıkabilirsiniz."))
             .setPositiveButton(tr("Sync now", "Şimdi eşitle")) { _, _ -> startSync() }
             .setNegativeButton(tr("Later", "Sonra"), null)
@@ -759,7 +767,7 @@ open class MainActivity : Activity() {
             val col = if (v.mode == Mode.BUS) C.HIGHLIGHT else v.color
             val tripsToday = run { var k = 0; var i = 0; while (i < d.trips.size) { if (d.trips[i] and n.today != 0) k++; i += 3 }; k }
             header("→ " + v.headsign.ifEmpty { v.lineName }, v.lineName + " · " + Mode.name(v.mode) +
-                (if (v.mode == Mode.BUS) tr(" · $tripsToday trips today", " · bugün $tripsToday sefer") else ""), badge(v.ref, col))
+                (if (v.mode == Mode.BUS && v.ntrips > 0) tr(" · $tripsToday trips today", " · bugün $tripsToday sefer") else ""), badge(v.ref, col))
             // map: the route, its stops, the focused stop
             map.lines = listOf(MapView.Line(d.geom, col, 4.5f))
             val dots = ArrayList<MapView.Dot>()
@@ -798,6 +806,8 @@ open class MainActivity : Activity() {
             } else {
                 if (v.mode != Mode.BUS && v.ntrips == 0) views.add(note(tr("Metro, tram and ferry lines come from OpenStreetMap, without timetables.",
                     "Metro, tramvay ve vapur hatları OpenStreetMap'ten gelir; saatleri yoktur.")))
+                else if (v.ntrips == 0 && !City.timetables) views.add(note(tr("${City.operator} publishes no open timetables; this line comes from OpenStreetMap.",
+                    "${City.operator} açık saat verisi yayımlamıyor; bu hat OpenStreetMap'ten gelir.")))
                 v.stops.forEachIndexed { i, sid ->
                     val st = d.stops[sid] ?: return@forEachIndexed
                     val next = if (v.ntrips > 0 && i < v.stops.size - 1) Times.next(d.trips, v.dists, i, n.sec, n.today, n.yesterday, 1).firstOrNull() else null
@@ -1291,7 +1301,7 @@ open class MainActivity : Activity() {
             opts.forEachIndexed { i, o ->
                 val first = o.legs.first()
                 val dep = first.next.firstOrNull()?.let { tr(" · next ${Times.mins(it, n.sec)}", " · sonraki ${Times.mins(it, n.sec)}") }
-                    ?: if (first.v.ntrips == 0 && first.v.mode != Mode.BUS) "" else tr(" · no more today", " · bugün sefer kalmadı")
+                    ?: if (first.v.ntrips == 0) "" else tr(" · no more today", " · bugün sefer kalmadı")
                 val km = String.format(java.util.Locale.US, "%.1f", o.j.rideMeters / 1000.0)
                 val end = Fmt.dist(o.j.endDist.toDouble())
                 val sub = changes(o.j.changes) +
@@ -1462,10 +1472,10 @@ open class MainActivity : Activity() {
             "${City.localName} sekmesi tek bir eşitlemeden sonra çevrimdışı çalışır"))
         map.circle = null; map.lines = emptyList(); map.dots = emptyList()
         body(
-            note(tr("Sync downloads the ${City.name} map, places, metro/tram/ferry lines (OpenStreetMap) and all ${City.operator} bus lines, stops and timetables. " +
+            note(tr("Sync downloads the ${City.name} map, places, metro/tram/ferry lines (OpenStreetMap) and ${busWhat()}. " +
                 "It needs Wi-Fi and ${City.downloadSize} of download, and takes 10–60 minutes. After that, everything works offline.",
-                "Eşitleme ${City.localName} haritasını, yerleri, metro/tramvay/vapur hatlarını (OpenStreetMap) ve tüm ${City.operator} otobüs hatlarını, " +
-                    "duraklarını ve saatlerini indirir. Wi-Fi ve ${City.downloadSize} indirme gerekir; 10–60 dakika sürer. Sonrasında her şey çevrimdışı çalışır.")),
+                "Eşitleme ${City.localName} haritasını, yerleri, metro/tramvay/vapur hatlarını (OpenStreetMap) ve ${busWhatAcc()} " +
+                    "indirir. Wi-Fi ve ${City.downloadSize} indirme gerekir; 10–60 dakika sürer. Sonrasında her şey çevrimdışı çalışır.")),
             button(tr("Open sync settings", "Eşitleme ayarlarını aç"), C.ACCENT, C.ACCENT) { show(Screen.Settings) },
         )
     }
@@ -1480,7 +1490,12 @@ open class MainActivity : Activity() {
             val s = if (store.ready) {
                 val at = store.meta("synced_at")?.toLongOrNull()
                 tr("Last sync: ", "Son eşitleme: ") + (at?.let { Fmt.date(it) } ?: "?") + "\n" +
-                    (if (City.ankara) tr("EGO timetables read: ", "EGO saatleri okundu: ") else tr("İETT timetable published: ", "İETT saatlerinin yayın tarihi: ")) +
+                    (when (City.bus) {
+                        City.Bus.EGO -> tr("EGO timetables read: ", "EGO saatleri okundu: ")
+                        City.Bus.IETT -> tr("İETT timetable published: ", "İETT saatlerinin yayın tarihi: ")
+                        City.Bus.GTFS -> tr("${City.operator} timetable starts: ", "${City.operator} saatlerinin başlangıcı: ")
+                        City.Bus.OSM -> tr("Bus routes read: ", "Otobüs güzergâhları okundu: ")
+                    }) +
                     (store.meta("gtfs_date") ?: "?") + "\n" +
                     (egoStats()?.let { it + "\n" } ?: "") +
                     store.counts() + "\n" +
@@ -1510,7 +1525,8 @@ open class MainActivity : Activity() {
         views.add(syncText!!)
         syncErr = text("", 13f, C.RED).apply { setPadding(dp(6), dp(2), dp(6), dp(2)) }
         views.add(syncErr!!)
-        // situational sync
+        // situational sync (only where the operator publishes announcements and today's times)
+        if (!City.situational) { sitInfo = null; sitBtn = null } else {
         views.add(text(tr("Situational sync", "Güncel durum eşitlemesi"), 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
         sitInfo = text("", 13f, C.DIM).apply { setPadding(dp(6), 0, dp(6), dp(6)) }
         views.add(sitInfo!!)
@@ -1526,6 +1542,7 @@ open class MainActivity : Activity() {
                 "departure times of every bus line, without downloading the map again. About 800 small requests on Wi-Fi; usually under a minute.",
             "İETT'nin güncel duyurularını (iptal edilen seferler, güzergâh değişiklikleri, kapalı yollar; hatlarda ⚠ ile gösterilir) ve her otobüs " +
                 "hattının bugünkü planlı kalkış saatlerini haritayı yeniden indirmeden alır. Wi-Fi ile yaklaşık 800 küçük istek; genelde bir dakikadan kısa.")))
+        }
         // line looks
         views.add(text(tr("Lines on the map", "Haritadaki hatlar"), 15f, bold = true).apply { setPadding(dp(6), dp(14), dp(6), dp(2)) })
         views.add(slider(tr("Bus web thickness", "Otobüs ağı kalınlığı"), Style.webWidth, 0.3f, 2f) { Style.webWidth = it })
@@ -1543,6 +1560,10 @@ open class MainActivity : Activity() {
                 "Stops EGO lists without a map position are placed by name near the line, or estimated between their neighbours. On holidays EGO runs the Saturday times.",
                 "EGO ilk duraktaki kalkış saatlerini ve sefer süresini yayımlar; sonraki duraklardaki saatler bunlardan tahmin edilir. " +
                     "EGO'nun konumsuz listelediği duraklar adlarına göre hattın yakınına yerleştirilir ya da komşu duraklar arasında tahmin edilir. Bayramlarda EGO cumartesi saatlerini uygular.")
+            else if (!City.timetables) tr("${City.operator} publishes no open timetables, so bus lines show their route and stops only. " +
+                "The lines are the ones mapped in OpenStreetMap; some may be missing or out of date.",
+                "${City.operator} açık saat verisi yayımlamıyor; otobüs hatlarında yalnızca güzergâh ve duraklar görünür. " +
+                    "Hatlar OpenStreetMap'te çizilmiş olanlardır; bazıları eksik ya da eski olabilir.")
             else tr("Times at stops after the first are estimated from the first and last stop's scheduled times. Public holidays are not in the timetable.",
                 "İlk duraktan sonraki saatler, ilk ve son durağın planlı saatlerinden tahmin edilir. Resmî tatiller saat çizelgesinde yoktur."),
         ))

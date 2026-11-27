@@ -83,6 +83,22 @@
       "summary_tr": "Bölümlü, sade ana ekran. İsteğe bağlı; eski ana ekranınıza her an dönebilirsiniz."
     },
     {
+      "key": "utility",
+      "name": "Plain Utility",
+      "package": "app.plain.utility",
+      "file": "PlainUtility.apk",
+      "project": "PlainUtility",
+      "src": "PlainUtility",
+      "buildFile": "app/build.gradle.kts",
+      "tasks": [
+        ":app:testDebugUnitTest",
+        ":app:assembleRelease"
+      ],
+      "apk": "app/build/outputs/apk/release/app-release.apk",
+      "summary": "Clock and Notes in tabs: pomodoro focus timer, timer and stopwatch, and quick text or voice notes that remind you at a time you write in them (\"in 20 min\", \"tomorrow 9\"). Offline, nothing runs in the background.",
+      "summary_tr": "Sekmelerde Saat ve Notlar: pomodoro odak sayacı, sayaç ve kronometre, ve içine yazdığınız zamanda (\"20 dk sonra\", \"yarın 9\") hatırlatan hızlı yazılı ya da sesli notlar. İnternetsiz, arka planda hiçbir şey çalışmaz."
+    },
+    {
       "key": "music",
       "name": "Plain Music",
       "package": "app.localmusic",

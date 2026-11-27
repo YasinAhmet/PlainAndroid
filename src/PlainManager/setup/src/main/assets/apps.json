@@ -60,6 +60,21 @@
       "minSdk": 29,
       "summary": "Minimal home screen with app sections. Optional; you can switch back to your old home screen any time.",
       "summary_tr": "Bölümlü, sade ana ekran. İsteğe bağlı; eski ana ekranınıza her an dönebilirsiniz."
+    },
+    {
+      "key": "utility",
+      "name": "Plain Utility",
+      "package": "app.plain.utility",
+      "versionCode": 1,
+      "versionName": "1.0",
+      "file": "PlainUtility.apk",
+      "tag": "utility-v1.0",
+      "url": "https://github.com/YasinAhmet/PlainAndroid/releases/download/utility-v1.0/PlainUtility.apk",
+      "size": 196376,
+      "sha256": "b4b91c0ac310a55a798809c130796269144e67a16b3046339e74628a5dfb99fa",
+      "minSdk": 29,
+      "summary": "Clock and Notes in tabs: pomodoro focus timer, timer and stopwatch, and quick text or voice notes that remind you at a time you write in them (\"in 20 min\", \"tomorrow 9\"). Offline, nothing runs in the background.",
+      "summary_tr": "Sekmelerde Saat ve Notlar: pomodoro odak sayacı, sayaç ve kronometre, ve içine yazdığınız zamanda (\"20 dk sonra\", \"yarın 9\") hatırlatan hızlı yazılı ya da sesli notlar. İnternetsiz, arka planda hiçbir şey çalışmaz."
     }
   ]
 }

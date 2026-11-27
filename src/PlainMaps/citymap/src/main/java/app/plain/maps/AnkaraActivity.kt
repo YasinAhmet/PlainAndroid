@@ -1,10 +1,19 @@
 package app.plain.maps
 
-/**
- * The Ankara tab: the same map as Istanbul ([MainActivity]), run in the ":ankara" process where [City.id] is
- * "ankara" (set by Plain Maps' Application). Its data, caches and settings are its own (see [City]).
+/*
+ * The other city tabs: the same map as Istanbul ([MainActivity]), each run in its own process (":ankara", ":izmir" …)
+ * where [City.id] is that city (set by Plain Maps' Application). Their data, caches and settings are their own (see
+ * [City]). Each has its own sync service in the same process.
  */
-class AnkaraActivity : MainActivity()
 
-/** Ankara's sync, in the ":ankara" process with [AnkaraActivity]. */
+class AnkaraActivity : MainActivity()
 class AnkaraSyncService : SyncService()
+
+class IzmirActivity : MainActivity()
+class IzmirSyncService : SyncService()
+
+class KocaeliActivity : MainActivity()
+class KocaeliSyncService : SyncService()
+
+class AntalyaActivity : MainActivity()
+class AntalyaSyncService : SyncService()

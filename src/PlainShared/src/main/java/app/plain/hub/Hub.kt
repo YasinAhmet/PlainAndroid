@@ -32,8 +32,8 @@ import java.io.File
 /**
  * One app made of several former apps ("tabs"): Plain Maps = Istanbul / Ankara / Trekking, and so on.
  *
- * Every tab is its own Activity, all in the app's one task (one entry in Recents). The switcher pill ("Music ▾", in
- * the thumb bar at the bottom, see [wrap]) switches tabs by bringing the other tab's existing Activity to the front
+ * Every tab is its own Activity, all in the app's one task (one entry in Recents). The drawers on top (see [wrap]; the
+ * switcher pill on full-screen tabs) switch tabs by bringing the other tab's existing Activity to the front
  * (FLAG_ACTIVITY_REORDER_TO_FRONT),
  * so a tab is never started twice and keeps its state. Intents from other apps come in through [ForwardActivity]
  * aliases, which do the same. Nothing of a tab runs while it is not open, except what the former app already ran in
@@ -46,7 +46,7 @@ import java.io.File
  * Canonical copy: A:/Projects/PlainShared (the `:shared` module of every merged Plain app).
  */
 object Hub {
-    /** "Plain Maps": the app's name, shown before the tab name in the header. */
+    /** "Plain Maps": the app's name (the tab sheet's header). */
     var appName: String = ""
         private set
     var tabs: List<Tab> = emptyList()
@@ -70,6 +70,18 @@ object Hub {
     val visibleTabs: List<Tab> get() = tabs.filter { Build.VERSION.SDK_INT >= it.minSdk }
 
     fun tab(key: String?): Tab? = tabs.firstOrNull { it.key == key }
+
+    /**
+     * The tabs shown in the drawers / the tab sheet from tab [current]: those without [Tab.shown] or whose test
+     * passes (a downloaded city), plus [current] itself. The rest wait under "Others" ([otherTabs]).
+     */
+    fun mainTabs(ctx: Context, current: String?): List<Tab> =
+        visibleTabs.filter { it.key == current || it.shown?.invoke(ctx) != false }
+
+    fun otherTabs(ctx: Context, current: String?): List<Tab> {
+        val main = mainTabs(ctx, current).toSet()
+        return visibleTabs.filter { it !in main }
+    }
 
     // ------------------------------------------------------------------ state
 
@@ -174,14 +186,14 @@ object Hub {
     // ------------------------------------------------------------------ thumb bar layout (2026-11-27, "draft 3")
 
     /**
-     * How a tab sits in the frame. [LIST]: a quiet title on top ("Plain Media" small, the page's name big) and the
-     * thumb bar at the bottom: the switcher pill, then whatever the tab puts in [bar] (its search field, ⋮ …).
+     * How a tab sits in the frame. [LIST]: the app's tabs as drawers on top (the open one pulled out), a big title under
+     * them only when the tab sets one, and the thumb bar at the bottom with whatever the tab puts in [bar] (search, ⋮ …).
      * [FULL]: the tab draws edge to edge (a map, the camera) and places [switcher] itself; it gets all insets.
      */
     enum class Style { LIST, FULL }
 
     /**
-     * Puts the title above and the thumb bar below [content]; use as `setContentView(Hub.wrap(this, "key", root))`.
+     * Puts the drawers (and title) above and the thumb bar below [content]; use as `setContentView(Hub.wrap(this, "key", root))`.
      * The frame takes the status-bar inset (title) and the navigation-bar + keyboard inset (thumb bar) itself and hands
      * [content] the window insets without them, so the content's own inset handling keeps working.
      */
@@ -195,20 +207,20 @@ object Hub {
         frameOf(a)?.setHeaderWanted(shown)
     }
 
-    /** The big title (null: the tab's name). The small line above it then reads "Plain Media · Music". */
+    /** The big title under the drawers; null hides it (the drawers name the tab; a list may head itself). */
     fun setTitle(a: Activity, title: CharSequence?) { frameOf(a)?.setTitle(title) }
 
-    /** A ‹ before the title (a sub-page, search results); null hides it. */
+    /** A ‹ before the drawers (a sub-page, search results); null hides it. */
     fun setBack(a: Activity, onBack: (() -> Unit)?) { frameOf(a)?.setBack(onBack) }
 
-    /** Tapping the title (e.g. scroll the list back to the top); null: nothing. */
+    /** Tapping the title or the open tab's drawer again (e.g. scroll the list back to the top); null: nothing. */
     fun setOnTitleTap(a: Activity, fn: (() -> Unit)?) { frameOf(a)?.titleTap = fn }
 
-    /** Small views at the right end of the title row (an action that belongs to the page, not the thumb bar). */
+    /** Small views at the right end of the drawer row (an action that belongs to the page, not the thumb bar). */
     fun titleEnd(a: Activity): LinearLayout? = frameOf(a)?.titleEnd
 
     /**
-     * The thumb bar's slot after the switcher pill: horizontal, vertically centred; add the tab's search field (weight 1)
+     * The thumb bar's slot: horizontal, vertically centred; add the tab's search field (weight 1)
      * and ⋮ here after setContentView. Null for [Style.FULL] tabs.
      */
     fun bar(a: Activity): LinearLayout? = frameOf(a)?.slot
@@ -241,14 +253,30 @@ object Hub {
         return (0 until root.childCount).map { root.getChildAt(it) }.filterIsInstance<HubFrame>().firstOrNull()
     }
 
-    /** The app's tabs as a bottom sheet; picking one switches to it. */
+    /**
+     * The app's tabs as a bottom sheet; picking one switches to it. Tabs that are not shown yet (a city without
+     * data) sit behind an "Others" row, which opens them as a second sheet.
+     */
     @Suppress("UNUSED_PARAMETER")
     fun showMenu(a: Activity, anchor: View, current: String) {
-        val vis = visibleTabs
         val s = Sheet(a, accent).header(appName.ifEmpty { tr("Switch", "Değiştir") })
-        for (t in vis) s.choice(t.label, t.key == current) { open(a, t.key) }
+        for (t in mainTabs(a, current)) s.choice(t.label, t.key == current) { open(a, t.key) }
+        val others = otherTabs(a, current)
+        if (others.isNotEmpty()) {
+            s.item(null, tr("Others", "Diğerleri"), others.joinToString(", ") { it.label }, more = true) { showOthers(a, current) }
+        }
         s.show()
     }
+
+    /** The tabs under "Others" (not downloaded yet), as their own sheet. */
+    fun showOthers(a: Activity, current: String) {
+        val s = Sheet(a, accent).header(tr("Others", "Diğerleri"), othersNote?.invoke())
+        for (t in otherTabs(a, current)) s.choice(t.label, false) { open(a, t.key) }
+        s.show()
+    }
+
+    /** The line under the "Others" sheet's title ("Not downloaded yet"); set by the app. */
+    var othersNote: (() -> String)? = null
 
     /** Process name (`app.plain.maps:ankara`), for apps that run tabs in their own processes. */
     fun processName(): String {
@@ -269,40 +297,51 @@ data class Tab(
     val minSdk: Int = 1,
     val import: Migrate.Spec? = null,
     val ownProcess: Boolean = false,
+    /** Null: always in the drawers / tab sheet. Else shown there only while this is true (e.g. the city is downloaded); otherwise under "Others". */
+    val shown: ((Context) -> Boolean)? = null,
 ) {
     val label: String get() = tr(en, trName)
 }
 
 /**
- * The thumb-bar frame around a tab's own UI (2026-11-27): a quiet title on top ("Plain Maps" small, the page's name
- * big) and at the bottom the switcher pill ("Istanbul ▾") with the tab's own [slot] (search, ⋮). It takes the
- * status-bar inset (title) and the navigation-bar + keyboard inset (thumb bar) itself and hands the content the
- * window insets without them. Title and bar hide in picture-in-picture and when the tab asks ([Hub.setHeaderShown]).
- * [Hub.Style.FULL]: no title, no bar, the content gets every inset.
+ * The frame around a tab's own UI (thumb bar 2026-11-27, drawers 2026-11-28). On top: the app's tabs as a row of
+ * "drawers", outlined boxes hanging from the top edge; the open tab's drawer is pulled out (slid a little down, accent
+ * outline) and tapping another one slides that one out and switches. A ‹ sits before the drawers on sub-pages; the big
+ * title shows only when the tab sets one ([Hub.setTitle]), so a tab that heads its own list never shows two titles.
+ * At the bottom: the tab's own [slot] (search, ⋮). It takes the status-bar inset (drawers) and the navigation-bar +
+ * keyboard inset (thumb bar) itself and hands the content the window insets without them. Drawers, title and bar hide
+ * in picture-in-picture and when the tab asks ([Hub.setHeaderShown]).
+ * [Hub.Style.FULL]: no drawers, no bar, the content gets every inset (it places [Hub.switcher] itself).
  */
 internal class HubFrame(private val act: Activity, private val key: String, private val content: View, private val style: Hub.Style) : LinearLayout(act) {
+    private val top: LinearLayout
+    private val drawerRow: LinearLayout
+    private val drawers = ArrayList<Pair<String, LinearLayout>>()
     private val titleBox: LinearLayout
-    private val label: TextView
     private val title: TextView
     private val back: TextView
     val titleEnd: LinearLayout
     private val bar: LinearLayout
     val slot: LinearLayout?
     private var wanted = true
+    private var switching = false
     private var lastInsets: WindowInsets? = null
     var titleTap: (() -> Unit)? = null
     private var onBack: (() -> Unit)? = null
     private val dp = resources.displayMetrics.density
+    private val drop = 7 * dp // how far the open drawer is pulled out
 
     init {
         orientation = VERTICAL
         setBackgroundColor(BG)
-        val tabLabel = Hub.tab(key)?.label ?: key
-        // --- title: "Plain Media" (small) / "Music" (big); ‹ for sub-pages
-        titleBox = LinearLayout(act).apply {
+        top = LinearLayout(act).apply { orientation = VERTICAL }
+        // --- drawers: one outlined box per tab; ‹ before them on sub-pages, the tab's titleEnd after them
+        drawerRow = LinearLayout(act).apply {
             orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), (6 * dp).toInt())
+            gravity = Gravity.TOP
+            setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), (drop + 6 * dp).toInt())
+            clipChildren = false
+            clipToPadding = false
         }
         back = TextView(act).apply {
             text = "‹"
@@ -314,51 +353,138 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
             visibility = View.GONE
             setOnClickListener { onBack?.invoke() }
         }
-        titleBox.addView(back, LayoutParams((40 * dp).toInt(), (48 * dp).toInt()))
-        val col = LinearLayout(act).apply { orientation = VERTICAL; setPadding((8 * dp).toInt(), 0, 0, 0) }
-        label = TextView(act).apply {
-            text = Hub.appName
-            textSize = 12f
-            setTextColor(DIM)
-            isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.END
-            letterSpacing = 0.02f
+        drawerRow.addView(back, LayoutParams((40 * dp).toInt(), (DRAWER_H * dp).toInt()))
+        val cabinet = LinearLayout(act).apply { orientation = HORIZONTAL; clipChildren = false; clipToPadding = false }
+        val vis = Hub.mainTabs(act, key).ifEmpty { listOfNotNull(Hub.tab(key)) }
+        vis.forEachIndexed { i, t ->
+            val d = drawer(t.label) { pick(t.key) }
+            drawers += t.key to d
+            cabinet.addView(d, LayoutParams(0, (DRAWER_H * dp).toInt(), 1f).apply { if (i > 0) leftMargin = (6 * dp).toInt() })
+        }
+        // tabs not shown yet (see Tab.shown) wait behind one more drawer
+        if (Hub.otherTabs(act, key).isNotEmpty()) {
+            val d = drawer(tr("Others", "Diğerleri") + " ▾") { Hub.showOthers(act, key) }
+            drawers += "" to d
+            cabinet.addView(d, LayoutParams(0, (DRAWER_H * dp).toInt(), 1f).apply { leftMargin = (6 * dp).toInt() })
+        }
+        drawerRow.addView(cabinet, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        titleEnd = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        drawerRow.addView(titleEnd, LayoutParams(LayoutParams.WRAP_CONTENT, (DRAWER_H * dp).toInt()).apply { leftMargin = (4 * dp).toInt() })
+        top.addView(drawerRow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // --- title: only when the tab sets one (Youtube's "Download", a search page's name)
+        titleBox = LinearLayout(act).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((18 * dp).toInt(), 0, (12 * dp).toInt(), (6 * dp).toInt())
+            visibility = View.GONE
         }
         title = TextView(act).apply {
-            text = tabLabel
             textSize = 26f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(TEXT)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
             includeFontPadding = false
-            setPadding(0, (2 * dp).toInt(), 0, 0)
+            setOnClickListener { titleTap?.invoke() }
         }
-        col.addView(label); col.addView(title)
-        col.setOnClickListener { titleTap?.invoke() }
-        titleBox.addView(col, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        titleEnd = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        titleBox.addView(titleEnd, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        // --- thumb bar: switcher pill + the tab's slot
+        titleBox.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(titleBox, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // --- thumb bar: the tab's slot (search, ⋮); only the nav-bar inset when the tab puts nothing there
         bar = LinearLayout(act).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((8 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt(), (4 * dp).toInt())
+            setPadding((8 * dp).toInt(), 0, (4 * dp).toInt(), (4 * dp).toInt())
         }
-        bar.addView(Hub.pill(act, key), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { rightMargin = (6 * dp).toInt() })
         // a fixed minimum height: buttons appearing in the slot (a selection) never resize the content above
-        slot = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; minimumHeight = (44 * dp).toInt() }
+        slot = LinearLayout(act).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setOnHierarchyChangeListener(object : OnHierarchyChangeListener {
+                override fun onChildViewAdded(parent: View?, child: View?) = fitBar()
+                override fun onChildViewRemoved(parent: View?, child: View?) = fitBar()
+            })
+        }
         bar.addView(slot, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        if (style == Hub.Style.LIST) addView(titleBox, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        fitBar()
+        if (style == Hub.Style.LIST) addView(top, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         if (style == Hub.Style.LIST) addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        showOpen(key, animate = false)
         updateVisibility()
     }
 
+    /** A drawer front: the tab's name with a small pull under it; square top corners (it hangs from the screen's top). */
+    private fun drawer(label: String, onTap: () -> Unit): LinearLayout = LinearLayout(act).apply {
+        orientation = VERTICAL
+        gravity = Gravity.CENTER
+        val name = TextView(act).apply {
+            text = label
+            textSize = 14f
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setPadding((6 * dp).toInt(), 0, (6 * dp).toInt(), 0)
+        }
+        addView(name, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // the pull: a 2 dp line (a tiny indicator, allowed as a fill by the design rules)
+        addView(View(act), LayoutParams((16 * dp).toInt(), (2 * dp).toInt().coerceAtLeast(1)).apply { topMargin = (6 * dp).toInt() })
+        contentDescription = label
+        setOnClickListener { onTap() }
+    }
+
+    private fun styleDrawer(d: LinearLayout, open: Boolean) {
+        val c = if (open) Hub.accent else OUTLINE_BTN
+        val r = 10 * dp
+        d.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22FFFFFF),
+            GradientDrawable().apply {
+                setColor(BG)
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+                setStroke((1 * dp).toInt().coerceAtLeast(1), c)
+            }, null)
+        (d.getChildAt(0) as TextView).apply {
+            setTextColor(if (open) Hub.accent else DIM)
+            setTypeface(null, if (open) Typeface.BOLD else Typeface.NORMAL)
+        }
+        d.getChildAt(1).setBackgroundColor(if (open) Hub.accent else FAINT)
+        d.isSelected = open
+    }
+
+    /** Pulls out [open]'s drawer and pushes the others back in. */
+    private fun showOpen(open: String, animate: Boolean) {
+        for ((k, d) in drawers) {
+            val o = k == open
+            styleDrawer(d, o)
+            val y = if (o) drop else 0f
+            d.animate().cancel()
+            if (animate) d.animate().translationY(y).setDuration(140).start() else d.translationY = y
+        }
+    }
+
+    private fun pick(k: String) {
+        if (switching) return
+        if (k == key) { titleTap?.invoke(); return }
+        switching = true
+        showOpen(k, animate = true)
+        postDelayed({ Hub.open(act, k) }, 150)
+    }
+
+    private fun fitBar() {
+        val s = slot ?: return
+        val has = s.childCount > 0
+        s.minimumHeight = if (has) (44 * dp).toInt() else 0
+        bar.setPadding(bar.paddingLeft, if (has) (6 * dp).toInt() else 0, bar.paddingRight, bar.paddingBottom)
+    }
+
+    // back from another tab: this tab's drawer is the open one again
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE && switching) { switching = false; showOpen(key, animate = false) }
+    }
+
     fun setTitle(t: CharSequence?) {
-        val tabLabel = Hub.tab(key)?.label ?: key
-        title.text = t ?: tabLabel
-        label.text = if (t == null || t.toString() == tabLabel) Hub.appName else "${Hub.appName}  ·  $tabLabel"
+        title.text = t ?: ""
+        titleBox.visibility = if (t.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
     fun setBack(fn: (() -> Unit)?) {
@@ -375,8 +501,8 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         if (style == Hub.Style.FULL) return
         val pip = Build.VERSION.SDK_INT >= 24 && act.isInPictureInPictureMode
         val v = if (wanted && !pip) View.VISIBLE else View.GONE
-        if (titleBox.visibility != v) {
-            titleBox.visibility = v
+        if (top.visibility != v) {
+            top.visibility = v
             bar.visibility = v
             lastInsets?.let { dispatchApplyWindowInsets(it) } ?: requestApplyInsets()
         }
@@ -401,18 +527,18 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
     @Suppress("DEPRECATION")
     override fun dispatchApplyWindowInsets(insets: WindowInsets): WindowInsets {
         lastInsets = insets
-        if (style == Hub.Style.FULL || titleBox.visibility != View.VISIBLE) {
+        if (style == Hub.Style.FULL || top.visibility != View.VISIBLE) {
             content.dispatchApplyWindowInsets(insets)
             return insets
         }
-        val top: Int
+        val topInset: Int
         val bottom: Int
         val child: WindowInsets
         if (Build.VERSION.SDK_INT >= 30) {
             val sb = insets.getInsets(WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.captionBar())
             val nav = insets.getInsets(WindowInsets.Type.navigationBars())
             val ime = insets.getInsets(WindowInsets.Type.ime())
-            top = sb.top
+            topInset = sb.top
             bottom = maxOf(nav.bottom, ime.bottom)
             val c = insets.getInsets(WindowInsets.Type.displayCutout())
             child = WindowInsets.Builder(insets)
@@ -426,12 +552,12 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
                 .setInsetsIgnoringVisibility(WindowInsets.Type.navigationBars(), Insets.of(nav.left, 0, nav.right, 0))
                 .build()
         } else {
-            top = insets.systemWindowInsetTop
+            topInset = insets.systemWindowInsetTop
             bottom = insets.systemWindowInsetBottom
             child = insets.replaceSystemWindowInsets(insets.systemWindowInsetLeft, 0, insets.systemWindowInsetRight, 0)
         }
-        val tTop = top + (12 * dp).toInt()
-        if (titleBox.paddingTop != tTop) titleBox.setPadding(titleBox.paddingLeft, tTop, titleBox.paddingRight, titleBox.paddingBottom)
+        // the drawers hang right under the status bar
+        if (drawerRow.paddingTop != topInset) drawerRow.setPadding(drawerRow.paddingLeft, topInset, drawerRow.paddingRight, drawerRow.paddingBottom)
         val bBottom = bottom + (4 * dp).toInt()
         if (bar.paddingBottom != bBottom) bar.setPadding(bar.paddingLeft, bar.paddingTop, bar.paddingRight, bBottom)
         content.dispatchApplyWindowInsets(child)
@@ -443,6 +569,9 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         const val LINE = 0xFF2A2A2A.toInt()
         const val TEXT = 0xFFE4E4E4.toInt()
         const val DIM = 0xFFA6A6A6.toInt()
+        const val FAINT = 0xFF484848.toInt()
+        const val OUTLINE_BTN = 0xFF333333.toInt()
+        const val DRAWER_H = 44
     }
 }
 

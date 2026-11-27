@@ -224,6 +224,7 @@ class DownloadService : Service() {
                     if (it.channel.isBlank()) it.channel = Naming.channel(info.author)
                     if (it.durationSec <= 0) it.durationSec = info.durationSec
                 }
+                earlyAdopt(id, info)?.let { have -> alreadySaved(id, have); finishedOk++; return }
                 try {
                     enqueueSave(fetch(id, info))
                     break
@@ -240,6 +241,19 @@ class DownloadService : Service() {
             try { wake.release() } catch (_: Exception) {}
             try { wifiLock?.release() } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * 3.10: the file is in its folder already (same name and length), e.g. from before a reinstall, which forgets what
+     * was downloaded: adopted before any stream is fetched. A YouTube Music track without an album is checked when
+     * saving instead (its folder needs the album lookup).
+     */
+    private fun earlyAdopt(id: Long, info: VideoInfo): Saved.File? {
+        val j = Store.get(id) ?: return null
+        if (j.kind == Kind.AUDIO && j.album == null && info.author.trim().endsWith(" - Topic")) return null
+        val rel = Naming.relativePath(j.kind, j.channel.ifBlank { Naming.channel(info.author) }, j.album)
+        val exts = if (j.kind == Kind.AUDIO) listOf("m4a", "ogg") else listOf("mp4")
+        return exts.firstNotNullOfOrNull { Saved.adopt(contentResolver, j.videoId, j.kind, rel, j.title.ifBlank { info.title }, it, info.durationSec.toInt()) }
     }
 
     /** The job's video is saved already: the job finishes pointing at that file (no second copy, no "Title (2)"). */
@@ -336,7 +350,7 @@ class DownloadService : Service() {
             }
             val rel = Naming.relativePath(j.kind, channel, album)
             // saved meanwhile (a cache completed while this downloaded), or before 3.3 with only the mark: keep that one
-            (Saved.find(this, j.videoId, j.kind) ?: Saved.adopt(cr, j.videoId, j.kind, rel, j.title, t.out.ext))?.let { have ->
+            (Saved.find(this, j.videoId, j.kind) ?: Saved.adopt(cr, j.videoId, j.kind, rel, j.title, t.out.ext, t.info.durationSec.toInt()))?.let { have ->
                 alreadySaved(id, have); finishedOk++; return
             }
             val name = Naming.unique(Naming.title(j.title), t.out.ext, Saver.takenNames(cr, j.kind, rel))

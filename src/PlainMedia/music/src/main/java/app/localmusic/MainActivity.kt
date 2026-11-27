@@ -105,6 +105,7 @@ class MainActivity : Activity() {
     var nowPlaying: NowPlayingView? = null
     private val overlays = ArrayList<View>()
     var organizer: OrganizerView? = null
+    var duplicates: DuplicatesView? = null
     var trash: TrashView? = null
 
     private var resumed = false
@@ -311,6 +312,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (eraser.onResult(requestCode, resultCode == RESULT_OK)) return
         organizer?.onConsent(requestCode, resultCode == RESULT_OK)
+        duplicates?.onConsent(requestCode, resultCode == RESULT_OK)
         trash?.onConsent(requestCode, resultCode == RESULT_OK)
     }
 
@@ -546,12 +548,9 @@ class MainActivity : Activity() {
         }
         back.visibility = if (drill.isNotEmpty() || query.isNotEmpty() || editPlaylist != null) View.VISIBLE else View.GONE
         Hub.setBack(this, if (back.visibility == View.VISIBLE) ({ onBackPressed() }) else null)
-        Hub.setTitle(this, when {
-            drill.lastOrNull()?.fromSearch == true -> drill.last().title
-            query.isNotEmpty() -> tr("Search", "Arama")
-            drill.isNotEmpty() -> drill.last().title
-            else -> TABS[tab]
-        })
+        // pages and tabs head their own list (HeaderRow: title, counts, Play/Shuffle), so the frame shows no second
+        // title; only search results, which have no header row, get one
+        Hub.setTitle(this, if (query.isNotEmpty() && drill.lastOrNull()?.fromSearch != true) tr("Search", "Arama") else null)
     }
 
     private fun selectTab(i: Int) {
@@ -1307,6 +1306,7 @@ class MainActivity : Activity() {
         sheet.section(tr("Library", "Kitaplık"))
             .item(Ic.REFRESH, tr("Rescan music", "Müziği yeniden tara"), sub = tr("New files usually show up by themselves", "Yeni dosyalar genelde kendiliğinden görünür")) { loadLibrary(); toast(tr("Rescanning…", "Yeniden taranıyor…")) }
             .item(Ic.FOLDER, tr("Organize library", "Kitaplığı düzenle"), sub = tr("Tidy folders and find duplicates; nothing moves until you confirm", "Klasörleri toparla, kopyaları bul; onaylayana dek hiçbir şey taşınmaz"), more = true) { openOrganizer() }
+            .item(Ic.DELETE, tr("Remove duplicates", "Kopyaları kaldır"), sub = tr("Songs on the phone twice, downloads included; you review the list first", "Telefonda iki kez olan şarkılar, indirmeler dahil; önce listeyi görürsünüz"), more = true) { openDuplicates() }
             .item(Ic.RESTORE, tr("Trash", "Çöp kutusu"), sub = tr("Erased songs, restorable for about 30 days", "Silinen şarkılar, yaklaşık 30 gün geri yüklenebilir"), more = true) { openTrash() }
         if (Build.VERSION.SDK_INT >= 33 && Library.hasPermission(this) && !Library.hasVideoPermission(this))
             sheet.item(Ic.VIDEO, tr("Show Plain Youtube videos", "Plain Youtube videolarını göster"), sub = tr("Needs the Videos permission", "Videolar izni gerekir")) { requestPermissions(arrayOf(Library.VIDEO_PERMISSION), REQ_VIDEO) }
@@ -1448,6 +1448,7 @@ class MainActivity : Activity() {
         overlays -= v
         root.removeView(v)
         if (v === organizer) organizer = null
+        if (v === duplicates) duplicates = null
         if (v === trash) trash = null
         if (v is QueueView) nowPlaying?.update()
     }
@@ -1457,6 +1458,11 @@ class MainActivity : Activity() {
     private fun openOrganizer() {
         if (!Library.hasPermission(this)) { toast(tr("Allow music access first", "Önce müzik erişimine izin verin")); return }
         organizer = OrganizerView(this).also { showOverlay(it) }
+    }
+
+    private fun openDuplicates() {
+        if (!Library.hasPermission(this)) { toast(tr("Allow music access first", "Önce müzik erişimine izin verin")); return }
+        duplicates = DuplicatesView(this).also { showOverlay(it) }
     }
 
     private fun openTrash() {

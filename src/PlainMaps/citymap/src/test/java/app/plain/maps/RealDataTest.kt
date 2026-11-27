@@ -11,6 +11,53 @@ import java.io.File
  *   OSM_CELL = an Overpass answer for the map query
  */
 class RealDataTest {
+    /** KOCAELI_DIR = Kocaeli's GTFS files (veri.kocaeli.bel.tr), unzipped. */
+    @Test
+    fun kocaeliFeed() {
+        val dir = System.getenv("KOCAELI_DIR")?.let(::File)
+        assumeTrue(dir != null && dir.isDirectory)
+        dir!!
+        val t0 = System.currentTimeMillis()
+        val t = Transit.read(File(dir, "stops.txt"), File(dir, "routes.txt"), File(dir, "trips.txt"), File(dir, "calendar.txt"), File(dir, "stop_times.txt"),
+            { println("  $it") }, box = BBox(29.00, 40.40, 30.50, 41.30), busOnly = true)
+        println("read in ${System.currentTimeMillis() - t0} ms: ${t.stops.size} stops (${t.badStops} bad), ${t.routes.size} routes, " +
+            "${t.patterns.size} patterns, ${t.tripsRead} trips (${t.tripsSkipped} skipped)")
+        val wanted = t.patterns.map { it.shapeId() }.filter { it.isNotEmpty() }.toHashSet()
+        File(dir, "shapes.txt").inputStream().buffered().use { Transit.readGtfsShapes(it, wanted, 1.2e-5, t.shapes) }
+        println("shapes: ${t.shapes.size} of ${wanted.size}")
+        t.patterns.filter { t.routes[it.route].short == "10" }.forEach { p ->
+            println("10 dir ${p.dir} → ${p.headsign()}: ${p.trips.size} trips, first ${p.trips.filter { it[0] and 1 != 0 }.minOfOrNull { it[1] }?.let { "%02d:%02d".format(it / 3600, it / 60 % 60) }}")
+        }
+        assertTrue(t.patterns.size > 300 && t.tripsRead > 10000)
+    }
+
+    /** ESHOT_ZIP = İzmir's bus-eshot-gtfs.zip (a plain GTFS with shapes.txt). */
+    @Test
+    fun eshotFeed() {
+        val zip = System.getenv("ESHOT_ZIP")?.let(::File)
+        assumeTrue(zip != null && zip.isFile)
+        zip!!
+        val dir = kotlin.io.path.createTempDirectory("eshot").toFile()
+        java.util.zip.ZipFile(zip).use { z ->
+            for (n in listOf("stops", "routes", "trips", "calendar")) z.getInputStream(z.getEntry("$n.txt")).use { i -> File(dir, "$n.txt").outputStream().use { i.copyTo(it) } }
+        }
+        val t0 = System.currentTimeMillis()
+        val t = Transit.read(File(dir, "stops.txt"), File(dir, "routes.txt"), File(dir, "trips.txt"), File(dir, "calendar.txt"), zip,
+            { println("  $it") }, box = BBox(26.20, 37.80, 28.50, 39.40))
+        println("read in ${System.currentTimeMillis() - t0} ms: ${t.stops.size} stops (${t.badStops} bad), ${t.routes.size} routes, " +
+            "${t.patterns.size} patterns, ${t.tripsRead} trips (${t.tripsSkipped} skipped)")
+        val wanted = t.patterns.map { it.shapeId() }.filter { it.isNotEmpty() }.toHashSet()
+        java.util.zip.ZipFile(zip).use { z -> z.getInputStream(z.getEntry("shapes.txt")).use { Transit.readGtfsShapes(it.buffered(), wanted, 1.2e-5, t.shapes) } }
+        println("shapes: ${t.shapes.size} of ${wanted.size}; patterns without shape: ${t.patterns.count { it.shapeId().isEmpty() }}")
+        val p = t.patterns.maxBy { it.trips.size }
+        println("busiest: ${t.routes[p.route].short} ${t.routes[p.route].long} → ${p.headsign()}, ${p.trips.size} trips, days ${p.trips.map { it[0] }.toSet()}")
+        println("stop sample: " + t.stops.take(4).map { "${it.name} ${it.lat},${it.lon}" })
+        assertTrue(t.stops.size > 5000 && t.badStops < 50)
+        assertTrue(t.patterns.size > 300 && t.tripsRead > 10000)
+        assertTrue(t.shapes.size >= wanted.size * 0.95)
+        dir.deleteRecursively()
+    }
+
     @Test
     fun ietfFeed() {
         val dir = System.getenv("GTFS_DIR")?.let(::File)

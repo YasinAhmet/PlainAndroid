@@ -21,7 +21,8 @@ import java.util.Locale
 object Organizer {
     class Scan(val files: List<FileInfo>, val uris: Map<Long, Uri>)
 
-    fun scan(ctx: Context, progress: (String) -> Unit): Scan {
+    /** [withPlainYoutube]: Plain Youtube's saved music (not its cache) counts as music too ("Remove duplicates"). */
+    fun scan(ctx: Context, withPlainYoutube: Boolean = false, progress: (String) -> Unit): Scan {
         val cr = ctx.contentResolver
         val cols = mutableListOf(
             MediaStore.Audio.Media._ID, MediaStore.Audio.Media.VOLUME_NAME, MediaStore.Audio.Media.RELATIVE_PATH,
@@ -59,7 +60,7 @@ object Organizer {
                         album = s(MediaStore.Audio.Media.ALBUM)?.takeUnless { a -> rel.trimEnd('/').endsWith(a) }, // folder name used as album
                         track = s(MediaStore.Audio.Media.TRACK), disc = s(MediaStore.Audio.Media.DISC_NUMBER), genre = s(MediaStore.Audio.Media.GENRE),
                     ),
-                    PlainYoutube.organiserSkip(rel) ?: Classify.skipReason(
+                    (if (withPlainYoutube && !PlainYoutube.isCached(rel)) null else PlainYoutube.organiserSkip(rel)) ?: Classify.skipReason(
                         rel, name, dur, ringtone = b(MediaStore.Audio.Media.IS_RINGTONE), notification = b(MediaStore.Audio.Media.IS_NOTIFICATION),
                         alarm = b(MediaStore.Audio.Media.IS_ALARM), podcast = b(MediaStore.Audio.Media.IS_PODCAST),
                         audiobook = b(MediaStore.Audio.Media.IS_AUDIOBOOK),

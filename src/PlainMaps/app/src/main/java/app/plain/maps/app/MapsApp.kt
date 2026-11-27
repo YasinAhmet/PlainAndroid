@@ -8,10 +8,11 @@ import app.plain.migrate.Migrate
 import app.trekmap.trail.TrailInit
 
 /**
- * Plain Maps (formerly Plain Istanbul Map): Istanbul (default), Ankara and Trekking tabs.
+ * Plain Maps (formerly Plain Istanbul Map): a tab per city (Istanbul default, Ankara, İzmir, Kocaeli, Antalya; see
+ * [City.all]) and Trekking.
  *
- * Processes: Istanbul in the main one, Ankara in ":ankara" (the same map code with [City.id] = "ankara"), Trekking in
- * ":trail" (a recording never shares memory with a big city map). This runs once in each of them.
+ * Processes: Istanbul in the main one, every other city in ":<id>" (the same map code with [City.id] = that city),
+ * Trekking in ":trail" (a recording never shares memory with a big city map). This runs once in each of them.
  */
 class MapsApp : Application() {
     override fun onCreate() {
@@ -21,14 +22,17 @@ class MapsApp : Application() {
                 "its plans, walked trails, trail photos, offline maps and settings",
                 "planlarını, yürünen rotalarını, rota fotoğraflarını, çevrimdışı haritalarını ve ayarlarını",
                 prefs = mapOf("app" to TrailInit.PREFS)))
-        Hub.setup(this, "Plain Maps", listOf(
-            Tab("istanbul", "Istanbul", "İstanbul", "app.plain.maps.MainActivity"),
-            Tab("ankara", "Ankara", "Ankara", "app.plain.maps.AnkaraActivity", ownProcess = true),
-            trekking,
-        ), accent = 0xFF26C6DA.toInt())
+        // one tab per city; only downloaded cities sit in the tab sheet, the rest wait under "Others"
+        val cities = City.all.map { c ->
+            Tab(c.id, c.en, c.trName, c.activity.name, ownProcess = c.id != "istanbul", shown = { ctx -> City.downloaded(ctx, c.id) })
+        }
+        Hub.setup(this, "Plain Maps", cities + trekking, accent = 0xFF26C6DA.toInt())
+        Hub.othersNote = { app.plain.lang.tr("Not downloaded yet. Nothing downloads until you say so.",
+            "Henüz indirilmedi. Siz istemeden hiçbir şey indirilmez.") }
         val proc = Hub.processName()
+        val cityProc = City.all.firstOrNull { it.id != "istanbul" && proc.endsWith(":" + it.id) }
         when {
-            proc.endsWith(":ankara") -> City.id = "ankara"
+            cityProc != null -> City.id = cityProc.id
             proc.endsWith(":trail") -> {
                 TrailInit.shareAuthority(this)
                 // with old Plain Trekking data still to copy, nothing may load the empty state first (see Hub.gate)
