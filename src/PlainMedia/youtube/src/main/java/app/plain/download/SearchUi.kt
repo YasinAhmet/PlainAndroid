@@ -1156,6 +1156,11 @@ class SearchScreen(private val act: MainActivity) {
         private var tab = if (name.trim().endsWith(" - Topic")) "music" else "videos"
         private var tabs: Map<String, String> = emptyMap()
         private val saved = HashMap<String, Triple<List<Item>, String?, Boolean>>()
+        /** Videos/Shorts order: YouTube's sort chips (tokens per tab) and the order shown now per tab. */
+        private val sortTokens = HashMap<String, Map<Browse.Sort, String>>()
+        private val sortNow = HashMap<String, Browse.Sort>()
+        private val sortPrefs = act.getSharedPreferences("channel_sort", android.content.Context.MODE_PRIVATE)
+        private val sortBtn = act.pill("", C.ACCENT, C.ACCENT) { chooseSort() }
         /** YouTube Music artist page for this channel id (null = not loaded yet; hasMusic false = none). */
         @Volatile private var artist: MusicParse.Artist? = null
         private var artistTried = false
@@ -1179,6 +1184,7 @@ class SearchScreen(private val act: MainActivity) {
                 val c = Chip(act, label) { switchTab(k) }
                 tabChips[k] = c; flow.addView(c)
             }
+            flow.addView(sortBtn)
             flow.addView(act.pill(tr("Download all…", "Tümünü indir…"), C.ACCENT, C.ACCENT) { downloadAllMenu() })
             // members-only videos of this channel: only offered with an account (the list is asked with it)
             if (Account.usable) flow.addView(act.pill(tr("Members", "Üyeler"), C.BLUE, C.BLUE) { push(MembersPage(channelId, name)) })
@@ -1190,7 +1196,49 @@ class SearchScreen(private val act: MainActivity) {
             updateHead()
         }
 
+        private fun sortLabel(s: Browse.Sort) = when (s) {
+            Browse.Sort.LATEST -> tr("Most recent", "En yeni")
+            Browse.Sort.POPULAR -> tr("Most viewed", "En çok izlenen")
+            Browse.Sort.OLDEST -> tr("Oldest", "En eski")
+        }
+
+        private fun savedSort(): Browse.Sort =
+            runCatching { Browse.Sort.valueOf(sortPrefs.getString("sort", null) ?: "LATEST") }.getOrDefault(Browse.Sort.LATEST)
+
+        private fun updateSort() {
+            val t = sortTokens[tab]
+            sortBtn.visibility = if ((tab == "videos" || tab == "shorts") && !t.isNullOrEmpty()) View.VISIBLE else View.GONE
+            sortBtn.text = tr("Sort: ", "Sırala: ") + sortLabel(sortNow[tab] ?: Browse.Sort.LATEST) + " ›"
+        }
+
+        /** "Sort: …" on a channel's Videos/Shorts: YouTube's own orders (the whole channel, not just the loaded pages). */
+        private fun chooseSort() {
+            val t = sortTokens[tab] ?: return
+            val opts = Browse.Sort.values().filter { it in t }
+            if (opts.isEmpty()) return
+            app.plain.ui.Sheet.choose(act, tr("Sort videos", "Videoları sırala"), opts.map { sortLabel(it) }, opts.indexOf(sortNow[tab] ?: Browse.Sort.LATEST), C.ACCENT) { i ->
+                val s = opts.getOrNull(i) ?: return@choose
+                sortPrefs.edit().putString("sort", s.name).apply() // remembered for the next channel too
+                if (s != sortNow[tab]) applySort(s)
+            }
+        }
+
+        private fun applySort(s: Browse.Sort) {
+            val k = tab
+            val t = sortTokens[k]?.get(s) ?: return
+            endSelection()
+            run(true, { g -> WebApi.more(act, calls, g, contUrl, t, region) }) { o ->
+                if (tab != k) return@run
+                sortNow[k] = s
+                items.clear()
+                append(Browse.page(o))
+                setStatus(if (items.isEmpty()) tr("Nothing here", "Burada bir şey yok") else null)
+                updateHead()
+            }
+        }
+
         private fun updateHead() {
+            updateSort()
             titleV.text = name.ifEmpty { tr("Channel", "Kanal") }
             val f = Store.isFollowed(channelId)
             followBtn.text = if (f) tr("Following", "Takip ediliyor") else tr("Follow", "Takip et")
@@ -1233,6 +1281,12 @@ class SearchScreen(private val act: MainActivity) {
                 region = o.optString("_gl").ifEmpty { null }
                 items.clear()
                 append(Browse.page(o))
+                if (k == "videos" || k == "shorts") {
+                    sortTokens[k] = Browse.sortChips(o)
+                    sortNow[k] = Browse.Sort.LATEST
+                    val want = savedSort()
+                    if (want != Browse.Sort.LATEST && sortTokens[k]?.containsKey(want) == true) main.post { if (tab == k) applySort(want) }
+                }
                 val empty = if (items.isEmpty()) Browse.emptyChannel(o) else null
                 setStatus(if (items.isEmpty()) empty?.let { "YouTube: $it" } ?: tr("Nothing here", "Burada bir şey yok") else null)
                 updateHead()

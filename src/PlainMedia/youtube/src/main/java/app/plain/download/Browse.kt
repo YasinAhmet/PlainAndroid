@@ -115,6 +115,49 @@ object Browse {
         }
     }
 
+    /** Order of a channel's Videos/Shorts list (YouTube's chips above the grid). */
+    enum class Sort { LATEST, POPULAR, OLDEST }
+
+    /**
+     * The sort chips of a channel's Videos/Shorts tab: each chip's continuation token reloads the list in that order.
+     * New layout (2026): chipViewModel.tapCommand.innertubeCommand.continuationCommand.token; older: chipCloudChipRenderer
+     * .navigationEndpoint.continuationCommand.token. Labels follow the request language, so known EN/TR words are
+     * matched first and the chip position (Latest, Popular, Oldest) is the fallback.
+     */
+    fun sortChips(o: JSONObject): Map<Sort, String> {
+        val chips = ArrayList<Pair<String, String>>()
+        fun walk(x: Any?, depth: Int) {
+            if (depth > 60) return
+            when (x) {
+                is JSONObject -> {
+                    val vm = x.optJSONObject("chipViewModel")
+                    val old = x.optJSONObject("chipCloudChipRenderer")
+                    when {
+                        vm != null -> token(vm.optJSONObject("tapCommand") ?: JSONObject())?.let { chips += vm.optString("text") to it }
+                        old != null -> token(old.optJSONObject("navigationEndpoint") ?: JSONObject())?.let { chips += text(old.opt("text")) to it }
+                        else -> { val k = x.keys(); while (k.hasNext()) walk(x.opt(k.next()), depth + 1) }
+                    }
+                }
+                is JSONArray -> for (i in 0 until x.length()) walk(x.opt(i), depth + 1)
+            }
+        }
+        walk(o, 0)
+        if (chips.isEmpty()) return emptyMap()
+        val out = LinkedHashMap<Sort, String>()
+        for ((label, t) in chips) {
+            val l = fold(label)
+            val s = when {
+                l.startsWith("latest") || l.startsWith("newest") || l.startsWith("enson") || l.startsWith("enyeni") -> Sort.LATEST
+                l.startsWith("popular") || l.startsWith("popule") || l.startsWith("mostpopular") -> Sort.POPULAR
+                l.startsWith("oldest") || l.startsWith("eneski") -> Sort.OLDEST
+                else -> null
+            }
+            if (s != null && s !in out) out[s] = t
+        }
+        if (out.isEmpty() && chips.size == 3) Sort.values().forEachIndexed { i, s -> out[s] = chips[i].second }
+        return out
+    }
+
     /** First continuationCommand.token below [o]. */
     private fun token(o: JSONObject): String? {
         o.optJSONObject("continuationCommand")?.optString("token")?.takeIf { it.isNotEmpty() }?.let { return it }
