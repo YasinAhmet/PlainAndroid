@@ -98,30 +98,54 @@ object LookJpeg {
         return bytes * 3 / 2 < left
     }
 
-    fun apply(ctx: Context, jpeg: ByteArray, look: Look, quality: Int): ByteArray {
-        if (look.neutral) return jpeg
+    fun apply(ctx: Context, jpeg: ByteArray, look: Look, quality: Int): ByteArray = apply(ctx, jpeg, look, false, quality)
+
+    /**
+     * Applies [look] (null or neutral = none) and, with [mirror], flips the photo left-right as it will be seen
+     * upright: pixels a HAL already turned flip along x, pixels an EXIF tag still turns by 90/270 flip along y.
+     */
+    fun apply(ctx: Context, jpeg: ByteArray, look: Look?, mirror: Boolean, quality: Int): ByteArray {
+        val lk = look?.takeIf { !it.neutral }
+        if (lk == null && !mirror) return jpeg
         // a full-size ARGB copy of a big sensor's photo can need hundreds of MB; an OutOfMemoryError there may hit
         // another thread instead of this catch, so a photo too big for the heap is kept untouched up front
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, o)
         if (o.outWidth <= 0 || o.outHeight <= 0 || !fits(o.outWidth.toLong() * o.outHeight * 4)) return jpeg
+        val vertical = mirror && Sizes.mirrorAlongY(try {
+            ExifInterface(java.io.ByteArrayInputStream(jpeg)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (_: Exception) { ExifInterface.ORIENTATION_NORMAL })
         val src = File(ctx.cacheDir, "look-src-${System.nanoTime()}.jpg")
         val dst = File(ctx.cacheDir, "look-dst-${System.nanoTime()}.jpg")
         return try {
             val bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options().apply {
                 inMutable = true; inPreferredConfig = Bitmap.Config.ARGB_8888
             }) ?: return jpeg
-            val m = look.matrix()
+            val m = lk?.matrix() ?: FloatArray(0)
             val w = bmp.width
+            val h = bmp.height
             val rows = 32
             val buf = IntArray(w * rows)
             var y = 0
-            while (y < bmp.height) {
-                val n = min(rows, bmp.height - y)
+            if (lk != null || (mirror && !vertical)) while (y < h) {
+                val n = min(rows, h - y)
                 bmp.getPixels(buf, 0, w, 0, y, w, n)
-                for (i in 0 until w * n) buf[i] = look.pixel(buf[i], m)
+                if (lk != null) for (i in 0 until w * n) buf[i] = lk.pixel(buf[i], m)
+                if (mirror && !vertical) for (r in 0 until n) Sizes.reverse(buf, r * w, w)
                 bmp.setPixels(buf, 0, w, 0, y, w, n)
                 y += n
+            }
+            if (mirror && vertical) {
+                // swap row pairs in place: two row buffers instead of a second full bitmap
+                val a = IntArray(w)
+                val b = IntArray(w)
+                for (top in 0 until h / 2) {
+                    val bot = h - 1 - top
+                    bmp.getPixels(a, 0, w, 0, top, w, 1)
+                    bmp.getPixels(b, 0, w, 0, bot, w, 1)
+                    bmp.setPixels(b, 0, w, 0, top, w, 1)
+                    bmp.setPixels(a, 0, w, 0, bot, w, 1)
+                }
             }
             val out = ByteArrayOutputStream(jpeg.size)
             bmp.compress(Bitmap.CompressFormat.JPEG, quality, out)

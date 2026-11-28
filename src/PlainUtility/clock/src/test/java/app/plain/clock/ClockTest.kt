@@ -219,4 +219,31 @@ class ClockTest {
             if (ms != null) assertTrue("'$s' = $ms", ms in 1000..86_400_000)
         }
     }
+    @Test fun tickIsFastWhileRunning() {
+        // a running countdown/stopwatch redraws at least every 100 ms, whatever the time
+        for (now in listOf(0L, 1L, 59_999L, 60_000L, 1_764_288_000_123L, -5L)) assertTrue(Tick.delay(true, now) in 1..100)
+    }
+
+    @Test fun tickWaitsForTheMinuteWhenIdle() {
+        assertEquals(60_020, Tick.delay(false, 0))
+        assertEquals(21, Tick.delay(false, 59_999))
+        assertEquals(30_020, Tick.delay(false, 90_000))
+        // never zero/negative, never longer than a minute (+ the small slack), also for odd clocks
+        val r = Random(7)
+        repeat(10_000) {
+            val now = r.nextLong() / 2
+            val d = Tick.delay(false, now)
+            assertTrue("$now -> $d", d in 21..60_020)
+            assertEquals(20, Math.floorMod(now + d, 60_000L))
+        }
+    }
+
+    @Test fun countdownShowsEachSecondWithin100ms() {
+        // drawn every 100 ms, a 3 s countdown passes through every whole second on screen
+        val c = Countdown.start(3_000, 10_000)
+        val seen = LinkedHashSet<String>()
+        var t = 10_000L
+        while (t <= 13_100) { seen += Fmt.countdown(c.remaining(t)); t += Tick.delay(c.running, t) }
+        assertEquals(listOf("00:03", "00:02", "00:01", "00:00"), seen.toList())
+    }
 }

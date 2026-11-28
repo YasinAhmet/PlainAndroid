@@ -144,8 +144,16 @@ class MusicTest {
         assertFalse(Sched.canStart(listOf(a(1)), video, 3)) // video waits for the audio downloads
         assertFalse(Sched.canStart(listOf(job(11, State.RUNNING, kind = Kind.VIDEO)), audio, 3)) // and runs alone
         assertFalse(Sched.canStart(listOf(a(1)), audio, 1))
-        assertTrue(Sched.canStart(listOf(a(1), a(2), a(3)), audio, 9)) // capped at 4
-        assertFalse(Sched.canStart(listOf(a(1), a(2), a(3), a(4)), audio, 9))
+        assertTrue(Sched.canStart(listOf(a(1), a(2), a(3), a(4)), audio, 9)) // up to 100 now
+        assertFalse(Sched.canStart((1L..9L).map(a), audio, 9))
+        assertTrue(Sched.canStart((1L..99L).map(a), audio, 100))
+        assertFalse(Sched.canStart((1L..100L).map(a), audio, 100))
+        assertFalse(Sched.canStart((1L..100L).map(a), audio, 5000)) // capped at 100
+        assertFalse(Sched.canStart(listOf(a(1)), audio, 0)) // never below 1
+        assertTrue(Sched.canStart(emptyList(), audio, -5))
+        // retry waits: quick for drops, long (with jitter) for "too many requests"
+        assertEquals(200L, Fetcher.retryDelay(1, false, 0)); assertEquals(2000L, Fetcher.retryDelay(60, false, 0))
+        assertEquals(4000L, Fetcher.retryDelay(2, true, 0)); assertEquals(30_000L + 999, Fetcher.retryDelay(60, true, 999))
         val r = listOf(a(1).also { it.total = 100; it.done = 40 }, a(2).also { it.total = 50; it.done = 60 })
         assertEquals(60L, Sched.pendingBytes(r))
     }

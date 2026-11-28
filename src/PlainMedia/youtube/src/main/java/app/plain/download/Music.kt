@@ -228,6 +228,9 @@ data class BatchStats(val total: Int, val done: Int, val failed: Int, val cancel
 
 /** Download scheduling: audio jobs in parallel (up to the setting, 1–4), anything with video alone. */
 object Sched {
+    /** ⋮ "Parallel downloads" goes up to this many audio jobs at once (each one thread, one 64 KB buffer). */
+    const val MAX_PARALLEL = 100
+
     fun isAudio(j: Job) = j.kind == Kind.AUDIO
 
     /** May [next] start now, given the jobs currently in their download stage? */
@@ -235,7 +238,7 @@ object Sched {
         downloading.isEmpty() -> true
         !isAudio(next) -> false // video: one download at a time
         downloading.any { !isAudio(it) } -> false
-        else -> downloading.size < maxAudio.coerceIn(1, 4)
+        else -> downloading.size < maxAudio.coerceIn(1, MAX_PARALLEL)
     }
 
     /** Bytes the running downloads still need (their estimate minus what they have). */

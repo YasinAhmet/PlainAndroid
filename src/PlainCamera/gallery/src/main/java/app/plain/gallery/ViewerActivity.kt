@@ -132,6 +132,7 @@ class ViewerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        CategoryBackup.flush()
         if (playing) video.pause()
     }
 

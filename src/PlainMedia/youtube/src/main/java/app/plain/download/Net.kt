@@ -196,6 +196,13 @@ class Fetcher(
     companion object {
         const val CHUNK = 10L shl 20
         const val MAX_TRIES = 60
+
+        /**
+         * Wait before retry [tries]. A plain drop retries quickly (≤ 2 s); "too many requests" (429/503, likely with
+         * many parallel downloads) backs off longer, with a per-thread jitter so the threads don't retry in lockstep.
+         */
+        fun retryDelay(tries: Int, throttled: Boolean, jitter: Long = (Thread.currentThread().id * 137L) % 1000L): Long =
+            if (!throttled) minOf(200L * tries, 2000L) else minOf(2000L * tries, 30_000L) + jitter
     }
 
     /** Appends to [dest] until complete. [onBytes] gets the file length now. Returns the total size. */
@@ -204,6 +211,7 @@ class Fetcher(
         var pos = dest.length()
         if (total > 0 && pos > total) { dest.delete(); pos = 0 }
         var tries = 0
+        var throttled = false
         val buf = ByteArray(64 shl 10)
         val file = try { FileOutputStream(dest, true) } catch (e: IOException) { throw StorageFull(e) }
         file.use { fo ->
@@ -244,13 +252,15 @@ class Fetcher(
                         }
                         code == 416 && pos > 0 -> { total = pos }
                         code == 403 || code == 410 -> throw Expired()
+                        code == 429 || code == 503 -> { throttled = true; throw IOException("HTTP $code") }
                         else -> throw IOException("HTTP $code")
                     }
                 } catch (e: IOException) {
                     if (e is Cancelled || e is Expired || e is NoWifi || e is StorageFull) { con?.disconnect(); throw e }
                     con?.disconnect()
                     if (++tries > MAX_TRIES) throw IOException(tr("Download failed: ${e.message}", "İndirme başarısız: ${e.message}"), e)
-                    Thread.sleep(minOf(200L * tries, 2000L))
+                    Thread.sleep(retryDelay(tries, throttled))
+                    throttled = false
                 }
             }
         }

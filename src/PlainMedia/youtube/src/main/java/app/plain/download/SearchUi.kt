@@ -836,7 +836,12 @@ class SearchScreen(private val act: MainActivity) {
         fun refresh() {
             if (refreshing) return
             val due = Store.follows()
-            if (due.isEmpty()) { updateInfo(); return }
+            if (due.isEmpty()) {
+                // nothing followed: guide to the sign-in / subscriptions sync (or Takeout, or a channel search)
+                updateInfo()
+                act.noSubscriptions(onImport = { importDialog() }, onSearch = { showBase(searchPage); searchPage.channelsMode() })
+                return
+            }
             noWifi = false
             try { Net.network(act, Store.wifiOnly) } catch (e: Exception) {
                 // checked once here instead of failing every channel; the saved feed stays on screen
@@ -1057,6 +1062,13 @@ class SearchScreen(private val act: MainActivity) {
         private fun setType(i: Int) { if (i != f.type) setF(f.copy(type = i)) }
 
         fun searchFor(q: String) { box.setText(q); query = q; cancelNet(); doSearch() }
+
+        /** "Search channels to follow" (Feed with nothing followed): the Channels type, keyboard up in the box. */
+        fun channelsMode() {
+            setType(1)
+            box.requestFocus()
+            main.postDelayed({ if (box.isAttachedToWindow) act.getSystemService(InputMethodManager::class.java).showSoftInput(box, 0) }, 150)
+        }
 
         private fun submit() {
             act.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(box.windowToken, 0)

@@ -93,7 +93,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     private enum class Mode { PHOTO, VIDEO }
     private enum class Caller { NONE, IMAGE, VIDEO }
-    private class Shot(val time: Long, val rotation: Int, val look: Look? = null, val quality: Int = 95)
+    private class Shot(val time: Long, val rotation: Int, val look: Look? = null, val quality: Int = 95, val mirror: Boolean = false)
 
     private lateinit var prefs: SharedPreferences
     private lateinit var cm: CameraManager
@@ -142,6 +142,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     private var facing = CameraCharacteristics.LENS_FACING_BACK
     private var flash = 0 // photo: 0 off, 1 auto, 2 on · video: 0 off, 1 torch
     private val front get() = facing == CameraCharacteristics.LENS_FACING_FRONT
+    /** Front-camera photos are saved mirrored, as the preview shows them (default on). */
+    private val mirrorFront get() = prefs.getBoolean("mirrorFront", true)
     /** The Advanced tab is showing; Basic ignores [adv] (and flash) completely. */
     private var advanced = false
     private var adv = Adv()
@@ -594,6 +596,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         flipBtn = label(tr("Flip", "Çevir"), 13f).apply {
             background = ring(BTN_LINE, dp(1))
             setOnClickListener { flip() }
+            // hold = the "more" version of Flip: the front camera's options
+            setOnLongClickListener { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); flipOptions(); true }
         }
         row.addView(thumb, LinearLayout.LayoutParams(dp(54), dp(54)))
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
@@ -1363,7 +1367,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         val r = reader ?: return
         val pv = preview ?: return
         val look = if (advanced) adv.look.takeIf { !it.neutral } else null
-        val shot = Shot(System.currentTimeMillis(), Sizes.jpegOrientation(sensorOrientation, deviceDeg, front), look, eff.jpeg)
+        val shot = Shot(System.currentTimeMillis(), Sizes.jpegOrientation(sensorOrientation, deviceDeg, front), look, eff.jpeg, front && mirrorFront)
         try {
             val b = d.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             b.addTarget(r.surface)
@@ -1411,7 +1415,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     private fun savePhoto(raw: ByteArray, shot: Shot) {
         val prepared = Jpeg.prepare(this, raw, shot.rotation, shot.time)
-        val jpeg = shot.look?.let { LookJpeg.apply(this, prepared, it, shot.quality) } ?: prepared
+        val jpeg = if (shot.look != null || shot.mirror) LookJpeg.apply(this, prepared, shot.look, shot.mirror, shot.quality) else prepared
         if (caller == Caller.IMAGE) { deliverPhoto(jpeg); return }
         try {
             val uri = Media.savePhoto(this, jpeg, shot.time)
@@ -1854,6 +1858,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                     setAdv(Adv(), if (lens != 0 && !front) Apply.RESTART else Apply.CAMERA)
                     toast(tr("Advanced settings reset.", "Gelişmiş ayarlar sıfırlandı."))
                 })
+                add(optionRow(tr("Front camera", "Ön kamera"), listOf(tr("Mirror", "Aynala")), { mirrorFront }) { setMirrorFront(!mirrorFront); showPanel("Quality") })
+                add(noteRow(mirrorNote()))
                 // language: a dropdown under the row; the activity is recreated and comes back to this panel
                 lateinit var langRow: View
                 langRow = optionRow("", listOf(PlainLang.label()), { false }) { if (!recording) Sheet.language(this, ACCENT) }
@@ -1899,6 +1905,25 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         }
         panel.visibility = View.VISIBLE
         refreshChips()
+    }
+
+    private fun mirrorNote() = if (mirrorFront) tr("Front photos are saved as the preview shows them (mirrored). Photos only; videos stay unmirrored.",
+        "Ön kamera fotoğrafları önizlemedeki gibi (aynalı) kaydedilir. Yalnızca fotoğraflar; videolar aynalanmaz.")
+    else tr("Front photos are saved unmirrored, as others see you. Photos only.", "Ön kamera fotoğrafları aynalanmadan, başkalarının gördüğü gibi kaydedilir. Yalnızca fotoğraflar.")
+
+    private fun setMirrorFront(on: Boolean) {
+        prefs.edit().putBoolean("mirrorFront", on).apply()
+    }
+
+    /** Hold on Flip: the front camera's settings in a sheet (also in Advanced > Quality). */
+    private fun flipOptions() {
+        if (isFinishing) return
+        Sheet(this, ACCENT).header(tr("Front camera", "Ön kamera"))
+            .toggle(null, tr("Mirror front camera", "Ön kamerayı aynala"), mirrorFront, sub = mirrorNote()) { on ->
+                setMirrorFront(on)
+                if (openPanel == "Quality") showPanel("Quality")
+            }
+            .show()
     }
 
     // ---- profiles

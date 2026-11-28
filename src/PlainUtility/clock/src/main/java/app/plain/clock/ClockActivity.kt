@@ -79,9 +79,23 @@ class ClockActivity : Activity() {
         override fun run() {
             if (!resumed) return
             draw()
-            main.postDelayed(this, nextTick())
+            arm()
         }
     }
+
+    /**
+     * (Re)starts the one redraw loop for the current state. Every post goes through here and drops the pending one
+     * first, so there's never a second loop. Called on resume, on a mode switch and on every [Engine] change (a start
+     * from the screen, a notification button, the assistant): the delay depends on whether something runs, so a loop
+     * left waiting for the next minute must be re-armed the moment a countdown or the stopwatch starts.
+     */
+    private fun arm() {
+        main.removeCallbacks(tick)
+        if (resumed && !isFinishing) main.postDelayed(tick, nextTick())
+    }
+
+    /** This screen's [Engine.listener]: only cleared by this screen (a second Clock screen may have set its own). */
+    private val onEngine: () -> Unit = { draw(); arm() }
 
     override fun onCreate(b: Bundle?) {
         PlainLang.init(this)
@@ -210,15 +224,15 @@ class ClockActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        Engine.listener = { draw() }
+        Engine.listener = onEngine
     }
 
     override fun onResume() {
         super.onResume()
+        Engine.listener = onEngine
         resumed = true
         draw()
-        main.removeCallbacks(tick)
-        main.postDelayed(tick, nextTick())
+        arm()
     }
 
     override fun onPause() {
@@ -228,7 +242,7 @@ class ClockActivity : Activity() {
     }
 
     override fun onStop() {
-        Engine.listener = null
+        if (Engine.listener === onEngine) Engine.listener = null
         super.onStop()
     }
 
@@ -236,15 +250,14 @@ class ClockActivity : Activity() {
 
     // ------------------------------------------------------------------ drawing
 
-    /** How long until something on screen changes: tenths for a running stopwatch, the next second, else the next minute. */
+    /** Until the next redraw: every 100 ms while this mode's countdown or the stopwatch runs, else the next minute. */
     private fun nextTick(): Long {
-        val now = System.currentTimeMillis()
-        val toMinute = 60_000 - now % 60_000 + 20
-        return when (mode) {
-            Engine.WATCH -> if (Engine.watch(this).running) 100 else toMinute
-            Engine.POMO -> Engine.pomoCd(this).let { if (it.running) (it.remaining(now) % 1000).coerceIn(20, 1000) + 5 else toMinute }
-            else -> Engine.timerCd(this).let { if (it.running) (it.remaining(now) % 1000).coerceIn(20, 1000) + 5 else toMinute }
+        val running = when (mode) {
+            Engine.WATCH -> Engine.watch(this).running
+            Engine.POMO -> Engine.pomoCd(this).running
+            else -> Engine.timerCd(this).running
         }
+        return Tick.delay(running, System.currentTimeMillis())
     }
 
     /** The channel that rings at the end in this mode. */
@@ -255,8 +268,7 @@ class ClockActivity : Activity() {
         mode = m
         Engine.prefs(this).edit().putString("mode", m).apply()
         draw()
-        main.removeCallbacks(tick)
-        if (resumed) main.postDelayed(tick, nextTick())
+        arm()
     }
 
     private fun draw() {

@@ -101,7 +101,9 @@ object Library {
         val args = Bundle().apply {
             // photos and videos, but not the YouTube videos Plain Media saved (Movies/PlainDownload/<Channel>/…)
             val types = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (1,3) AND " +
-                "(${MediaStore.MediaColumns.RELATIVE_PATH} IS NULL OR ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE '$OUR_DOWNLOADS%')"
+                "(${MediaStore.MediaColumns.RELATIVE_PATH} IS NULL OR ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE '$OUR_DOWNLOADS%') AND " +
+                // nor the categories backup picture (CategoryBackup)
+                "IFNULL(${MediaStore.MediaColumns.DISPLAY_NAME}, '') NOT LIKE '${CategoryBackup.LIKE}'"
             putString(ContentResolver.QUERY_ARG_SQL_SELECTION, if (where == null) types else "$types AND $where")
             if (whereArgs != null) putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, whereArgs)
         }

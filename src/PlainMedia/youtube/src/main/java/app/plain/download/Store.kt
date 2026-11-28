@@ -465,8 +465,8 @@ object Store {
 
     /** Parallel audio downloads for bulk music (⋮, 1–4, default 3). */
     var parallelAudio: Int
-        get() = prefs.getInt("parallelAudio", 3).coerceIn(1, 4)
-        set(v) = prefs.edit().putInt("parallelAudio", v.coerceIn(1, 4)).apply()
+        get() = prefs.getInt("parallelAudio", 3).coerceIn(1, Sched.MAX_PARALLEL)
+        set(v) = prefs.edit().putInt("parallelAudio", v.coerceIn(1, Sched.MAX_PARALLEL)).apply()
 
     /** Queued jobs in start order: normal downloads oldest first, then cache jobs. */
     @Synchronized fun queuedInOrder(): List<Job> {

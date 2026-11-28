@@ -95,4 +95,23 @@ class SizesTest {
         assertEquals(Dim(4000, 3000), Dim.parse("4000x3000"))
         assertNull(Dim.parse("junk"))
     }
+
+    @Test fun mirrorAxis() {
+        // HAL turned the pixels (no tag / normal): flip along x
+        assertEquals(false, Sizes.mirrorAlongY(0))
+        assertEquals(false, Sizes.mirrorAlongY(1))
+        assertEquals(false, Sizes.mirrorAlongY(3)) // 180: still x
+        // pixels still turned a quarter by EXIF: upright left-right is the stored y axis
+        assertTrue(Sizes.mirrorAlongY(6))
+        assertTrue(Sizes.mirrorAlongY(8))
+    }
+
+    @Test fun reverseRows() {
+        val a = intArrayOf(1, 2, 3, 4, 5, 6, 7)
+        Sizes.reverse(a, 0, 3); Sizes.reverse(a, 3, 4)
+        assertEquals(listOf(3, 2, 1, 7, 6, 5, 4), a.toList())
+        val one = intArrayOf(9); Sizes.reverse(one, 0, 1); assertEquals(9, one[0])
+        val big = IntArray(4000) { it }; Sizes.reverse(big, 0, 4000); Sizes.reverse(big, 0, 4000)
+        assertEquals((0 until 4000).toList(), big.toList())
+    }
 }

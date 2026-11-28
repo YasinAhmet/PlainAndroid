@@ -89,7 +89,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (ui !== a) return
         uiMain.removeCallbacks(hideCtl)
         registerVolume(false)
-        if (fullscreen) { fullscreen = false; full.setPadding(0, insetTop, 0, insetBottom); restoreBrightness() }
+        if (fullscreen) { fullscreen = false; full.setPadding(0, insetTop, 0, insetBottom); restoreBrightness(); fsBar.visibility = View.GONE }
         (root.parent as? android.view.ViewGroup)?.removeView(root) // the old window's views no longer reach us
         holder = null
         try { mp?.setDisplay(null) } catch (_: Exception) {}
@@ -332,6 +332,12 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private lateinit var rotateBtn: TextView
     private lateinit var volIcon: ImageView
     private lateinit var volBar: SeekBar
+    // fullscreen: a tap shows only these (time + volume over a dark scrim); details stay behind "exit fullscreen"
+    private lateinit var fsBar: LinearLayout
+    private lateinit var fsSeek: SeekBar
+    private lateinit var fsPos: TextView
+    private lateinit var fsDur: TextView
+    private lateinit var fsVol: SeekBar
     private var insetTop = 0
     private var insetBottom = 0
     private var speed = 1f
@@ -341,7 +347,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private val audio = app.getSystemService(AudioManager::class.java)
     private val vol = VolumeModel(audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
     private var volReceiver: BroadcastReceiver? = null
-    private val hideCtl = Runnable { if (state == PState.FULL && mode == PlayMode.WATCH && mp?.isPlaying == true) showControls(false) }
+    private val hideCtl = Runnable { if (state == PState.FULL && (fullscreen || mode == PlayMode.WATCH && mp?.isPlaying == true)) showControls(false) }
 
     private var videoId = ""
     private var title = ""
@@ -446,6 +452,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             forced = r.mode; musicLink = r.musicLink; albumHint = r.album; channelId = null
         }
         info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = startMs; pubFile = null; listenItag = 0
+        Visited.mark(videoId) // Custom Feed "only unwatched": opened = seen
         height = Store.watchP
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH
@@ -558,6 +565,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 stage.visibility = View.VISIBLE
                 topBar.visibility = if (fullscreen) View.GONE else View.VISIBLE
                 controls.visibility = if (fullscreen) View.GONE else View.VISIBLE
+                fsBar.visibility = View.GONE
                 miniCtl.visibility = View.GONE; miniCard.visibility = View.GONE
                 ui?.requestedOrientation = if (rotationLocked) ActivityInfo.SCREEN_ORIENTATION_LOCKED else ActivityInfo.SCREEN_ORIENTATION_SENSOR
                 if (started) registerVolume(true)
@@ -582,7 +590,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 full.setPadding(dp(1), dp(1), dp(1), dp(1))
                 full.isClickable = false
                 full.clipToOutline = true
-                topBar.visibility = View.GONE; controls.visibility = View.GONE
+                topBar.visibility = View.GONE; controls.visibility = View.GONE; fsBar.visibility = View.GONE
                 stage.visibility = if (watch) View.VISIBLE else View.GONE
                 miniCtl.visibility = if (watch) View.VISIBLE else View.GONE
                 miniCard.visibility = if (watch) View.GONE else View.VISIBLE
@@ -595,7 +603,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
                 full.translationX = 0f; full.translationY = 0f
                 full.background = null; full.setBackgroundColor(C.BG)
                 full.setPadding(0, 0, 0, 0)
-                topBar.visibility = View.GONE; controls.visibility = View.GONE
+                topBar.visibility = View.GONE; controls.visibility = View.GONE; fsBar.visibility = View.GONE
                 stage.visibility = View.VISIBLE
                 miniCtl.visibility = View.GONE; miniCard.visibility = View.GONE
                 registerVolume(false)
@@ -739,15 +747,18 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun showControls(show: Boolean, kick: Boolean = true) {
         if (state != PState.FULL) return
-        controls.visibility = if (show && !fullscreen) View.VISIBLE else if (show && fullscreen) View.VISIBLE else View.GONE
+        // fullscreen: never the details (they would shrink the video), only the time / volume overlay
+        controls.visibility = if (show && !fullscreen) View.VISIBLE else View.GONE
         topBar.visibility = if (show && !fullscreen) View.VISIBLE else View.GONE
+        fsBar.visibility = if (show && fullscreen) View.VISIBLE else View.GONE
+        if (show && fullscreen) { syncFsTime(); syncVolumeBar() }
         if (show && kick) kickHide()
     }
 
     /** Controls hide 3 s after the last touch while a video plays (one delayed post, only while the player is full). */
     private fun kickHide() {
         uiMain.removeCallbacks(hideCtl)
-        if (state == PState.FULL && mode == PlayMode.WATCH && mp?.isPlaying == true) uiMain.postDelayed(hideCtl, 3000)
+        if (state == PState.FULL && (fullscreen && fsBar.visibility == View.VISIBLE || mode == PlayMode.WATCH && mp?.isPlaying == true)) uiMain.postDelayed(hideCtl, 3000)
     }
 
     private fun flashSeek(text: String, left: Boolean) {
@@ -949,9 +960,66 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         chips.addView(queueBtn)
         controls.addView(chips, lpL(MATCH, WRAP))
         root.addView(controls, lpL(MATCH, WRAP))
+        buildFsBar()
     }
 
-    private fun syncVolumeBar() { if (volBar.progress != vol.level) volBar.progress = vol.level }
+    private fun syncVolumeBar() {
+        if (volBar.progress != vol.level) volBar.progress = vol.level
+        if (::fsVol.isInitialized && fsVol.progress != vol.level) fsVol.progress = vol.level
+    }
+
+    /** The fullscreen overlay: a dark scrim at the bottom of the video with the time slider and the volume slider. */
+    private fun buildFsBar() {
+        fsBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xCC000000.toInt())
+            setPadding(dp(16), dp(8), dp(16), dp(10))
+            visibility = View.GONE
+            isClickable = true // taps on the scrim stay here (and keep it up) instead of reaching the video's gestures
+            setOnClickListener { kickHide() }
+        }
+        fun bar(tint: Int) = SeekBar(this).apply {
+            progressTintList = android.content.res.ColorStateList.valueOf(tint)
+            thumbTintList = android.content.res.ColorStateList.valueOf(tint)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(C.OUTLINE)
+        }
+        val timeRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        fsPos = text("0:00", 12f, C.DIM)
+        fsDur = text("0:00", 12f, C.DIM)
+        fsSeek = bar(C.ACCENT).apply {
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) { if (fromUser) fsPos.text = Text.duration(p / 1000L).ifEmpty { "0:00" } }
+                override fun onStartTrackingTouch(s: SeekBar) { dragging = true; uiMain.removeCallbacks(hideCtl) }
+                override fun onStopTrackingTouch(s: SeekBar) { dragging = false; seekTo(s.progress); kickHide() }
+            })
+        }
+        timeRow.addView(fsPos); timeRow.addView(fsSeek, lpL(0, WRAP, 1f)); timeRow.addView(fsDur)
+        fsBar.addView(timeRow, lpL(MATCH, WRAP))
+        val volRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        volRow.addView(android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.yt_ic_volume); imageTintList = android.content.res.ColorStateList.valueOf(C.DIM)
+            contentDescription = tr("Volume", "Ses düzeyi")
+        }, lpL(dp(20), dp(20)).apply { marginStart = dp(6); marginEnd = dp(4) })
+        fsVol = bar(C.TEXT).apply {
+            max = vol.max
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) { if (fromUser) { setVolume(p); if (volBar.progress != p) volBar.progress = p } }
+                override fun onStartTrackingTouch(s: SeekBar) { uiMain.removeCallbacks(hideCtl) }
+                override fun onStopTrackingTouch(s: SeekBar) { kickHide() }
+            })
+        }
+        volRow.addView(fsVol, lpL(0, WRAP, 1f))
+        fsBar.addView(volRow, lpL(MATCH, WRAP).apply { topMargin = dp(4) })
+        stage.addView(fsBar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+    }
+
+    private fun syncFsTime() {
+        if (!::fsSeek.isInitialized || fsBar.visibility != View.VISIBLE) return
+        fsSeek.max = seek.max
+        fsDur.text = durV.text
+        if (!dragging) { fsSeek.progress = seek.progress; fsPos.text = posV.text }
+        fsSeek.secondaryProgress = seek.secondaryProgress
+    }
 
     private fun speedMenu() {
         val a = ui as? android.app.Activity ?: return
@@ -1049,7 +1117,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (state == PState.MINI) applyState() // Watch <-> Listen changes the mini window's shape
     }
 
-    private fun toggleControls() { showControls(controls.visibility != View.VISIBLE) }
+    private fun toggleControls() { showControls(if (fullscreen) fsBar.visibility != View.VISIBLE else controls.visibility != View.VISIBLE) }
 
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
@@ -1064,6 +1132,9 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         }
         topBar.visibility = if (on) View.GONE else View.VISIBLE
         controls.visibility = if (on) View.GONE else View.VISIBLE
+        fsBar.visibility = View.GONE
+        uiMain.removeCallbacks(hideCtl)
+        if (!on) kickHide()
     }
 
     private fun status(s: String?, error: Boolean = false) {
@@ -1423,7 +1494,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         syncSession()
         updateMini()
         if (state == PState.PIP || Store.pipAuto) updatePip()
-        if (mp?.isPlaying != true) uiMain.removeCallbacks(hideCtl)
+        if (mp?.isPlaying != true && !fullscreen) uiMain.removeCallbacks(hideCtl)
     }
 
     private fun updateTime() {
@@ -1432,6 +1503,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val pos = p.currentPosition
         if (!dragging) { seek.progress = pos; posV.text = Text.duration(pos / 1000L).ifEmpty { "0:00" } }
         source?.meta?.let { m -> seek.secondaryProgress = (m.fraction * seek.max).toInt() }
+        syncFsTime()
         if (source?.meta?.complete == false) status(cacheText())
     }
 
@@ -1604,6 +1676,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         // the next item of the queue continues where it was left if it is long (a video, a podcast); a song starts over
         val at = Resume.get(resumeKeys(), longOnly = true)
         info = null; choices = emptyList(); tracks = emptyList(); audioLang = Store.audioLang(videoId); triedOpus = false; watchFailed = false; resumeMs = at; pubFile = null; listenItag = 0
+        Visited.mark(videoId)
         if (at > 0) showContinued(at)
         mode = forced ?: Store.mode(videoId) ?: PlayMode.WATCH
         if (localUri != null) mode = if (localAudio) PlayMode.LISTEN else PlayMode.WATCH

@@ -79,6 +79,8 @@ class MainActivity : Activity() {
     // tabs: 0 = Download (the original screen), 1 = Search
     lateinit var search: SearchScreen
         private set
+    // tab 2 = Custom Feed (the user's own feeds)
+    private lateinit var custom: CustomFeedScreen
     private lateinit var downloadView: View
     private val tabViews = ArrayList<TextView>()
     private var tab = -1
@@ -101,7 +103,10 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         Store.init(this)
         kind = Store.kind; audioFmt = Store.audioFmt; audioQ = Store.audioQ
+        Visited.init(this)
+        CustomFeedStore.init(this)
         search = SearchScreen(this)
+        custom = CustomFeedScreen(this)
         dlThumbs = ThumbLoader(this, dlCalls)
         val frame = android.widget.FrameLayout(this)
         frame.addView(build(), android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
@@ -111,8 +116,10 @@ class MainActivity : Activity() {
         setContentView(Hub.wrap(this, "youtube", frame))
         // thumb bar (layout "draft 3"): Download / Search and ⋮ sit at the bottom next to the "Youtube ▾" switcher
         Hub.bar(this)?.apply {
-            tabViews.forEach { addView(it, lpL(WRAP, WRAP).apply { rightMargin = dp(6) }) }
-            addView(View(this@MainActivity), lpL(0, 1, 1f))
+            // three tabs (Download / Search / Custom Feed): they scroll sideways on a narrow screen instead of pushing ⋮ out
+            val tabsRow = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL }
+            tabViews.forEach { tabsRow.addView(it, lpL(WRAP, WRAP).apply { rightMargin = dp(6) }) }
+            addView(android.widget.HorizontalScrollView(this@MainActivity).apply { isHorizontalScrollBarEnabled = false; addView(tabsRow) }, lpL(0, WRAP, 1f))
             addView(icon(R.drawable.yt_ic_more, desc = tr("Menu", "Menü")) { mainMenu() }.also { moreBtn = it })
         }
         search.onTitle = { name, page -> if (tab == 1) { Hub.setTitle(this, name); Hub.setBack(this, if (page) ({ handleBack() }) else null) } }
@@ -122,7 +129,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
         }
-        selectTab(Store.tab.coerceIn(0, 1), record = false)
+        selectTab(Store.tab.coerceIn(0, 2), record = false)
         handleIntent(intent)
         // 3.3: completed caches become saved files (also the old Cached/ folder: moved, duplicates deleted) — once
         // when this tab opens, not at every app start (the Music tab alone never runs it)
@@ -150,6 +157,7 @@ class MainActivity : Activity() {
         Store.addListener(onStore)
         renderList()
         if (tab == 1) search.onShown()
+        if (tab == 2) custom.onShown()
         sync() // MediaStore → history (trashed / restored / deleted / moved by any app), then the Cached folder
         main.post { loadVisibleThumbs() }
         // queued downloads left from before (e.g. after the phone restarted the app) run when the app is opened
@@ -170,6 +178,7 @@ class MainActivity : Activity() {
         started = false
         Store.removeListener(onStore)
         search.onHidden() // cancels every Search request (and queued thumbnails)
+        custom.onHidden()
         dlCalls.cancelAll(); dlThumbs.cancel()
         rows.values.forEach { it.thumbAsked = false }
         super.onStop()
@@ -179,6 +188,7 @@ class MainActivity : Activity() {
         player.detach(this) // playing: goes on under the playback service; paused: closes
         io.shutdownNow()
         search.destroy()
+        custom.destroy()
         dlThumbs.shutdown()
         super.onDestroy()
     }
@@ -213,9 +223,9 @@ class MainActivity : Activity() {
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastBackHandled < 150) return
         lastBackHandled = now
-        val selectingHere = if (tab == 0) selecting else search.topSelecting
+        val selectingHere = when (tab) { 0 -> selecting; 1 -> search.topSelecting; else -> false }
         when (BackRule.decide(selectingHere, player.isFull, player.isFullscreen, !nav.isEmpty, lastBackAt, now)) {
-            BackRule.Action.END_SELECTION -> if (tab == 0) endSelection() else search.endTopSelection()
+            BackRule.Action.END_SELECTION -> if (tab == 0) endSelection() else if (tab == 1) search.endTopSelection()
             BackRule.Action.LEAVE_FULLSCREEN -> player.leaveFullscreen()
             BackRule.Action.MINIMIZE_PLAYER -> player.minimize()
             BackRule.Action.POP -> popNav()
@@ -265,12 +275,18 @@ class MainActivity : Activity() {
             v.setTextColor(if (i == t) C.ACCENT else C.DIM)
             v.background = outline(dpf(18), if (i == t) C.ACCENT else C.OUTLINE)
         }
-        if (t == 0) { Hub.setTitle(this, tr("Download", "İndir")); Hub.setBack(this, null) } else search.reportTitle()
+        when (t) {
+            0 -> { Hub.setTitle(this, tr("Download", "İndir")); Hub.setBack(this, null) }
+            2 -> { Hub.setTitle(this, tr("Custom Feed", "Özel Akış")); Hub.setBack(this, null) }
+            else -> search.reportTitle()
+        }
         downloadView.visibility = if (t == 0) View.VISIBLE else View.GONE
         search.view.visibility = if (t == 1) View.VISIBLE else View.GONE
+        custom.view.visibility = if (t == 2) View.VISIBLE else View.GONE
         if (!changed) return
         getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(window.decorView.windowToken, 0)
         if (t == 1) { if (started) search.onShown() } else search.onHidden()
+        if (t == 2) { if (started) custom.onShown() } else custom.onHidden()
         if (t == 0) main.post { loadVisibleThumbs() }
     }
 
@@ -289,6 +305,7 @@ class MainActivity : Activity() {
     }
 
     fun openVideo(id: String) {
+        Visited.mark(id) // opened (Custom Feed "only unwatched")
         selectTab(0)
         cameFromSearch = true
         input.setText(Yt.watchUrl(id))
@@ -334,10 +351,11 @@ class MainActivity : Activity() {
         }
 
         // Download / Search: pills placed in the Hub thumb bar (onCreate)
-        for ((i, label) in listOf(tr("Download", "İndir"), tr("Search", "Ara")).withIndex()) {
+        for ((i, label) in listOf(tr("Download", "İndir"), tr("Search", "Ara"), tr("Custom Feed", "Özel Akış")).withIndex()) {
             val tv = text(label, 14f, C.DIM, bold = true).apply {
                 gravity = Gravity.CENTER
-                setPadding(dp(13), dp(8), dp(13), dp(8))
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                isSingleLine = true
                 setOnClickListener { selectTab(i) }
             }
             tabViews += tv
@@ -359,6 +377,7 @@ class MainActivity : Activity() {
         downloadView = scroll
         pages.addView(scroll, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
         pages.addView(search.view, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+        pages.addView(custom.view, android.widget.FrameLayout.LayoutParams(MATCH, MATCH).also { custom.view.visibility = View.GONE })
 
         input = EditText(this).apply {
             hint = tr("Paste a YouTube link (video, channel or playlist)", "YouTube bağlantısı yapıştırın (video, kanal veya çalma listesi)")
@@ -492,10 +511,11 @@ class MainActivity : Activity() {
             .toggle(Ic.WIFI, tr("Wi-Fi only", "Yalnızca Wi-Fi"), Store.wifiOnly, sub = tr("Off: mobile data is used too", "Kapalı: mobil veri de kullanılır")) { on -> Store.wifiOnly = on }
             .item(Ic.TUNE, tr("Audio format", "Ses biçimi"), value = if (Store.originalAudio) tr("Original", "Orijinal") else tr("Clean M4A", "Temiz M4A"), more = true,
                 reset = Sheet.Reset(tr("Original", "Orijinal")) { Store.originalAudio = true }) { audioFormatMenu() }
-            .item(Ic.SPEED, tr("Parallel audio downloads", "Paralel ses indirme"), sub = tr("For bulk music downloads", "Toplu müzik indirmeleri için"), value = "${Store.parallelAudio}", more = true,
-                reset = Sheet.Reset("3") { Store.parallelAudio = 3 }) {
-                Sheet.choose(this, tr("Parallel audio downloads", "Paralel ses indirme"), (1..4).map { "$it" }, Store.parallelAudio - 1, C.ACCENT,
-                    tr("More is faster on good Wi-Fi; videos always download one at a time", "İyi Wi-Fi'de çoğu daha hızlıdır; videolar her zaman tek tek iner")) { Store.parallelAudio = it + 1 }
+            .item(Ic.SPEED, tr("Parallel downloads", "Paralel indirme"), sub = tr("For bulk music downloads", "Toplu müzik indirmeleri için"), value = "${Store.parallelAudio}", more = true,
+                reset = Sheet.Reset("3") { setParallel(3) }) {
+                Sheet.choose(this, tr("Parallel downloads", "Paralel indirme"), (1..Sched.MAX_PARALLEL).map { "$it" }, Store.parallelAudio - 1, C.ACCENT,
+                    tr("Audio downloads at once (videos always one at a time). More is faster on good Wi-Fi, but high values may get throttled or asked to confirm you're not a bot; failed ones can be retried.",
+                        "Aynı anda inen ses sayısı (videolar her zaman tek tek). İyi Wi-Fi'de çoğu daha hızlıdır, ama yüksek değerler yavaşlatılabilir veya bot doğrulaması istenebilir; başarısız olanlar yeniden denenebilir.")) { setParallel(it + 1) }
             }
             .item(Ic.PHOTO, tr("Cover art in audio files", "Ses dosyalarında kapak"), value = Store.artQuality.label, more = true,
                 reset = Sheet.Reset(ArtQuality.LOW.label) { Store.artQuality = ArtQuality.LOW }) { artMenu() }
@@ -521,6 +541,12 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** A new limit applies to the next scheduling pass at once: a running service is poked to start more jobs now. */
+    private fun setParallel(n: Int) {
+        Store.parallelAudio = n
+        if (DownloadService.running) DownloadService.start(this)
+    }
+
     private fun audioFormatMenu() {
         Sheet(this, C.ACCENT).header(tr("Audio format", "Ses biçimi"))
             .choice(tr("Clean M4A", "Temiz M4A"), !Store.originalAudio, sub = tr("Converted on the phone: tags and cover art, plays everywhere", "Telefonda dönüştürülür: etiketler ve kapak, her yerde çalar")) { Store.originalAudio = false; refreshNote() }
@@ -541,6 +567,9 @@ class MainActivity : Activity() {
     }
 
     private val account by lazy { AccountUi(this) }
+
+    /** Feed Refresh with nothing followed: the "log in to sync" sheet (AccountUi). */
+    fun noSubscriptions(onImport: () -> Unit, onSearch: () -> Unit) = account.noSubscriptions(onImport, onSearch)
 
     private fun about() = message(
         "Plain Youtube",

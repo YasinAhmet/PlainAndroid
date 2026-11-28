@@ -28,6 +28,8 @@ object YoutubeApp {
         Store.init(app)
         Account.init(app)
         Resume.init(app)
+        Visited.init(app)
+        CustomFeedStore.init(app)
         PlayService.channel(app)
         // (3.3: completed caches are saved when the Youtube tab opens, not at every process start — MainActivity)
         DownloadService.channel(app)
@@ -36,7 +38,7 @@ object YoutubeApp {
 
 /**
  * Foreground service (type dataSync) that exists only while there is work. A pipeline:
- *  - download workers fetch streams: audio jobs up to ⋮ "parallel audio downloads" at once (default 3), a job with
+ *  - download workers fetch streams: audio jobs up to ⋮ "Parallel downloads" at once (default 3, up to 100), a job with
  *    video alone ([Sched]); then each job is handed to
  *  - the saver, which converts/copies one job at a time into MediaStore,
  * so downloads continue while earlier jobs convert. The service (and its wake locks) stays up until every worker is
@@ -476,6 +478,7 @@ class DownloadService : Service() {
             lastProgress[id] = now
         }
         Store.update(id, persist = false) { it.done = done; it.total = total }
+        if (total in 1..done) synchronized(lastProgress) { lastProgress.remove(id) } // finished: don't keep one entry per job forever
         notifyProgress(id, force = false)
     }
 
@@ -483,8 +486,11 @@ class DownloadService : Service() {
 
     private fun notifyProgress(id: Long, force: Boolean) {
         val now = System.currentTimeMillis()
-        if (!force && now - lastNotif < 1000) return
-        lastNotif = now
+        // many download threads report at once (up to 100): only one of them posts per second
+        synchronized(lastProgress) {
+            if (!force && now - lastNotif < 1000) return
+            lastNotif = now
+        }
         refreshNotif(id)
     }
 

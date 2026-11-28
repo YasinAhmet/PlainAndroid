@@ -156,6 +156,19 @@ object Sizes {
         }
     }
 
+    /**
+     * A mirrored front photo must flip left-right as seen upright. When the EXIF [orientationTag] still turns the
+     * stored pixels a quarter (6 = rotate 90, 8 = rotate 270, and the transposed 5/7), that is the stored y axis.
+     */
+    fun mirrorAlongY(orientationTag: Int) = orientationTag in 5..8
+
+    /** Reverses [n] ints of [a] starting at [from], in place (one pixel row). */
+    fun reverse(a: IntArray, from: Int, n: Int) {
+        var i = from
+        var j = from + n - 1
+        while (i < j) { val t = a[i]; a[i] = a[j]; a[j] = t; i++; j-- }
+    }
+
     /** Storage left free when a video stops for a full disk (room for the file's index and the system). */
     const val VIDEO_RESERVE = 64L shl 20
     /** Below this much room a recording isn't started at all. */

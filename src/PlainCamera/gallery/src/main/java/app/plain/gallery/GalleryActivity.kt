@@ -217,6 +217,7 @@ class GalleryActivity : Activity() {
 
     override fun onPause() {
         resumed = false
+        CategoryBackup.flush()
         main.removeCallbacks(reload)
         super.onPause()
     }
@@ -282,6 +283,12 @@ class GalleryActivity : Activity() {
                     items = l
                     loaded = true
                     refresh()
+                    // a fresh install with no categories: bring them back from the shared-storage backup
+                    CategoryBackup.restoreIfEmpty(this) {
+                        if (isDestroyed) return@restoreIfEmpty
+                        refresh()
+                        toast(tr("Categories restored from the backup.", "Kategoriler yedekten geri yüklendi."))
+                    }
                 }
             }
         } catch (_: Exception) {}
@@ -490,10 +497,18 @@ class GalleryActivity : Activity() {
         s.section(tr("View", "Görünüm"))
             .toggle(Ic.FOLDER, tr("Categories", "Kategoriler"), catsOn, sub = tr("Your own categories, shown as folders", "Kendi kategorileriniz, klasör olarak")) { on -> setCats(on) }
             .toggle(Ic.DELETE, tr("Hold to delete", "Basılı tutarak sil"), holdDelete, sub = tr("A long press moves the photo to the trash", "Uzun basış fotoğrafı çöpe taşır")) { on -> setHoldDelete(on) }
+            .item(Ic.RESTORE, tr("Restore categories…", "Kategorileri geri yükle…"),
+                sub = tr("Pick a backup (Pictures/Plain). Saved there by itself after each change", "Bir yedek seçin (Pictures/Plain). Her değişiklikten sonra oraya kendiliğinden kaydedilir")) { pickBackup() }
             .section(tr("App", "Uygulama"))
             .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this)) { Sheet.language(this, ACCENT) }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
             .show()
+    }
+
+    /** Restore categories…: the system file picker, then the picked backup is merged in. */
+    private fun pickBackup() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/png")
+        try { startActivityForResult(i, RC_BACKUP) } catch (_: Exception) { toast(tr("No file picker on this phone.", "Bu telefonda dosya seçici yok.")) }
     }
 
     private fun setCats(on: Boolean) {
@@ -682,6 +697,14 @@ class GalleryActivity : Activity() {
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
         super.onActivityResult(rc, res, data)
         when (rc) {
+            RC_BACKUP -> {
+                val u = data?.data
+                if (res == RESULT_OK && u != null) CategoryBackup.restoreFrom(this, u) { n ->
+                    if (isDestroyed) return@restoreFrom
+                    if (n == null) toast(tr("That file isn't a categories backup.", "Bu dosya bir kategori yedeği değil."))
+                    else { refresh(); toast(tr("Restored $n categories.", "$n kategori geri yüklendi.")) }
+                }
+            }
             RC_VIEW -> {
                 items = Library.items
                 refresh()
@@ -728,6 +751,7 @@ class GalleryActivity : Activity() {
         private const val RC_VIEW = 2
         private const val RC_TRASH = 3
         private const val RC_RESTORE = 4
+        private const val RC_BACKUP = 5
         private const val CAMERA_PKG = "app.plain.camera"
     }
 }

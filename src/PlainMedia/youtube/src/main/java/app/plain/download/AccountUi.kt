@@ -70,6 +70,38 @@ class AccountUi(private val act: MainActivity) {
         }.start()
     }
 
+    /**
+     * Feed Refresh with no subscriptions / follows at all: a sheet that leads to the sign-in (signed in already: to
+     * Sync subscriptions), with the Takeout import and a channel search as other ways.
+     */
+    fun noSubscriptions(onImport: () -> Unit, onSearch: () -> Unit) {
+        Thread {
+            val j = try { Account.jar() } catch (_: Exception) { null } // decrypt off the main thread
+            main.post { if (!act.isFinishing && !act.isDestroyed) noSubsSheet(j != null && j.signedIn && !Account.expired, onImport, onSearch) }
+        }.start()
+    }
+
+    private fun noSubsSheet(signed: Boolean, onImport: () -> Unit, onSearch: () -> Unit) {
+        val sheet = app.plain.ui.Sheet(act, C.ACCENT)
+        if (signed) {
+            sheet.header(tr("You have no subscriptions here yet", "Burada henüz aboneliğiniz yok"),
+                tr("You're signed in: bring your YouTube subscriptions in.", "Oturumunuz açık: YouTube aboneliklerinizi getirin."))
+                .item(app.plain.ui.Ic.SYNC, tr("Sync subscriptions", "Abonelikleri eşitle"), more = true) { syncSubs() }
+        } else {
+            sheet.header(tr("You have no subscriptions. Log in to sync them.", "Aboneliğiniz yok. Eşitlemek için giriş yapın."),
+                tr("After signing in: ⋮ → YouTube account → Sync subscriptions.", "Oturum açtıktan sonra: ⋮ → YouTube hesabı → Abonelikleri eşitle."))
+                .item(app.plain.ui.Ic.ACCOUNT, tr("Sign in to YouTube", "YouTube'da oturum aç"), sub = tr("On this phone", "Bu telefonda"), more = true) {
+                    act.startActivityForResult(Intent(act, SignInActivity::class.java), REQ_SIGNIN)
+                }
+                .item(app.plain.ui.Ic.UPLOAD, tr("Import cookies.txt", "cookies.txt içe aktar"), more = true) { pickFile() }
+        }
+        sheet.section(tr("Other ways", "Diğer yollar"))
+            .item(app.plain.ui.Ic.FOLDER, tr("Import from Google Takeout", "Google Takeout'tan içe aktar"), sub = tr("No sign-in needed", "Oturum açmak gerekmez"), more = true) { onImport() }
+            .item(app.plain.ui.Ic.SEARCH, tr("Search channels to follow", "Takip edilecek kanalları ara"), more = true) { onSearch() }
+            .item(app.plain.ui.Ic.INFO, tr("What is the account used for?", "Hesap ne için kullanılır?")) { act.message(tr("Account", "Hesap"), WHAT) }
+            .show()
+    }
+
     private fun menu(signed: Boolean) {
         val title = when {
             !signed -> tr("Not signed in", "Oturum açılmadı")

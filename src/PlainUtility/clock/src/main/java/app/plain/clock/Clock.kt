@@ -124,6 +124,15 @@ data class Anchor(val wall: Long, val elapsed: Long, val boot: Int) {
     }
 }
 
+/** How often the open Clock screen redraws. */
+object Tick {
+    /** While the shown countdown/stopwatch runs. */
+    const val FAST = 100L
+
+    /** Until the next redraw: [FAST] while something on screen runs, else just past the next minute (the time of day). */
+    fun delay(running: Boolean, now: Long): Long = if (running) FAST else 60_000 - Math.floorMod(now, 60_000L) + 20
+}
+
 object Fmt {
     /** 25:00, 1:05:00 (rounded up, so a countdown shows 00:00 only at the very end). */
     fun countdown(ms: Long): String = hms((ms + 999) / 1000)

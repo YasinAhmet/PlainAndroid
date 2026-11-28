@@ -10,7 +10,10 @@ import android.widget.FrameLayout
 import app.plain.lang.tr
 import java.io.File
 
-/** The categories, kept in the app's own private storage (a small text file). Main thread only. */
+/**
+ * The categories, kept in the app's own private storage (a small text file), with a copy in shared storage that
+ * survives a reinstall ([CategoryBackup]). Main thread only.
+ */
 object Categories {
     private var tags: Tags? = null
 
@@ -23,6 +26,17 @@ object Categories {
     }
 
     fun save(ctx: Context) {
+        saveLocal(ctx)
+        CategoryBackup.schedule(ctx)
+    }
+
+    /** Takes [t] as the categories (a restored backup) and keeps it here. */
+    fun replace(ctx: Context, t: Tags) {
+        tags = t
+        saveLocal(ctx)
+    }
+
+    private fun saveLocal(ctx: Context) {
         val t = tags ?: return
         val f = file(ctx)
         val out = f.startWrite()
