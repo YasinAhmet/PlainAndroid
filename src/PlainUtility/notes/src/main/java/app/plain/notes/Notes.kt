@@ -15,10 +15,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.util.Calendar
 
 /**
  * A note: text, a voice recording ([audio] = file name in files/notes/), or both (a caption). [remindAt] > 0: it
- * reminds then (a notification); [fired]: that has happened and it waits for Done or Snooze.
+ * reminds then (a notification); [fired]: that has happened and it waits for Done or Snooze. [archived] > 0: finished
+ * at that time; it waits in the Archive (its [remindAt] is kept, so "Use again" can remind at the same time of day).
  */
 data class Note(
     val id: Long,
@@ -28,12 +30,16 @@ data class Note(
     val created: Long = id,
     val remindAt: Long = 0,
     val fired: Boolean = false,
+    val archived: Long = 0,
 ) {
     val title: String get() = text.trim().lineSequence().firstOrNull { it.isNotBlank() }?.trim()
         ?: tr("Voice note", "Sesli not") + if (audioMs > 0) " · " + When.duration(audioMs) else ""
 
     fun json(): JSONObject = JSONObject().put("id", id).put("text", text).put("created", created)
-        .put("remindAt", remindAt).put("fired", fired).apply { if (audio != null) put("audio", audio).put("audioMs", audioMs) }
+        .put("remindAt", remindAt).put("fired", fired).apply {
+            if (audio != null) put("audio", audio).put("audioMs", audioMs)
+            if (archived > 0) put("archived", archived)
+        }
 
     companion object {
         fun of(o: JSONObject) = Note(
@@ -44,6 +50,9 @@ data class Note(
             created = o.optLong("created", o.getLong("id")),
             remindAt = o.optLong("remindAt"),
             fired = o.optBoolean("fired"),
+            // (a "done": true from any older or hand-made file counts as finished, so it goes to the Archive)
+            archived = o.optLong("archived").takeIf { it > 0 }
+                ?: if (o.optBoolean("done")) maxOf(o.optLong("created", o.getLong("id")), o.optLong("remindAt")) else 0L,
         )
     }
 }
@@ -70,11 +79,20 @@ object Notes {
     private fun load(c: Context): List<Note>? {
         val f = file(c)
         if (!f.exists()) return emptyList()
-        return try {
-            val a = JSONArray(f.readText())
-            (0 until a.length()).mapNotNull { i -> try { a.optJSONObject(i)?.let { Note.of(it) } } catch (_: Exception) { null } }
-        } catch (_: Exception) { null }
+        return try { parse(f.readText()) } catch (_: Exception) { null }
     }
+
+    /**
+     * notes.json's text: a plain array of notes (every version so far; an archived note just carries "archived", which
+     * an older app ignores). An object {"format":..., "notes":[...]} is read too, should a later version write one.
+     */
+    fun parse(text: String): List<Note>? = try {
+        val t = text.trim()
+        val a = if (t.startsWith("{")) JSONObject(t).getJSONArray("notes") else JSONArray(t)
+        (0 until a.length()).mapNotNull { i -> try { a.optJSONObject(i)?.let { Note.of(it) } } catch (_: Exception) { null } }
+    } catch (_: Exception) { null }
+
+    fun encode(list: List<Note>): String = JSONArray().apply { list.forEach { put(it.json()) } }.toString()
 
     fun all(c: Context): List<Note> = synchronized(lock) { load(c) ?: emptyList() }
 
@@ -82,9 +100,7 @@ object Notes {
 
     /** False when it couldn't be written (storage full…): the list on disk is then unchanged. */
     private fun write(c: Context, list: List<Note>): Boolean = try {
-        val a = JSONArray()
-        list.forEach { a.put(it.json()) }
-        val text = a.toString()
+        val text = encode(list)
         val tmp = File(c.filesDir, "notes.json.tmp")
         tmp.writeText(text)
         if (tmp.length() == 0L && text.isNotEmpty()) throw IOException("nothing written")
@@ -137,6 +153,43 @@ object Notes {
         return put(c, cur.copy(remindAt = at, fired = false))
     }
 
+    /** Finished: off the list, into the Archive (its reminder and notification go). */
+    fun finish(c: Context, n: Note): Boolean {
+        val cur = get(c, n.id) ?: return false
+        if (cur.archived > 0) return true
+        return put(c, cur.copy(archived = System.currentTimeMillis(), fired = false))
+    }
+
+    /** "Use again (today)": back on the list; a reminder comes back for today at the same time if that is still ahead. */
+    fun reuse(c: Context, n: Note): Boolean {
+        val cur = get(c, n.id) ?: return false
+        return put(c, cur.copy(archived = 0, fired = false, remindAt = reuseAt(cur.remindAt, System.currentTimeMillis())))
+    }
+
+    /** Today at [remindAt]'s time of day, or 0 when there was none or that time has passed today. */
+    fun reuseAt(remindAt: Long, now: Long): Long {
+        if (remindAt <= 0) return 0
+        val was = Calendar.getInstance().apply { timeInMillis = remindAt }
+        val t = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, was.get(Calendar.HOUR_OF_DAY))
+            set(Calendar.MINUTE, was.get(Calendar.MINUTE))
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        return if (t > now) t else 0
+    }
+
+    /** Deletes every archived note (and its recording). */
+    fun deleteArchived(c: Context): Boolean {
+        val gone = all(c).filter { it.archived > 0 }
+        if (gone.isEmpty()) return true
+        val ids = gone.map { it.id }.toSet()
+        if (!change(c) { l -> l.filter { it.id !in ids } }) return false
+        gone.forEach { n -> audioFile(c, n)?.delete(); cancelAlarm(c, n); cancelNotification(c, n) }
+        listener?.invoke()
+        return true
+    }
+
     fun snoozeMinutes(c: Context) = c.getSharedPreferences("notes", Context.MODE_PRIVATE).getInt("snooze", 10)
 
     // ------------------------------------------------------------------ alarms
@@ -146,7 +199,7 @@ object Notes {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     private fun schedule(c: Context, n: Note) {
-        if (n.remindAt <= 0 || n.fired) { cancelAlarm(c, n); return }
+        if (n.remindAt <= 0 || n.fired || n.archived > 0) { cancelAlarm(c, n); return }
         val am = c.getSystemService(AlarmManager::class.java) ?: return
         val pi = alarmPi(c, n)
         try {
@@ -164,7 +217,7 @@ object Notes {
     /** The alarm went off: show the note. */
     fun fire(c: Context, id: Long) {
         val n = get(c, id) ?: return
-        if (n.remindAt <= 0 || n.fired) return
+        if (n.remindAt <= 0 || n.fired || n.archived > 0) return
         if (n.remindAt > System.currentTimeMillis() + 1500) { schedule(c, n); return }   // moved later meanwhile
         val f = n.copy(fired = true)
         change(c) { l -> l.map { if (it.id == id) f else it } }
@@ -179,7 +232,7 @@ object Notes {
     fun restore(c: Context) {
         val now = System.currentTimeMillis()
         for (n in all(c)) when {
-            n.remindAt <= 0 -> {}
+            n.remindAt <= 0 || n.archived > 0 -> {}
             n.fired -> notify(c, n, quiet = true)
             n.remindAt <= now -> fire(c, n.id)
             else -> schedule(c, n)
@@ -235,7 +288,7 @@ object Notes {
             .setShowWhen(true)
             .setCategory(Notification.CATEGORY_REMINDER)
             .setContentIntent(openPi(c, n))
-            .addAction(Notification.Action.Builder(null, tr("Done", "Tamam"), pi(c, NotesReceiver.DONE, n)).build())
+            .addAction(Notification.Action.Builder(null, tr("Done", "Bitti"), pi(c, NotesReceiver.DONE, n)).build())
             .addAction(Notification.Action.Builder(null, tr("Snooze $snooze min", "$snooze dk ertele"), pi(c, NotesReceiver.SNOOZE, n)).build())
         if (quiet) {
             b.setOnlyAlertOnce(true)   // still showing (an update): no second alert

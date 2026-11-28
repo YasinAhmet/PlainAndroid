@@ -63,3 +63,15 @@ fun Context.pill(t: String, textColor: Int = C.TEXT, stroke: Int = C.OUTLINE_BTN
     }
 
 fun View.enable(on: Boolean) { isEnabled = on; alpha = if (on) 1f else 0.35f }
+
+/** Prev / "2 / 5" / Next under a page of a long list. */
+fun Context.pager(page: Int, pages: Int, go: (Int) -> Unit): View = android.widget.LinearLayout(this).apply {
+    gravity = Gravity.CENTER
+    setPadding(dp(16), dp(10), dp(16), dp(10))
+    addView(pill(app.plain.lang.tr("‹ Prev", "‹ Önceki")) { go(page - 1) }.apply { enable(page > 0) })
+    addView(text("${page + 1} / $pages", 13f, C.LABEL).apply { setPadding(dp(14), 0, dp(14), 0); fontFeatureSettings = "tnum" })
+    addView(pill(app.plain.lang.tr("Next ›", "Sonraki ›")) { go(page + 1) }.apply { enable(page < pages - 1) })
+}
+
+/** How many pages [size] rows make at [per] a page (at least one). */
+fun pageCount(size: Int, per: Int) = if (size <= 0) 1 else (size + per - 1) / per

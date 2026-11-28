@@ -18,9 +18,16 @@ class NotesReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         PlainLang.init(c)
         val id = i.data?.host?.toLongOrNull() ?: return
+        // a routine's: plainroutine://<id>/<day yyyymmdd>/<minute of the day>
+        val seg = i.data?.pathSegments.orEmpty()
+        val day = seg.getOrNull(0)?.toIntOrNull() ?: 0
+        val min = seg.getOrNull(1)?.toIntOrNull() ?: -1
         when (i.action) {
             REMIND -> Notes.fire(c, id)
-            DONE -> Notes.get(c, id)?.let { Notes.remind(c, it, 0) }
+            DONE -> Notes.get(c, id)?.let { Notes.finish(c, it) }   // finished: into the Archive
+            R_REMIND -> Routines.fire(c, id)
+            R_DONE -> Routines.doneFromNotification(c, id, day, min)
+            R_SNOOZE -> Routines.snooze(c, id, day, min)
             SNOOZE -> Notes.get(c, id)?.let { Notes.remind(c, it, System.currentTimeMillis() + Notes.snoozeMinutes(c) * 60_000L) }
         }
     }
@@ -29,15 +36,29 @@ class NotesReceiver : BroadcastReceiver() {
         const val REMIND = "app.plain.notes.REMIND"
         const val DONE = "app.plain.notes.DONE"
         const val SNOOZE = "app.plain.notes.SNOOZE"
+        const val R_REMIND = "app.plain.routines.REMIND"
+        const val R_DONE = "app.plain.routines.DONE"
+        const val R_SNOOZE = "app.plain.routines.SNOOZE"
     }
 }
 
-/** After a restart or an app update: sets the note reminders again. */
+/**
+ * After a restart or an app update: sets the note and routine reminders again. After the phone's clock or time zone
+ * changed: only the routines (their alarms are times of day; a note's is a fixed moment and stays right).
+ */
 class NotesBoot : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (i.action != Intent.ACTION_BOOT_COMPLETED && i.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-        PlainLang.init(c)
-        Notes.restore(c)
+        when (i.action) {
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                PlainLang.init(c)
+                Notes.restore(c)
+                Routines.restore(c)
+            }
+            Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> {
+                PlainLang.init(c)
+                Routines.restore(c)
+            }
+        }
     }
 }
 

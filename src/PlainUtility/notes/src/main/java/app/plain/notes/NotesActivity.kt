@@ -3,8 +3,6 @@ package app.plain.notes
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -57,7 +55,9 @@ import app.plain.shared.R as SR
  * cancels) or tap it to record hands-free and tap ■ to save. Whatever is typed becomes the voice note's caption.
  *
  * List: timed notes first (soonest first; due ones with a ✓), then the rest, newest first. Tap a text note to edit it,
- * a voice note to play it; hold either for its sheet. Nothing ticks unless this tab is open.
+ * a voice note to play it; hold either for its sheet. The ✓ at a row's end finishes the note: it moves to the Archive
+ * (a row at the list's end, or ⋮ → Archive), where it can be used again today or deleted for good.
+ * Nothing ticks unless this tab is open.
  */
 class NotesActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
@@ -74,6 +74,10 @@ class NotesActivity : Activity() {
     private lateinit var cancelRec: TextView
     private lateinit var action: ImageView
     private val rows = HashMap<Long, View>()
+
+    // the Archive (finished notes), a sub-page of this tab
+    private var archiveMode = false
+    private var archPage = 0
 
     // composer reminder: picked with the bell, or found in the text
     private var pickedAt = 0L
@@ -101,7 +105,7 @@ class NotesActivity : Activity() {
                 recorder != null -> updateRecStatus()
                 player != null -> updatePlay()
                 // only reminders' "in 5 min" and the day in "today 14:05" change: don't rebuild a long list for nothing
-                notes.any { it.remindAt > 0 } || shownDay != dayOf(System.currentTimeMillis()) -> show()
+                notes.any { it.remindAt > 0 && it.archived == 0L } || shownDay != dayOf(System.currentTimeMillis()) -> show()
                 else -> refreshChip()
             }
             val next = if (recorder != null || player?.isPlaying == true) 250L else 30_000L
@@ -172,7 +176,7 @@ class NotesActivity : Activity() {
                 fontFeatureSettings = "tnum"
                 visibility = View.GONE
             }
-            bell = iconButton(SR.drawable.sheet_ic_bell, tr("Remind me", "Hatırlat")) { remindSheet(effectiveAt()) { pickedAt = it; dropped = it == 0L; updateChip() } }
+            bell = iconButton(SR.drawable.sheet_ic_bell, tr("Remind me", "Hatırlat")) { remindPicker(effectiveAt()) { pickedAt = it; dropped = it == 0L; updateChip() } }
             cancelRec = text("✕", 20f, C.DIM).apply {
                 gravity = Gravity.CENTER
                 contentDescription = tr("Cancel recording", "Kaydı iptal et")
@@ -195,6 +199,7 @@ class NotesActivity : Activity() {
         }
         updateAction()
         b?.getString("draft")?.let { field.setText(it) }
+        if (b?.getBoolean("archive") == true) { archiveMode = true; archPage = b.getInt("archPage"); Hub.setBack(this) { leaveArchive() } }
         // the intent that started this tab, once: not again when Android recreates it (it would overwrite the draft
         // or play the note again)
         if (b == null) handle(intent)
@@ -203,6 +208,8 @@ class NotesActivity : Activity() {
     override fun onSaveInstanceState(out: Bundle) {
         super.onSaveInstanceState(out)
         if (::field.isInitialized) out.putString("draft", field.text.toString())
+        out.putBoolean("archive", archiveMode)
+        out.putInt("archPage", archPage)
     }
 
     override fun onNewIntent(i: Intent) {
@@ -224,7 +231,8 @@ class NotesActivity : Activity() {
             ACTION_SHOW -> {
                 val id = i.getLongExtra(EXTRA_ID, -1)
                 load()
-                val n = notes.firstOrNull { it.id == id } ?: return
+                val n = notes.firstOrNull { it.id == id && it.archived == 0L } ?: return
+                if (archiveMode) leaveArchive()
                 main.post { rows[id]?.let { r -> scroll.smoothScrollTo(0, (r.top - dp(40)).coerceAtLeast(0)) } }
                 if (n.audio != null && playingId != id) togglePlay(n)
             }
@@ -297,8 +305,11 @@ class NotesActivity : Activity() {
         list.removeAllViews()
         rows.clear()
         playSub = null
-        val timed = notes.filter { it.remindAt > 0 }.sortedBy { it.remindAt }
-        val rest = notes.filter { it.remindAt <= 0 }.sortedByDescending { it.created }
+        val archived = notes.filter { it.archived > 0 }.sortedByDescending { it.archived }
+        if (archiveMode) { showArchive(archived, now); return }
+        val active = notes.filter { it.archived == 0L }
+        val timed = active.filter { it.remindAt > 0 }.sortedBy { it.remindAt }
+        val rest = active.filter { it.remindAt <= 0 }.sortedByDescending { it.created }
         if (timed.isNotEmpty()) {
             list.addView(heading(tr("Reminders", "Hatırlatıcılar")))
             timed.forEach { list.addView(row(it, now)) }
@@ -308,8 +319,112 @@ class NotesActivity : Activity() {
             else list.addView(View(this), LinearLayout.LayoutParams(-1, dp(8)))
             rest.forEach { list.addView(row(it, now)) }
         }
+        if (archived.isNotEmpty()) list.addView(link(tr("Archive", "Arşiv"), archived.size.toString()) { enterArchive() })
         empty.visibility = if (notes.isEmpty()) View.VISIBLE else View.GONE
         refreshChip()
+    }
+
+    /** A quiet row that opens a sub-page: "Archive   3 ›". */
+    private fun link(label: String, value: String, fn: () -> Unit) = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(52)
+        setPadding(dp(20), dp(8), dp(16), dp(8))
+        background = ripple(null, android.graphics.drawable.ColorDrawable(C.BG))
+        setOnClickListener { fn() }
+        addView(ImageView(this@NotesActivity).apply { setImageResource(SR.drawable.sheet_ic_folder); imageTintList = ColorStateList.valueOf(C.LABEL) },
+            LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(14) })
+        addView(text(label, 15f, C.DIM), LinearLayout.LayoutParams(0, -2, 1f))
+        addView(text("$value  ›", 14f, C.LABEL))
+    }
+
+    // ------------------------------------------------------------------ archive
+
+    private fun enterArchive() {
+        if (recorder != null) return
+        archiveMode = true
+        archPage = 0
+        Hub.setBack(this) { leaveArchive() }
+        show()
+        scroll.scrollTo(0, 0)
+    }
+
+    private fun leaveArchive() {
+        if (!archiveMode) return
+        archiveMode = false
+        Hub.setBack(this, null)
+        show()
+        scroll.scrollTo(0, 0)
+    }
+
+    @Deprecated("Activity back handling")
+    override fun onBackPressed() {
+        if (archiveMode) leaveArchive() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private fun showArchive(archived: List<Note>, now: Long) {
+        val pages = pageCount(archived.size, PAGE)
+        archPage = archPage.coerceIn(0, pages - 1)
+        list.addView(heading(tr("Archive", "Arşiv") + " · " + archived.size))
+        if (archived.isEmpty()) list.addView(text(tr("Nothing here. Finished notes (✓) wait here; use one again today or delete it for good.",
+            "Burada bir şey yok. Biten notlar (✓) burada bekler; bugün yeniden kullanabilir ya da kalıcı olarak silebilirsiniz."),
+            14f, C.DIM, lines = 0).apply { setPadding(dp(20), dp(8), dp(20), dp(8)) })
+        archived.drop(archPage * PAGE).take(PAGE).forEach { list.addView(row(it, now)) }
+        if (pages > 1) list.addView(pager(archPage, pages) { archPage = it; show(); scroll.scrollTo(0, 0) })
+        if (archived.isNotEmpty()) list.addView(text(tr("Delete all archived…", "Arşivdekilerin hepsini sil…"), 14f, C.RED).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(52)
+            setPadding(dp(20), 0, dp(20), 0)
+            background = ripple(null, android.graphics.drawable.ColorDrawable(C.BG))
+            setOnClickListener { confirmDeleteArchived(archived.size) }
+        })
+        empty.visibility = View.GONE
+        refreshChip()
+    }
+
+    private fun archiveSheet(n: Note) {
+        val now = System.currentTimeMillis()
+        val again = Notes.reuseAt(n.remindAt, now)
+        val sub = when {
+            n.remindAt <= 0 -> tr("Back on the list", "Listeye geri döner")
+            again > 0 -> tr("Reminds today at ", "Bugün şu saatte hatırlatır: ") + java.util.Calendar.getInstance().apply { timeInMillis = again }
+                .let { Stack.hhmm(it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE)) }
+            else -> tr("Back on the list; today's time has passed, so no reminder", "Listeye döner; bugünkü saat geçti, hatırlatıcı olmaz")
+        }
+        val s = Sheet(this, C.ACCENT).header(n.title, tr("Finished ", "Bitti: ") + When.label(n.archived, now))
+            .actions(
+                Sheet.Action(Ic.RESTORE, tr("Use again", "Yeniden kullan")) { reuse(n) },
+                if (n.audio != null) Sheet.Action(Ic.PLAY, tr("Play", "Oynat")) { togglePlay(n) } else null,
+                if (n.text.isNotBlank()) Sheet.Action(Ic.COPY, tr("Copy", "Kopyala")) { copy(n) } else null,
+                Sheet.Action(Ic.SHARE, tr("Share", "Paylaş")) { share(n) },
+            )
+            .section(null)
+            .item(Ic.RESTORE, tr("Use again (today)", "Yeniden kullan (bugün)"), sub = sub) { reuse(n) }
+        s.section(null).item(Ic.DELETE, tr("Delete permanently…", "Kalıcı olarak sil…"), danger = true) { confirmDelete(n) }.show()
+    }
+
+    private fun reuse(n: Note) {
+        val had = n.remindAt > 0
+        if (!Notes.reuse(this, n)) { cantSave(); return }
+        val back = Notes.get(this, n.id)
+        when {
+            back != null && back.remindAt > 0 -> { askNotify(); toast(tr("Back on the list · reminds ", "Listede · hatırlatma: ") + When.label(back.remindAt, System.currentTimeMillis())) }
+            had -> toast(tr("Back on the list, without a reminder (today's time has passed)", "Listede, hatırlatıcısız (bugünkü saat geçti)"))
+            else -> toast(tr("Back on the list", "Listeye geri döndü"))
+        }
+    }
+
+    private fun finishNote(n: Note) {
+        if (n.id == playingId) stopPlay()
+        if (!Notes.finish(this, n)) cantSave() else toast(tr("Done · moved to the archive", "Bitti · arşive taşındı"))
+    }
+
+    private fun confirmDeleteArchived(count: Int) {
+        AlertDialog.Builder(this)
+            .setTitle(tr("Delete all $count archived notes?", "Arşivdeki $count notun hepsi silinsin mi?"))
+            .setMessage(tr("This can't be undone.", "Bu geri alınamaz."))
+            .setPositiveButton(tr("Delete", "Sil")) { _, _ -> stopPlay(); if (!Notes.deleteArchived(this)) cantSave() }
+            .setNegativeButton(tr("Cancel", "İptal"), null)
+            .show()
     }
 
     /** The composer's "in 10 min" chip keeps its time current (typed or picked with the bell). */
@@ -329,8 +444,8 @@ class NotesActivity : Activity() {
             minimumHeight = dp(54)
             setPadding(dp(20), dp(8), dp(8), dp(8))
             background = ripple(null, android.graphics.drawable.ColorDrawable(C.BG))
-            setOnClickListener { if (n.audio != null) togglePlay(n) else edit(n) }
-            setOnLongClickListener { it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); noteSheet(n); true }
+            setOnClickListener { if (n.audio != null) togglePlay(n) else if (n.archived > 0) archiveSheet(n) else edit(n) }
+            setOnLongClickListener { it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); if (n.archived > 0) archiveSheet(n) else noteSheet(n); true }
         }
         if (n.audio != null) {
             val playing = current && player?.isPlaying == true
@@ -349,6 +464,7 @@ class NotesActivity : Activity() {
         val sub = text("", 12.5f, C.LABEL, lines = 1).apply { setPadding(0, dp(3), 0, 0); fontFeatureSettings = "tnum" }
         val len = if (n.audio != null) " · " + When.duration(n.audioMs) else ""
         when {
+            n.archived > 0 -> sub.text = tr("Finished ", "Bitti: ") + When.label(n.archived, now) + len
             n.remindAt > 0 && (n.fired || n.remindAt <= now) -> {
                 sub.text = tr("Due · ", "Zamanı geldi · ") + When.left(n.remindAt, now) + len
                 sub.setTextColor(C.ACCENT)
@@ -363,14 +479,16 @@ class NotesActivity : Activity() {
         mid.addView(sub)
         if (current) playSub = sub
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
-        if (n.remindAt > 0 && (n.fired || n.remindAt <= now)) {
+        if (n.archived == 0L) {
+            // ✓: finished, into the Archive (bright when the reminder is due, faint otherwise)
+            val due = n.remindAt > 0 && (n.fired || n.remindAt <= now)
             row.addView(ImageView(this).apply {
                 setImageResource(SR.drawable.sheet_ic_check)
-                imageTintList = ColorStateList.valueOf(C.ACCENT)
+                imageTintList = ColorStateList.valueOf(if (due) C.ACCENT else C.FAINT)
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 background = ripple(null, ring(C.BG))
-                contentDescription = tr("Done", "Tamam")
-                setOnClickListener { Notes.remind(this@NotesActivity, n, 0) }
+                contentDescription = tr("Done: move to the archive", "Bitti: arşive taşı")
+                setOnClickListener { finishNote(n) }
             }, LinearLayout.LayoutParams(dp(44), dp(44)))
         } else row.addView(View(this), LinearLayout.LayoutParams(dp(12), 1))
         rows[n.id] = row
@@ -446,6 +564,7 @@ class NotesActivity : Activity() {
         val n = Note(id = Notes.newId(this), text = t, created = now, remindAt = at)
         if (!Notes.put(this, n)) { cantSave(); return }   // the text stays in the field
         clearComposer()
+        leaveArchive()
         if (at > 0) { askNotify(); toast(tr("Reminds ", "Hatırlatma: ") + When.label(at, System.currentTimeMillis())) }
         scrollTo(n.id)
     }
@@ -574,6 +693,7 @@ class NotesActivity : Activity() {
         val n = Note(id = recId, text = t, audio = f.name, audioMs = realLength(f, dur), created = now, remindAt = at)
         if (!Notes.put(this, n)) { f.delete(); cantSave(); return }
         clearComposer()
+        leaveArchive()
         if (at > 0) askNotify()
         scrollTo(n.id)
     }
@@ -715,7 +835,7 @@ class NotesActivity : Activity() {
         val sub = if (n.remindAt > 0) tr("Reminds ", "Hatırlatma: ") + When.label(n.remindAt, now) else tr("Written ", "Yazıldı: ") + When.label(n.created, now)
         val s = Sheet(this, C.ACCENT).header(n.title, sub)
             .actions(
-                Sheet.Action(Ic.BELL, tr("Remind", "Hatırlat")) { remindSheet(n.remindAt) { Notes.remind(this, n, it); if (it > 0) askNotify() } },
+                Sheet.Action(Ic.BELL, tr("Remind", "Hatırlat")) { remindPicker(n.remindAt) { Notes.remind(this, n, it); if (it > 0) askNotify() } },
                 Sheet.Action(Ic.EDIT, if (n.audio != null) tr("Caption", "Açıklama") else tr("Edit", "Düzenle")) { edit(n) },
                 if (n.text.isNotBlank()) Sheet.Action(Ic.COPY, tr("Copy", "Kopyala")) { copy(n) } else null,
                 Sheet.Action(Ic.SHARE, tr("Share", "Paylaş")) { share(n) },
@@ -723,13 +843,14 @@ class NotesActivity : Activity() {
         if (n.remindAt > 0) {
             s.section(tr("Reminder", "Hatırlatıcı"))
             if (n.fired || n.remindAt <= now) {
-                s.item(Ic.CHECK, tr("Done", "Tamam"), sub = tr("Keeps the note, drops the reminder", "Not kalır, hatırlatıcı kalkar")) { Notes.remind(this, n, 0) }
+                s.item(Ic.CLOSE, tr("Keep the note, drop the reminder", "Not kalsın, hatırlatıcı kalksın")) { Notes.remind(this, n, 0) }
                 val m = Notes.snoozeMinutes(this)
                 s.item(Ic.SLEEP, tr("Snooze $m min", "$m dk ertele")) { Notes.remind(this, n, System.currentTimeMillis() + m * 60_000L) }
             } else {
                 s.item(Ic.CLOSE, tr("Remove the reminder", "Hatırlatıcıyı kaldır"), sub = When.left(n.remindAt, now)) { Notes.remind(this, n, 0) }
             }
         }
+        s.section(null).item(Ic.CHECK, tr("Done", "Bitti"), sub = tr("Moves the note to the archive", "Notu arşive taşır")) { finishNote(n) }
         if (n.audio == null) s.section(null).item(Ic.MIC, tr("Add a voice note with this text", "Bu metinle sesli not ekle"),
             sub = tr("Fills the field; then hold the mic", "Alanı doldurur; sonra mikrofonu basılı tutun")) {
             field.setText(n.text); field.setSelection(field.text.length)
@@ -756,82 +877,11 @@ class NotesActivity : Activity() {
 
     private fun confirmDelete(n: Note) {
         AlertDialog.Builder(this)
-            .setTitle(tr("Delete this note?", "Bu not silinsin mi?"))
-            .setMessage(n.title)
+            .setTitle(if (n.archived > 0) tr("Delete permanently?", "Kalıcı olarak silinsin mi?") else tr("Delete this note?", "Bu not silinsin mi?"))
+            .setMessage(n.title + if (n.archived > 0) "\n\n" + tr("This can't be undone.", "Bu geri alınamaz.") else "")
             .setPositiveButton(tr("Delete", "Sil")) { _, _ -> if (n.id == playingId) stopPlay(); if (!Notes.delete(this, n)) cantSave() }
             .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
-    }
-
-    /** When to remind: quick lengths, tonight / tomorrow, a typed time, or the calendar. [onPick] gets 0 for none. */
-    private fun remindSheet(current: Long, onPick: (Long) -> Unit) {
-        val now = System.currentTimeMillis()
-        val inMin = { m: Int -> { onPick(System.currentTimeMillis() + m * 60_000L) } }
-        val at = { dayOffset: Int, h: Int ->
-            Calendar.getInstance().apply {
-                add(Calendar.DAY_OF_YEAR, dayOffset); set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-        }
-        val s = Sheet(this, C.ACCENT).header(tr("Remind me", "Hatırlat"),
-            if (current > 0) tr("Now: ", "Şu an: ") + When.label(current, now) else tr("From now, or at a time", "Şimdiden itibaren ya da bir saatte"))
-            .actions(
-                Sheet.Action(Ic.HISTORY, tr("10 min", "10 dk"), inMin(10)),
-                Sheet.Action(Ic.HISTORY, tr("30 min", "30 dk"), inMin(30)),
-                Sheet.Action(Ic.HISTORY, tr("1 hour", "1 saat"), inMin(60)),
-                Sheet.Action(Ic.SLEEP, tr("Tomorrow 9:00", "Yarın 9:00")) { onPick(at(1, 9)) },
-            )
-            .section(tr("Timer", "Süre"))
-        for (m in listOf(5, 15, 45, 120)) {
-            val label = if (m < 60) tr("In $m min", "$m dk sonra") else tr("In ${m / 60} hours", "${m / 60} saat sonra")
-            s.item(Ic.HISTORY, label, value = When.label(now + m * 60_000L, now).substringAfterLast(' ')) { inMin(m)() }
-        }
-        s.section(tr("Time", "Saat"))
-        if (at(0, 20) > now + 15 * 60_000L) s.item(Ic.BELL, tr("This evening", "Bu akşam"), value = "20:00") { onPick(at(0, 20)) }
-        s.item(Ic.BELL, tr("Tomorrow evening", "Yarın akşam"), value = "20:00") { onPick(at(1, 20)) }
-        s.item(Ic.EDIT, tr("Type a time…", "Bir zaman yazın…"), sub = tr("“20 min”, “18:30”, “friday 9”", "“20 dk”, “18:30”, “cuma 9”"), more = true) { askTime(onPick) }
-        s.item(Ic.FILTER, tr("Pick a date and time…", "Tarih ve saat seçin…"), more = true) { pickDate(current, onPick) }
-        if (current > 0) s.section(null).item(Ic.CLOSE, tr("No reminder", "Hatırlatıcı yok")) { onPick(0) }
-        s.show()
-    }
-
-    private fun askTime(onPick: (Long) -> Unit) {
-        val e = EditText(this).apply {
-            hint = tr("e.g. 20 min, 18:30, tomorrow 9", "ör. 20 dk, 18:30, yarın 9")
-            isSingleLine = true
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setTextColor(C.TEXT)
-        }
-        val box = FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(e) }
-        val d = AlertDialog.Builder(this)
-            .setTitle(tr("Remind me", "Hatırlat"))
-            .setMessage(tr("A number alone is minutes.", "Yalnızca sayı = dakika."))
-            .setView(box)
-            .setPositiveButton(tr("Set", "Ayarla")) { _, _ ->
-                val t = e.text.toString().trim()
-                val now = System.currentTimeMillis()
-                val at = t.replace(',', '.').toDoubleOrNull()?.let { m -> if (m > 0 && m <= 43_200) now + (m * 60_000).toLong() else null }
-                    ?: When.find(t, now)?.at
-                if (at == null) toast(tr("That isn't a time I know.", "Bu zamanı anlayamadım.")) else onPick(at)
-            }
-            .setNegativeButton(tr("Cancel", "İptal"), null)
-            .create()
-        d.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
-        d.show()
-        e.requestFocus()
-    }
-
-    private fun pickDate(current: Long, onPick: (Long) -> Unit) {
-        val c = Calendar.getInstance().apply {
-            if (current > 0) timeInMillis = current else { add(Calendar.HOUR_OF_DAY, 1); set(Calendar.MINUTE, 0) }
-        }
-        DatePickerDialog(this, { _, y, m, d ->
-            TimePickerDialog(this, { _, h, min ->
-                val at = Calendar.getInstance().apply { set(y, m, d, h, min, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
-                if (at <= System.currentTimeMillis()) toast(tr("That time has passed.", "Bu zaman geçti.")) else onPick(at)
-            }, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), true).show()
-        }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).apply {
-            datePicker.minDate = System.currentTimeMillis() - 1000
-        }.show()
     }
 
     private fun openNotificationSettings(channel: String?) {
@@ -846,7 +896,10 @@ class NotesActivity : Activity() {
         val snooze = Notes.snoozeMinutes(this)
         val opts = listOf(5, 10, 15, 30, 60)
         val fmt = { m: Int -> tr("$m min", "$m dk") }
+        val archived = notes.count { it.archived > 0 }
         val s = Sheet(this, C.ACCENT).header(tr("Notes", "Notlar"), tr("Quick text and voice notes with reminders", "Hatırlatıcılı hızlı yazılı ve sesli notlar"))
+            .item(Ic.FOLDER, tr("Archive", "Arşiv"), sub = tr("Finished notes: use again or delete", "Biten notlar: yeniden kullan ya da sil"),
+                value = archived.toString(), more = true) { if (archiveMode) leaveArchive() else enterArchive() }
             .section(tr("Reminders", "Hatırlatıcılar"))
             .item(Ic.SLEEP, tr("Snooze length", "Erteleme süresi"), value = fmt(snooze), more = true,
                 reset = Sheet.Reset(fmt(10)) { prefs.edit().putInt("snooze", 10).apply() }) {
@@ -870,5 +923,6 @@ class NotesActivity : Activity() {
         const val EXTRA_ID = "id"
         private const val RC_MIC = 1
         private const val RC_NOTIFY = 2
+        private const val PAGE = 40
     }
 }

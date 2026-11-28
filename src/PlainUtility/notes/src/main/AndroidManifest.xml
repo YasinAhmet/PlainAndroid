@@ -17,11 +17,21 @@
             android:theme="@style/nts_AppTheme"
             android:windowSoftInputMode="adjustResize"
             android:exported="false" />
+        <!-- Routines tab: daily repeating reminders (next occurrence = one exact alarm per routine) -->
+        <activity
+            android:name=".RoutinesActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:launchMode="singleTop"
+            android:theme="@style/nts_AppTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="false" />
         <receiver android:name=".NotesReceiver" android:exported="false" />
         <receiver android:name=".NotesBoot" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
         <!-- Share a voice note: read-only, one file at a time, only with a grant -->

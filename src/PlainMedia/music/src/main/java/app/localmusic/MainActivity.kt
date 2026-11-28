@@ -1526,6 +1526,10 @@ class MainActivity : Activity() {
     // --- player updates ----------------------------------------------------------------------
 
     private fun onPlayerChanged() {
+        // play pressed while this screen shows (button, notification, headset): the time ticker starts here too,
+        // not only in onResume (the shown time stood still until the screen was left and opened again)
+        handler.removeCallbacks(ticker)
+        if (resumed && Player.playing) handler.postDelayed(ticker, 500)
         val s = Player.current
         if (s == null) mini.visibility = View.GONE
         else {

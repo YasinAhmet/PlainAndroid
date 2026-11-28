@@ -413,7 +413,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
     private val tick = object : Runnable {
         override fun run() {
             updateTime()
-            if (started && mp?.isPlaying == true) main.postDelayed(this, 500)
+            // keeps going through a short stall (buffering: isPlaying may read false while still meant to play)
+            if (started && mp != null && (mp?.isPlaying == true || playWhenReady)) main.postDelayed(this, 500)
         }
     }
 
@@ -471,6 +472,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         started = true
         runBg(bg.show()) // back in the app: video again (surface, or the video stream at the same position)
         if (state != PState.CLOSED && mp == null) start()
+        // the time ticker stops while the app is in the background (audio goes on): run it again, or the shown time froze
+        main.removeCallbacks(tick); if (mp != null) main.post(tick)
         if (state == PState.FULL) registerVolume(true)
     }
 

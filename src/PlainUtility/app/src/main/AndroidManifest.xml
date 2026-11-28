@@ -57,5 +57,12 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity-alias>
+        <!-- a routine's notification opens the Routines tab -->
+        <activity-alias
+            android:name="app.plain.hub.OpenRoutines"
+            android:exported="false"
+            android:targetActivity="app.plain.hub.ForwardActivity">
+            <meta-data android:name="app.plain.hub.TAB" android:value="routines" />
+        </activity-alias>
     </application>
 </manifest>
