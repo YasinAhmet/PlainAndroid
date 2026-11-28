@@ -103,17 +103,57 @@ class PlayQueue(private val rnd: Random = Random()) {
         if (order.isEmpty()) pos = -1 else if (pos >= order.size) pos = if (repeat == Repeat.ALL) 0 else order.size - 1
     }
 
-    /** Drop every entry whose id fails [keep] (e.g. files that no longer exist). */
+    /**
+     * Drop every entry whose id fails [keep] (e.g. files that no longer exist). One pass: the same result as removing
+     * them one by one with [removeAt] (from the back), but O(n) for a 20k-song queue instead of O(n²).
+     */
     fun retain(keep: (Long) -> Boolean) {
-        for (p in order.indices.reversed()) if (!keep(items[order[p]])) removeAt(p)
+        if (order.isEmpty()) return
+        val kept = BooleanArray(items.size) { keep(items[it]) }
+        if (kept.all { it }) return
+        retainItems(kept)
     }
 
-    fun playNext(id: Long) {
-        if (pos < 0) { set(listOf(id), 0, shuffle); return }
+    /** "Clear upcoming": drop everything after the current entry (in play order). */
+    fun clearAfterCurrent() {
+        if (pos < 0 || pos >= order.size - 1) return
+        val kept = BooleanArray(items.size)
+        for (p in 0..pos) kept[order[p]] = true
+        retainItems(kept)
+    }
+
+    /** Keep the items flagged in [kept] (indices into [items]); the current entry, if dropped, is followed by the next one. */
+    private fun retainItems(kept: BooleanArray) {
+        val newIndex = IntArray(items.size)
+        var n = 0
+        for (i in items.indices) newIndex[i] = if (kept[i]) n++ else -1
+        var before = 0 // dropped entries before the current one
+        for (p in 0 until pos.coerceAtMost(order.size)) if (!kept[order[p]]) before++
+        val newOrder = ArrayList<Int>(n)
+        for (i in order) if (kept[i]) newOrder.add(newIndex[i])
+        val newItems = ArrayList<Long>(n)
+        for (i in items.indices) if (kept[i]) newItems.add(items[i])
+        items.clear(); items.addAll(newItems)
+        order.clear(); order.addAll(newOrder)
+        val p = pos - before
+        pos = when {
+            order.isEmpty() -> -1
+            p >= order.size -> if (repeat == Repeat.ALL) 0 else order.size - 1
+            else -> p
+        }
+    }
+
+    fun playNext(id: Long) = playNext(listOf(id))
+
+    /** Insert [ids] (in this order) right after the current entry. One insert for the lot, not one per song. */
+    fun playNext(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        if (pos < 0) { set(ids, 0, shuffle); return }
         if (shuffle) {
-            items.add(id); order.add(pos + 1, items.size - 1)
+            val first = items.size
+            items.addAll(ids); order.addAll(pos + 1, ids.indices.map { first + it })
         } else {
-            items.add(pos + 1, id); order.add(order.size); // identity stays valid
+            items.addAll(pos + 1, ids); for (k in ids.indices) order.add(order.size) // identity stays valid
         }
     }
 

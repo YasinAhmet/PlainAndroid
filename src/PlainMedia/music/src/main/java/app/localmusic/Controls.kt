@@ -36,6 +36,16 @@ object SeekStep {
     }
 }
 
+/** Sleep timer fade-out: the volume over the last [MS] before it pauses (squared: closer to how loudness is heard). */
+object SleepFade {
+    const val MS = 30_000L
+    fun volume(leftMs: Long): Float = when {
+        leftMs >= MS -> 1f
+        leftMs <= 0 -> 0f
+        else -> (leftMs.toFloat() / MS).let { it * it }
+    }
+}
+
 /** Picture-in-picture aspect ratio: Android accepts only 1:2.39 … 2.39:1. */
 object PipRatio {
     fun of(w: Int, h: Int): Pair<Int, Int> {

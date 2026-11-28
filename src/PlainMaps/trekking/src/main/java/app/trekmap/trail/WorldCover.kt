@@ -40,8 +40,9 @@ object WorldCover {
     const val STEP0 = 1.0 / 12000.0
 
     fun tileName(latS: Int, lonW: Int): String =
-        (if (latS >= 0) "N" else "S") + "%02d".format(kotlin.math.abs(latS)) +
-            (if (lonW >= 0) "E" else "W") + "%03d".format(kotlin.math.abs(lonW))
+        // part of a URL: ASCII digits whatever the phone's language (Arabic/Persian/… locales format %d with their own digits)
+        (if (latS >= 0) "N" else "S") + String.format(java.util.Locale.US, "%02d", kotlin.math.abs(latS)) +
+            (if (lonW >= 0) "E" else "W") + String.format(java.util.Locale.US, "%03d", kotlin.math.abs(lonW))
 
     fun url(name: String) =
         "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_${name}_Map.tif"

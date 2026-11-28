@@ -63,6 +63,31 @@ class TagsTest {
         assertFalse(t.rename("missing", "x"))
     }
 
+    @Test fun turkishNamesMatchWithoutCrashing() {
+        // create() looks the stored key up again by equals(ignoreCase): it must agree with the map's order for
+        // dotted / dotless i, or first {} would throw
+        val t = Tags()
+        assertEquals("İzmir", t.create("İzmir"))
+        assertEquals("İzmir", t.create("izmir"))
+        assertEquals("Işık", t.create("Işık"))
+        assertEquals("Işık", t.create("IŞIK"))
+        assertEquals("Işık", t.create("ışık"))
+        t.add("ŞEHİR", listOf(1L)); t.add("şehir", listOf(2L))
+        assertEquals(setOf(1L, 2L), t.ids("Şehir"))
+        assertEquals(3, t.names.size)
+        val back = Tags.parse(t.serialize())
+        assertEquals(t.names, back.names)
+    }
+
+    @Test fun manyCategoriesAndIds() {
+        val t = Tags()
+        for (c in 0 until 200) t.add("Cat $c", (0L until 500L).map { it * 7 + c })
+        assertEquals(200, t.names.size)
+        val back = Tags.parse(t.serialize())
+        assertEquals(500, back.ids("cat 199").size)
+        assertEquals(t.allIds(), back.allIds())
+    }
+
     @Test fun serializeRoundTrip() {
         val t = Tags()
         t.add("Hike\tday", listOf(5L, 7L))

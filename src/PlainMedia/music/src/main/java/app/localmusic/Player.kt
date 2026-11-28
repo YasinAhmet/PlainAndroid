@@ -132,6 +132,9 @@ object Player {
     private fun songOf(id: Long): Song? = Library.index.byId[id] ?: external[id] ?: vanished[id]
     private fun known(id: Long) = id in Library.index.byId || id in external || id in vanished
 
+    /** The song behind a queue entry: library songs, but also an opened file or a vanished song still playing (the queue screen). */
+    fun songFor(id: Long): Song? = songOf(id)
+
     /** Drop vanished entries other than the one playing now. */
     private fun dropVanished() {
         if (vanished.isEmpty()) return
@@ -184,17 +187,34 @@ object Player {
         val before = queue.current()
         if (playing && before != null && before !in lib.byId && before !in external) lastSong?.takeIf { it.id == before }?.let { vanished[before] = it }
         queue.retain { known(it) }
-        if (queue.current() != before && mp != null) prepareCurrent(0, playing) else { prepareNext(); changed(saveQueue = true) }
+        val moved = queue.current() != before
+        if (moved && mp != null) prepareCurrent(0, playing)
+        else {
+            if (moved) { restorePosition = 0; savePosition(0) } // the remembered place belonged to the song that is gone
+            prepareNext(); changed(saveQueue = true)
+        }
     }
 
+    /**
+     * A notification / headset / Bluetooth button after Android reclaimed the process: the library is loaded first. Without
+     * a library (no permission, storage not ready) nothing is dropped: an empty library says nothing about the queue.
+     */
     private fun ensureLibrary() {
         if (Library.index.byId.isEmpty()) Library.load(app)
-        if (!queue.isEmpty()) queue.retain { known(it) }
+        if (queue.isEmpty() || Library.index.byId.isEmpty()) return
+        val before = queue.current()
+        queue.retain { known(it) }
+        if (queue.current() != before && mp == null) restorePosition = 0 // that place belonged to a song that is gone
     }
+
+    /** Songs that failed while playing (onError), one after the other: after a whole queue of them playback stops. */
+    private var errorRun = 0
 
     // --- transport ---------------------------------------------------------------------------
 
     fun play() {
+        // Already playing (e.g. play pressed during a short focus loss, then the focus came back): nothing to start.
+        if (playing && mp?.let { runCatching { it.isPlaying }.getOrDefault(false) } == true) { resumeOnFocusGain = false; return }
         ensureLibrary()
         if (queue.isEmpty()) {
             val all = Library.index.songs.map { it.id }
@@ -203,12 +223,11 @@ object Player {
             restorePosition = 0
         }
         if (mp == null && !prepareCurrent(restorePosition, play = false)) return
-        val p = mp ?: return
-        if (!requestFocus()) return
-        p.setVolume(1f, 1f)
-        p.start()
+        if (mp == null || !requestFocus()) return
+        val p = startPlayer() ?: run { abandonFocus(); changed(); return }
         applySpeed(p) // after start(): setting PlaybackParams on a paused player would start it
         playing = true
+        resumeOnFocusGain = false // playing again: nothing left to resume after a call
         listenStart()
         registerNoisy()
         session.isActive = true
@@ -217,18 +236,35 @@ object Player {
 
     fun pause(keepFocus: Boolean = false) {
         if (playing) mp?.let { p -> runCatching { restorePosition = p.currentPosition.toLong() } }
-        mp?.let { if (it.isPlaying) it.pause() }
+        mp?.let { p -> runCatching { if (p.isPlaying) p.pause() } }
         val wasPlaying = playing
         playing = false
         listenStop()
-        unregisterNoisy()
-        if (!keepFocus) { abandonFocus(); resumeOnFocusGain = false } // a real pause: no auto-resume after a call
+        // Paused by a call (keepFocus): the noisy receiver stays, so headphones unplugged during the call cancel the
+        // automatic resume instead of the music coming back on the speaker afterwards.
+        if (!keepFocus) { unregisterNoisy(); abandonFocus(); resumeOnFocusGain = false } // a real pause: no auto-resume after a call
         if (wasPlaying) savePosition()
         releaseIfIdle()
         changed()
     }
 
-    fun toggle() = if (playing) pause() else play()
+    fun toggle() = if (playing) pause() else userPlay()
+
+    /** Play pressed by the user (button, notification, lock screen, headset): a fresh start after a run of broken files. */
+    private fun userPlay() { errorRun = 0; play() }
+
+    /**
+     * start() on the loaded player. A player that went bad (an error not reported yet) throws IllegalStateException:
+     * the song is loaded again and started once more.
+     */
+    private fun startPlayer(): MediaPlayer? {
+        mp?.let { p ->
+            try { p.setVolume(fadeVol, fadeVol); p.start(); return p } catch (e: IllegalStateException) { dlog("start failed: $e") }
+        }
+        if (!prepareCurrent(restorePosition, play = false)) return null
+        val q = mp ?: return null
+        return try { q.setVolume(fadeVol, fadeVol); q.start(); q } catch (e: IllegalStateException) { dlog("start failed again: $e"); releasePlayers(); null }
+    }
 
     /** Playing, or paused for a moment by a phone call / navigation prompt: the service stays in the foreground. */
     val holdsForeground: Boolean get() = playing || resumeOnFocusGain
@@ -269,6 +305,8 @@ object Player {
     }
 
     fun next() {
+        ensureLibrary() // a notification / Bluetooth "next" after the process was reclaimed: without the library every entry looked missing
+        errorRun = 0
         val n = queue.peekNext(auto = false)
         if (n == null) { // end of the queue (repeat off): back to the first song, paused
             queue.jump(0); prepareCurrent(0, play = false); pause(); return
@@ -279,6 +317,8 @@ object Player {
     }
 
     fun prev() {
+        ensureLibrary()
+        errorRun = 0
         if (position() > 3000) { seekTo(0); return }
         queue.peekPrev()?.let { queue.jump(it) }
         prepareCurrent(autoStart(), playing)
@@ -294,9 +334,9 @@ object Player {
 
     fun seekTo(ms: Long) {
         val p = mp
-        restorePosition = ms.coerceIn(0, duration().takeIf { it > 0 } ?: Long.MAX_VALUE)
+        restorePosition = ms.coerceIn(0, duration().takeIf { it > 0 } ?: Int.MAX_VALUE.toLong())
         if (p != null) runCatching { p.seekTo(restorePosition.toInt()) }
-        savePosition(ms)
+        savePosition(restorePosition) // the clamped place (a Bluetooth seek past the end used to be saved as it came)
         changed()
     }
 
@@ -329,18 +369,22 @@ object Player {
     /** Play [ids] from [index]; [startAt] = where that song was left ("Continue from last session?", 3.3). */
     fun playList(ids: List<Long>, index: Int, startAt: Long = 0) {
         if (ids.isEmpty()) return
+        errorRun = 0
         queue.set(ids, index, queue.shuffle)
         prepareCurrent(startAt, play = true)
     }
 
     fun shufflePlay(ids: List<Long>) {
         if (ids.isEmpty()) return
+        errorRun = 0
         queue.setShuffled(ids)
         prepareCurrent(0, play = true)
     }
 
     /** A song tapped in the queue: continues where it was left. */
     fun jump(playPos: Int) {
+        if (playPos !in 0 until queue.size) return
+        errorRun = 0
         queue.jump(playPos)
         prepareCurrent(queue.current()?.let { songOf(it) }?.let { SongResume.get(it) } ?: 0, play = true)
     }
@@ -356,8 +400,10 @@ object Player {
     }
 
     fun playNext(songs: List<Song>) {
+        if (songs.isEmpty()) return
         val wasEmpty = queue.isEmpty()
-        for (s in songs.reversed()) queue.playNext(s.id)
+        // one insert (a 20k-song "Play next" was one O(n) insert per song); an empty queue now starts at the first song
+        queue.playNext(songs.map { it.id })
         if (wasEmpty) prepareCurrent(0, play = false) else { prepareNext(); changed(saveQueue = true) }
     }
 
@@ -373,34 +419,63 @@ object Player {
     }
 
     fun removeFromQueue(playPos: Int) {
+        if (playPos !in 0 until queue.size) return
         val wasCurrent = playPos == queue.pos
+        val wasLast = playPos == queue.size - 1
         queue.removeAt(playPos)
         when {
-            queue.isEmpty() -> stop()
+            queue.isEmpty() -> { stop(); saveQueue() } // (stop() alone kept the removed song in the saved queue)
+            // the playing song was the last one: the end of the queue, as with Next (repeat off: the first song, paused)
+            wasCurrent && wasLast -> {
+                queue.jump(0)
+                if (queue.repeat == Repeat.OFF) { prepareCurrent(0, play = false); pause() } else prepareCurrent(0, playing)
+            }
             wasCurrent -> prepareCurrent(0, playing)
             else -> { prepareNext(); changed(saveQueue = true) }
         }
     }
 
     fun clearUpcoming() {
-        for (p in queue.size - 1 downTo queue.pos + 1) queue.removeAt(p)
+        queue.clearAfterCurrent() // one pass (removing a 20k-song tail one by one froze the screen)
         prepareNext(); changed(saveQueue = true)
     }
 
     // --- sleep timer -------------------------------------------------------------------------
 
-    private val sleepRunnable = Runnable { sleepAt = 0; pause() }
+    /** Volume of the sleep timer's fade-out (1 = none); every start of a player uses it. */
+    private var fadeVol = 1f
+
+    private fun setFade(v: Float) {
+        fadeVol = v
+        for (p in listOfNotNull(mp, nextMp)) runCatching { p.setVolume(v, v) } // the gapless next one starts at it too
+    }
+
+    /**
+     * Runs [SleepFade.MS] before the timer ends, then once a second until it does: the volume goes down to silence and
+     * the music pauses (no step runs at any other time). The next play is at full volume again.
+     */
+    private val sleepRunnable = object : Runnable {
+        override fun run() {
+            if (sleepAt == 0L) return
+            val left = sleepAt - SystemClock.elapsedRealtime()
+            if (left <= 0) { sleepAt = 0; pause(); setFade(1f); return }
+            setFade(SleepFade.volume(left))
+            main.postDelayed(this, 1000)
+        }
+    }
 
     fun setSleepMinutes(min: Int) {
         main.removeCallbacks(sleepRunnable)
+        if (fadeVol != 1f) setFade(1f)
         sleepEndOfSong = false
         sleepAt = if (min > 0) SystemClock.elapsedRealtime() + min * 60_000L else 0
-        if (min > 0) main.postDelayed(sleepRunnable, min * 60_000L)
+        if (min > 0) main.postDelayed(sleepRunnable, (min * 60_000L - SleepFade.MS).coerceAtLeast(0))
         prepareNext(); changed()
     }
 
     fun setSleepEndOfSong() {
         main.removeCallbacks(sleepRunnable)
+        if (fadeVol != 1f) setFade(1f)
         sleepAt = 0
         sleepEndOfSong = true
         prepareNext(); changed()
@@ -429,43 +504,62 @@ object Player {
         mp?.release(); mp = null
     }
 
-    /** Load the queue's current song. Unplayable files are skipped (and dropped from the queue). */
+    /**
+     * Load the queue's current song. Unplayable files are skipped (and dropped from the queue); [startAt] belongs to the
+     * song asked for, so a song that follows a broken one starts from its beginning. Running off the end of the queue
+     * that way (repeat off) ends like the queue does: the first song, paused.
+     */
     private fun prepareCurrent(startAt: Long, play: Boolean): Boolean {
         if (startAt == 0L) listenRestart() else listenStop() // the previous song (or this one from the start again)
         rememberLoaded()
         dropVanished()
         releasePlayers()
+        var at = startAt
+        var playNow = play
         var tries = queue.size
         while (tries-- > 0) {
             val id = queue.current() ?: break
             val s = songOf(id)
+            // No library (not loaded yet, no permission, storage not ready): unknown is not "missing", keep the queue.
+            if (s == null && Library.index.byId.isEmpty()) break
             if (s != null) {
-                try {
-                    val p = createPlayer(s)
-                    if (startAt > 0 && startAt < s.durationMs) p.seekTo(startAt.toInt())
+                val p = try { createPlayer(s) } catch (_: Exception) { null }
+                if (p != null) {
+                    // MediaStore may not know the length (0): the player does after prepare()
+                    val len = s.durationMs.takeIf { it > 0 } ?: runCatching { p.duration.toLong() }.getOrDefault(0L)
+                    at = SongResume.startAt(at, len)
+                    if (at > 0 && runCatching { p.seekTo(at.toInt()) }.isFailure) at = 0
                     mp = p
                     loadedId = id
                     attachVideo(p)
-                    restorePosition = startAt
+                    restorePosition = at
                     break
-                } catch (_: Exception) {}
+                }
             }
-            queue.removeAt(queue.pos) // missing or broken file
+            at = 0 // missing or broken file: dropped
+            val wasLast = queue.pos == queue.size - 1
+            queue.removeAt(queue.pos)
+            if (wasLast && !queue.isEmpty()) { queue.jump(0); if (queue.repeat == Repeat.OFF) playNow = false }
         }
         if (mp == null) {
-            playing = false; unregisterNoisy(); abandonFocus()
+            playing = false; resumeOnFocusGain = false; unregisterNoisy(); abandonFocus()
             changed(saveQueue = true)
             return false
         }
         prepareNext()
-        savePosition(startAt)
-        if (play) play() else { if (playing) { playing = false; unregisterNoisy() }; changed(saveQueue = true) }
-        if (play) saveQueue()
+        savePosition(at)
+        when {
+            playNow -> { play(); saveQueue() }
+            play -> { pause(); saveQueue() } // ran off the end of the queue
+            else -> { if (playing) { playing = false; unregisterNoisy() }; changed(saveQueue = true) }
+        }
         return true
     }
 
     /** Gapless: hand the following song to MediaPlayer.setNextMediaPlayer. */
     private fun prepareNext() {
+        // Unlink before releasing: a released player left as "next" of the current one was started at its end.
+        if (nextMp != null) mp?.let { runCatching { it.setNextMediaPlayer(null) } }
         nextMp?.release(); nextMp = null; nextPos = -1
         val p = mp ?: return
         val n = queue.peekNext(auto = true)
@@ -483,6 +577,7 @@ object Player {
         if (s.isVideo && videoHolder != null) { runCatching { p.setNextMediaPlayer(null) }; return }
         try {
             val np = createPlayer(s)
+            if (fadeVol != 1f) runCatching { np.setVolume(fadeVol, fadeVol) }
             p.setNextMediaPlayer(np)
             nextMp = np; nextPos = n
         } catch (_: Exception) {
@@ -492,6 +587,7 @@ object Player {
 
     private fun onCompletion(done: MediaPlayer) {
         if (done !== mp) return
+        errorRun = 0
         if (loadedId != Long.MIN_VALUE) SongResume.clear(loadedId) // played to the end: next time from the start
         loadedId = Long.MIN_VALUE
         listenRestart()
@@ -534,11 +630,17 @@ object Player {
     }
 
     private fun onError(p: MediaPlayer) {
-        if (p === nextMp) { nextMp?.release(); nextMp = null; nextPos = -1; return }
+        if (p === nextMp) {
+            mp?.let { runCatching { it.setNextMediaPlayer(null) } }
+            nextMp?.release(); nextMp = null; nextPos = -1; return
+        }
         if (p !== mp) return
         val wasPlaying = playing
         val n = queue.peekNext(auto = false)
-        if (n == null || queue.size <= 1) { releasePlayers(); pause(); return }
+        // A run of files that open but fail while playing (repeat all) skipped round and round for ever: stop after
+        // every entry failed once in a row.
+        errorRun++
+        if (n == null || queue.size <= 1 || errorRun >= queue.size) { errorRun = 0; releasePlayers(); pause(); return }
         queue.jump(n)
         prepareCurrent(0, wasPlaying)
     }
@@ -574,33 +676,42 @@ object Player {
 
     // --- audio focus & noisy -----------------------------------------------------------------
 
+    /** Focus taken for a moment (a call, a navigation prompt): our request is still Android's, but play must ask again. */
+    private var focusLost = false
+
     private fun requestFocus(): Boolean {
-        if (hasFocus) return true
+        if (hasFocus && !focusLost) return true
+        // During a call this is refused, so pressing play doesn't start music over the call; it resumes after it (GAIN).
         hasFocus = audio.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (hasFocus) focusLost = false
         return hasFocus
     }
 
     private fun abandonFocus() {
-        if (!hasFocus) return
+        if (!hasFocus && !focusLost) return
         audio.abandonAudioFocusRequest(focusRequest)
-        hasFocus = false
+        hasFocus = false; focusLost = false
     }
 
     private fun onFocusChange(change: Int) {
         when (change) {
-            AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocusGain = false; hasFocus = false; pause() }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> { if (playing) { resumeOnFocusGain = true; pause(keepFocus = true) } }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> mp?.setVolume(0.25f, 0.25f)
+            AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocusGain = false; hasFocus = false; focusLost = false; pause() }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> { if (playing) { resumeOnFocusGain = true; focusLost = true; pause(keepFocus = true) } }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> mp?.let { runCatching { it.setVolume(0.25f * fadeVol, 0.25f * fadeVol) } }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                mp?.setVolume(1f, 1f)
+                hasFocus = true; focusLost = false
+                mp?.let { runCatching { it.setVolume(fadeVol, fadeVol) } }
                 if (resumeOnFocusGain) { resumeOnFocusGain = false; play() }
             }
         }
     }
 
-    /** Headphones unplugged / Bluetooth disconnected: pause. Registered only while playing. */
+    /**
+     * Headphones unplugged / Bluetooth disconnected: pause. Registered while playing, and while paused by a call (then it
+     * cancels the resume after the call, so the music doesn't come back on the speaker).
+     */
     private val noisy = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) { if (playing) pause() }
+        override fun onReceive(c: Context, i: Intent) { if (playing || resumeOnFocusGain) pause() }
     }
 
     private fun registerNoisy() {
@@ -621,18 +732,22 @@ object Player {
     fun savePosition(pos: Long = position()) {
         if (!::app.isInitialized) return
         Store.prefs.edit().putLong("position", pos).apply()
-        current?.let { if (it.id == loadedId) SongResume.put(it.id, pos, it.durationMs) }
+        current?.let { if (it.id == loadedId) SongResume.put(it.id, pos, lengthOf(it)) }
     }
 
     /** The song the player holds now ([mp]); its position is kept per song when another one is loaded (3.3). */
     private var loadedId = Long.MIN_VALUE
+
+    /** Length of [s]: MediaStore's, else what the loaded player says (MediaStore leaves DURATION empty for some files). */
+    private fun lengthOf(s: Song): Long = s.durationMs.takeIf { it > 0 }
+        ?: mp?.takeIf { loadedId == s.id }?.let { runCatching { it.duration.toLong() }.getOrNull() }?.takeIf { it > 0 } ?: 0
 
     private fun rememberLoaded() {
         val id = loadedId
         if (id == Long.MIN_VALUE || mp == null) return
         val s = songOf(id) ?: return
         val pos = if (playing) mp?.let { runCatching { it.currentPosition.toLong() }.getOrNull() } ?: restorePosition else restorePosition
-        SongResume.put(id, pos, s.durationMs)
+        SongResume.put(id, pos, lengthOf(s))
     }
 
     private fun saveQueue() {
@@ -707,7 +822,7 @@ object Player {
     }
 
     private val callback = object : MediaSession.Callback() {
-        override fun onPlay() = play()
+        override fun onPlay() = userPlay()
         override fun onPause() = pause()
         override fun onSkipToNext() = next()
         override fun onSkipToPrevious() = prev()
@@ -758,7 +873,7 @@ object Player {
     /** Keys from MediaButtonReceiver (when no session was active). */
     fun handleKey(code: Int) {
         when (code) {
-            KeyEvent.KEYCODE_MEDIA_PLAY -> play()
+            KeyEvent.KEYCODE_MEDIA_PLAY -> userPlay()
             KeyEvent.KEYCODE_MEDIA_PAUSE -> pause()
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> toggle()
             KeyEvent.KEYCODE_MEDIA_NEXT -> next()

@@ -33,7 +33,10 @@ private const val PAGE = 20
 
 class SearchScreen(private val act: MainActivity) {
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newFixedThreadPool(4) // also the RSS parallelism limit
+    // also the RSS parallelism limit. After destroy() (shutdown) a late execute is dropped instead of throwing
+    // RejectedExecutionException on the main thread (a reply posted after the activity went away).
+    private val io = java.util.concurrent.ThreadPoolExecutor(4, 4, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.LinkedBlockingQueue(), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
     private val calls = Calls()
     private val thumbs = ThumbLoader(act, calls)
 
@@ -475,8 +478,8 @@ class SearchScreen(private val act: MainActivity) {
         private val more = act.pill(tr("Retry", "Yeniden dene")) { retry() }
         /** Rows are shown [PAGE] at a time; [pg] may point past the end and is clamped by [shownPage]. */
         var pg = 0
-        val pageCount get() = maxOf(1, (items.size + PAGE - 1) / PAGE)
-        val shownPage get() = pg.coerceIn(0, pageCount - 1)
+        val pageCount get() = Paging.count(items.size, PAGE)
+        val shownPage get() = Paging.shown(pg, items.size, PAGE)
         /** ‹ Previous · Page X of Y · Next ›, once above and once below the rows. */
         private inner class Nav {
             val prev = act.smallPill("‹ " + tr("Previous", "Önceki")) { goPage(shownPage - 1) }
@@ -566,7 +569,7 @@ class SearchScreen(private val act: MainActivity) {
                 else -> { more.visibility = View.GONE; footNote.visibility = View.GONE }
             }
             val p = shownPage
-            val hasNext = (p + 1) * PAGE < items.size || token != null && loadedOnce
+            val hasNext = Paging.hasNext(p, items.size, PAGE, token != null, loadedOnce)
             val show = if (items.isNotEmpty() && (p > 0 || hasNext)) View.VISIBLE else View.GONE
             val label = tr("Page ${p + 1} of $pageCount${if (token != null) "+" else ""}", "Sayfa ${p + 1} / $pageCount${if (token != null) "+" else ""}")
             fun en(v: View, on: Boolean) { v.isEnabled = on; v.alpha = if (on) 1f else 0.35f }
@@ -585,7 +588,7 @@ class SearchScreen(private val act: MainActivity) {
             adapter.notifyDataSetChanged()
             list.setSelection(0)
             refreshFooter()
-            if (items.size < (k + 1) * PAGE && token != null && loadedOnce) {
+            if (Paging.needsMore(k, items.size, PAGE, token != null, loadedOnce)) {
                 loadMore() // the page shows the new rows once they're in
             }
         }
@@ -700,6 +703,7 @@ class SearchScreen(private val act: MainActivity) {
                     tr("Download all…", "Tümünü indir…") to { push(PlaylistPage(i.id, i.title).apply { auto = "download" }) },
                     tr("Cache all", "Tümünü önbelleğe al") to { push(PlaylistPage(i.id, i.title).apply { auto = "cache" }) },
                     tr("Listen all", "Tümünü dinle") to { push(PlaylistPage(i.id, i.title).apply { auto = "listen" }) },
+                    tr("Shuffle all", "Tümünü karışık çal") to { push(PlaylistPage(i.id, i.title).apply { auto = "shuffle" }) },
                     tr("Add to list…", "Listeye ekle…") to { push(PlaylistPage(i.id, i.title).apply { auto = "list" }) },
                 ))
             }
@@ -1477,8 +1481,9 @@ class SearchScreen(private val act: MainActivity) {
             row.addView(allBtn)
             head.addView(row, lpL(MATCH, WRAP))
             val flow = FlowLayout(act).apply { setPadding(0, 0, 0, act.dp(4)) }
-            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { gatherThen { playAll(items, null, name) } })
-            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { gatherThen { playAll(items, PlayMode.LISTEN, name) } })
+            // hold = the same, shuffled
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { gatherThen { playAll(items, null, name) } }.holdToShuffle { gatherThen { playAll(items, null, name, shuffle = true) } })
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { gatherThen { playAll(items, PlayMode.LISTEN, name) } }.holdToShuffle { gatherThen { playAll(items, PlayMode.LISTEN, name, shuffle = true) } })
             flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { gatherThen { cacheItems(items, name, music, name) } })
             flow.addView(act.pill(tr("Erase downloaded…", "İndirilenleri sil…")) {
                 gatherThen { eraseDownloaded(downloadedFor(items.filter { it.isVideo }.mapTo(HashSet()) { it.id }, null), name.ifEmpty { tr("this playlist", "bu çalma listesi") }) }
@@ -1507,6 +1512,7 @@ class SearchScreen(private val act: MainActivity) {
                     "download" -> downloadAll()
                     "cache" -> gatherThen { cacheItems(items, name, music, name) }
                     "listen" -> gatherThen { playAll(items, PlayMode.LISTEN, name) }
+                    "shuffle" -> gatherThen { playAll(items, null, name, shuffle = true) }
                     "list" -> gatherThen { Hold.addToList(act, items) }
                 }
                 auto = null
@@ -1559,12 +1565,18 @@ class SearchScreen(private val act: MainActivity) {
         override val musicDefault: Boolean get() = music
     }
 
-    /** Play all / Listen all: replaces the play queue and opens the player on it. */
-    fun playAll(items: List<Item>, mode: PlayMode?, album: String?) {
-        val e = items.filter { it.isVideo && !it.live }.map { PlayQueue.of(it, mode, album) }
+    /** Play all / Listen all: replaces the play queue and opens the player on it ([shuffle]: in random order). */
+    fun playAll(items: List<Item>, mode: PlayMode?, album: String?, shuffle: Boolean = false) {
+        val e = items.filter { it.isVideo && !it.live }.map { PlayQueue.of(it, mode, album) }.let { if (shuffle) it.shuffled() else it }
         if (e.isEmpty()) { act.toast(tr("Nothing to play", "Oynatılacak bir şey yok")); return }
         Store.setQueue(PlayQueue().replace(e))
         PlayerActivity.queue(act)
+        if (shuffle) act.toast(tr("Shuffled ${e.size}", "${e.size} öğe karışık çalınıyor"))
+    }
+
+    /** Hold on a Play all / Listen all pill = the shuffled version (haptic, like every hold). */
+    private fun View.holdToShuffle(fn: () -> Unit): View = apply {
+        setOnLongClickListener { v -> v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); fn(); true }
     }
 
     // ---- Lists (local, "categorize") ----
@@ -1598,6 +1610,7 @@ class SearchScreen(private val act: MainActivity) {
                 tr("Open", "Aç") to { push(LocalListPage(l.id)) },
                 tr("Play all", "Tümünü oynat") to { playAll(l.items, null, l.name) },
                 tr("Listen all", "Tümünü dinle") to { playAll(l.items, PlayMode.LISTEN, l.name) },
+                tr("Shuffle all", "Tümünü karışık çal") to { playAll(l.items, null, l.name, shuffle = true) },
                 tr("Download all…", "Tümünü indir…") to { bulk(l.items, l.name, link = "list:${l.id}") },
                 tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(l.items, l.name) },
                 tr("Rename…", "Yeniden adlandır…") to { Hold.rename(act, l) { fill() } },
@@ -1613,8 +1626,8 @@ class SearchScreen(private val act: MainActivity) {
         init {
             head.addView(titleV.apply { setPadding(0, act.dp(4), 0, act.dp(4)) })
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
-            flow.addView(act.pill(tr("Play all", "Tümünü oynat"), C.ACCENT, C.ACCENT) { playAll(items, null, list()?.name) })
-            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { playAll(items, PlayMode.LISTEN, list()?.name) })
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat"), C.ACCENT, C.ACCENT) { playAll(items, null, list()?.name) }.holdToShuffle { playAll(items, null, list()?.name, shuffle = true) })
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle")) { playAll(items, PlayMode.LISTEN, list()?.name) }.holdToShuffle { playAll(items, PlayMode.LISTEN, list()?.name, shuffle = true) })
             flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, list()?.name, link = "list:$listId") })
             flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, list()?.name) })
             head.addView(flow, lpL(MATCH, WRAP))
@@ -1789,6 +1802,7 @@ class SearchScreen(private val act: MainActivity) {
             act.menu(p.name, listOf(
                 tr("Open", "Aç") to { push(SpotifyListPage(id)) },
                 tr("Listen all", "Tümünü dinle") to { playAll(its, PlayMode.LISTEN, p.name) },
+                tr("Shuffle all", "Tümünü karışık çal") to { playAll(its, PlayMode.LISTEN, p.name, shuffle = true) },
                 tr("Download all…", "Tümünü indir…") to { bulk(its, p.name, p.name, music = true, link = "spotify:${p.id}") },
                 tr("Cache all", "Tümünü önbelleğe al") to { cacheItems(its, p.name, music = true, title = p.name) },
                 tr("Copy to my lists", "Listelerime kopyala") to {
@@ -1812,8 +1826,8 @@ class SearchScreen(private val act: MainActivity) {
             head.addView(titleV.apply { setPadding(0, act.dp(4), 0, 0) })
             head.addView(subV.apply { setPadding(0, act.dp(2), 0, act.dp(4)) })
             val flow = FlowLayout(act).apply { setPadding(0, act.dp(4), 0, act.dp(6)) }
-            flow.addView(act.pill(tr("Listen all", "Tümünü dinle"), C.ACCENT, C.ACCENT) { playAll(items, PlayMode.LISTEN, pl()?.name) })
-            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { playAll(items, null, pl()?.name) })
+            flow.addView(act.pill(tr("Listen all", "Tümünü dinle"), C.ACCENT, C.ACCENT) { playAll(items, PlayMode.LISTEN, pl()?.name) }.holdToShuffle { playAll(items, PlayMode.LISTEN, pl()?.name, shuffle = true) })
+            flow.addView(act.pill(tr("Play all", "Tümünü oynat")) { playAll(items, null, pl()?.name) }.holdToShuffle { playAll(items, null, pl()?.name, shuffle = true) })
             flow.addView(act.pill(tr("Download all…", "Tümünü indir…")) { bulk(items, pl()?.name, pl()?.name, music = true, link = "spotify:$playlistId") })
             flow.addView(act.pill(tr("Cache all", "Tümünü önbelleğe al")) { cacheItems(items, pl()?.name, music = true, title = pl()?.name) })
             flow.addView(missBtn)
@@ -1950,7 +1964,8 @@ class SearchScreen(private val act: MainActivity) {
             title.text = i.title.ifEmpty { i.id }
             when (i.kind) {
                 IKind.CHANNEL -> {
-                    avatar.text = app.plain.lang.PlainLang.upper(i.title.trim().take(1))
+                    // first letter; a whole code point, so a name starting with an emoji doesn't show half of it ("?")
+                    avatar.text = i.title.trim().let { t -> if (t.isEmpty()) "" else app.plain.lang.PlainLang.upper(t.substring(0, Character.charCount(t.codePointAt(0)))) }
                     channel.text = i.handle
                     meta.text = i.count
                     channel.setOnClickListener(null); channel.isClickable = false

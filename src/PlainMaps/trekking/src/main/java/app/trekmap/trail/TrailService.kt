@@ -35,7 +35,13 @@ class TrailService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (!pending || !Trail.attach(this)) {
+        // an exception here would crash-loop a sticky service: the recording stays safe on disk instead
+        val attached = pending && try { Trail.attach(this) } catch (e: Exception) {
+            Dev.event("trail", "attach failed: $e")
+            try { Trail.detach() } catch (_: Exception) {}
+            false
+        }
+        if (!attached) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY

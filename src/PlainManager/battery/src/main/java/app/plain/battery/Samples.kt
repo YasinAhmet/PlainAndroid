@@ -108,7 +108,7 @@ object Drain {
     }
 
     fun formatDuration(ms: Long): String {
-        val m = ms / 60000
+        val m = (ms / 60000).coerceAtLeast(0) // a clock set back must not show "-5m"
         return when {
             m < 60 -> tr("${m}m", "$m dk")
             m < 48 * 60 -> tr("${m / 60}h ${m % 60}m", "${m / 60} sa ${m % 60} dk")

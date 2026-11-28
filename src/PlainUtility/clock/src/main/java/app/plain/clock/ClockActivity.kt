@@ -39,6 +39,7 @@ import app.plain.ui.Sheet
 import app.plain.update.PlainUpdate
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -48,7 +49,7 @@ import kotlin.math.min
  * visible (nothing runs here once it's paused).
  *
  * Hidden gestures: swipe the dial sideways = next/previous mode; double-tap the time = start/pause;
- * hold the big button = reset; hold the time in Timer = type a length.
+ * hold the big button = reset; hold the time in Timer = type a length; hold "+1 min" = +5 min.
  */
 class ClockActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
@@ -86,7 +87,7 @@ class ClockActivity : Activity() {
         PlainLang.init(this)
         super.onCreate(b)
         if (Hub.gate(this, "clock")) { finish(); return }
-        mode = Engine.prefs(this).getString("mode", Engine.POMO) ?: Engine.POMO
+        mode = Engine.prefs(this).getString("mode", Engine.POMO)?.takeIf { it in listOf(Engine.POMO, Engine.TIMER, Engine.WATCH) } ?: Engine.POMO
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(C.BG) }
 
@@ -141,7 +142,8 @@ class ClockActivity : Activity() {
             "Bildirimler kapalı, bu yüzden sayaçlar çalamaz. Açmak için dokunun."), 12.5f, C.ACCENT, lines = 3).apply {
             gravity = Gravity.CENTER
             setPadding(dp(20), dp(4), dp(20), dp(8))
-            setOnClickListener { openNotificationSettings(null) }
+            // all notifications off: the app's page; only this mode's channel off: that channel's page
+            setOnClickListener { openNotificationSettings(if (Engine.canNotify(this@ClockActivity)) modeChannel() else null) }
         }
         root.addView(warn, LinearLayout.LayoutParams(-1, -2))
 
@@ -149,6 +151,7 @@ class ClockActivity : Activity() {
         val controls = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(12)) }
         left = pill("") { onLeft() }
         right = pill("") { onRight() }
+        right.setOnLongClickListener { onRightHold() }
         go = GoButton(this).apply {
             setOnClickListener { onGo() }
             setOnLongClickListener { onLeft(); true }
@@ -182,7 +185,9 @@ class ClockActivity : Activity() {
                 setOnClickListener { settings() }
             }, LinearLayout.LayoutParams(dp(44), dp(44)))
         }
-        handle(intent)
+        // "set a timer" once: not again when Android recreates this screen (a language change, or after the process
+        // was ended in the background), which would start the timer over
+        if (b == null) handle(intent)
     }
 
     override fun onNewIntent(i: Intent) {
@@ -242,6 +247,9 @@ class ClockActivity : Activity() {
         }
     }
 
+    /** The channel that rings at the end in this mode. */
+    private fun modeChannel() = if (mode == Engine.TIMER) Engine.CH_TIMER else Engine.CH_POMO
+
     private fun setMode(m: String) {
         if (m == mode && ::big.isInitialized) { draw(); return }
         mode = m
@@ -254,6 +262,11 @@ class ClockActivity : Activity() {
     private fun draw() {
         if (!::big.isInitialized) return
         val now = System.currentTimeMillis()
+        // an end whose alarm hasn't come yet (Android may hold back an inexact alarm): catch up while it's on screen
+        if (Engine.pomoCd(this).let { it.running && it.endAt < now - 1500 }) Engine.onEnd(this, Engine.POMO)
+        if (Engine.timerCd(this).let { it.running && it.endAt < now - 1500 }) Engine.onEnd(this, Engine.TIMER)
+        // (the formatters keep the zone they were made in; the phone's may have changed while this tab lived)
+        TimeZone.getDefault().let { if (hm.timeZone != it) { hm.timeZone = it; dateFmt.timeZone = it } }
         nowTime.text = hm.format(Date(now))
         nowDate.text = dateFmt.format(Date(now))
 
@@ -343,7 +356,7 @@ class ClockActivity : Activity() {
         go.contentDescription = if (running) tr("Pause", "Duraklat") else tr("Start", "Başlat")
         // (before Android 13+ has asked, the first Start asks: no warning yet)
         val asked = Build.VERSION.SDK_INT < 33 || Engine.prefs(this).getBoolean("asked_notify", false)
-        warn.visibility = if (Engine.canNotify(this) || mode == Engine.WATCH || !asked) View.GONE else View.VISIBLE
+        warn.visibility = if (Engine.canNotify(this, modeChannel()) || mode == Engine.WATCH || !asked) View.GONE else View.VISIBLE
         val keep = running && Engine.prefs(this).getBoolean("keep_on", false)
         if (keep) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
@@ -413,6 +426,16 @@ class ClockActivity : Activity() {
             Engine.TIMER -> { askNotify(); Engine.timerAdd(this, 60_000) }
             else -> Engine.watchLap(this)
         }
+    }
+
+    /** Hold "+1 min" in Timer: +5 min (hold is the bigger version of a tap). Elsewhere the tap's own action. */
+    private fun onRightHold(): Boolean {
+        if (mode != Engine.TIMER) return false
+        right.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        askNotify()
+        Engine.timerAdd(this, 5 * 60_000L)
+        toast(tr("+5 min", "+5 dk"))
+        return true
     }
 
     private fun startTimer(ms: Long) {

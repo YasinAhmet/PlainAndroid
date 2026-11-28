@@ -51,7 +51,7 @@ object Downloads {
         val p = Packs.get(id) ?: return
         if (!isActive(id)) {
             p.state = "queued"
-            Packs.saveMeta(p)
+            Packs.trySaveMeta(p)
         }
         ctx.startForegroundService(Intent(ctx, DownloadService::class.java).putExtra("id", id))
         fire()
@@ -65,7 +65,8 @@ object Downloads {
     }
 
     fun markPaused(id: String) {
-        Packs.get(id)?.let { it.state = "paused"; Packs.saveMeta(it) }
+        // also runs when a trail starts: full storage must never crash the START button
+        Packs.get(id)?.let { it.state = "paused"; Packs.trySaveMeta(it) }
     }
 
     /** Trail mode starts: stop all downloads, remember them for later. */
@@ -178,7 +179,9 @@ class DownloadService : Service() {
             try {
                 runPack(id)
             } catch (e: Exception) {
-                Packs.get(id)?.let { it.state = "incomplete"; Packs.saveMeta(it) }
+                Dev.event("download", "pack $id stopped: $e")
+                // with storage full this write fails too: a second throw here would kill the process
+                Packs.get(id)?.let { it.state = "incomplete"; Packs.trySaveMeta(it) }
             } finally {
                 Downloads.current = null
             }
@@ -334,7 +337,7 @@ class DownloadService : Service() {
             failed.get() > 0 -> "incomplete"
             else -> "done"
         }
-        Packs.saveMeta(pack)
+        Packs.trySaveMeta(pack)
         Packs.get(id)?.state = pack.state // the cached list may hold a newer object for this pack
         pr.done = done.get(); pr.bytes = bytes.get(); pr.failed = failed.get(); pr.waitingWifi = false
         val secs = (System.currentTimeMillis() - t0) / 1000.0

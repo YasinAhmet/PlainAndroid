@@ -118,6 +118,7 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
         title.marqueeRepeatLimit = -1
         // the song's names are links: title / "· Album" → album page, artist → artist page
         title.setOnClickListener { Player.current?.let { act.goToAlbum(it) } }
+        title.setOnLongClickListener { Player.current?.let { act.toggleFavourite(it) }; true } // hold: ★ Favourites (also in ⋮)
         artist.setOnClickListener { Player.current?.let { act.goToArtist(it) } }
         from.setOnClickListener { Player.current?.let { act.goToAlbum(it) } }
         texts.addView(title); texts.addView(artist, lpL(WRAP, WRAP))
@@ -213,7 +214,8 @@ class NowPlayingView(private val act: MainActivity) : FrameLayout(act) {
             art.bind(s.id, 720)
         }
         if (s.isVideo || videoBtn != null) syncVideo(s) // audio-only libraries never get here
-        from.text = "${Player.queue.pos + 1} / ${Player.queue.size}" + if (s.album.isNotBlank()) "  ·  ${s.album}" else ""
+        from.text = "${Player.queue.pos + 1} / ${Player.queue.size}" + (if (s.album.isNotBlank()) "  ·  ${s.album}" else "") +
+            if (Favourites.contains(Store.playlists, s)) "  ·  ★" else ""
         playBtn.setImageResource(if (Player.playing) R.drawable.mus_ic_pause else R.drawable.mus_ic_play)
         shuffleBtn.tint(if (Player.queue.shuffle) C.ACCENT else C.TEXT)
         when (Player.queue.repeat) {
@@ -371,6 +373,8 @@ class QueueView(private val act: MainActivity) : LinearLayout(act) {
     private lateinit var dragger: MainActivity.Dragger
     private val adapter = act.newRowAdapter { dragger }
     private val info: TextView = act.text("", 13f, C.DIM)
+    /** Queue play position of each row. */
+    private var positions: List<Int> = emptyList()
 
     init {
         orientation = VERTICAL
@@ -386,22 +390,30 @@ class QueueView(private val act: MainActivity) : LinearLayout(act) {
         list.divider = null
         list.selector = android.graphics.drawable.ColorDrawable(0)
         list.adapter = adapter
-        list.setOnItemClickListener { _, _, pos, _ -> (adapter.rows[pos] as? SongRow)?.let { Player.jump(it.index) } }
-        list.setOnItemLongClickListener { _, _, pos, _ -> (adapter.rows[pos] as? SongRow)?.let { act.songMenu(it.song) }; true }
+        list.setOnItemClickListener { _, _, pos, _ -> (adapter.rows.getOrNull(pos) as? SongRow)?.let { Player.jump(it.index) } }
+        list.setOnItemLongClickListener { _, _, pos, _ -> (adapter.rows.getOrNull(pos) as? SongRow)?.let { act.songMenu(it.song) }; true }
         addView(list, lpL(MATCH, 0, 1f))
-        dragger = act.Dragger(list, { adapter.rows as MutableList<Row> }, { adapter.notifyDataSetChanged() }) { from, to -> Player.moveInQueue(from, to) }
+        dragger = act.Dragger(list, { adapter.rows as MutableList<Row> }, { adapter.notifyDataSetChanged() }) { from, to ->
+            // rows → queue play positions (a row may stand for a later position when an entry has no song to show)
+            val f = positions.getOrNull(from); val t = positions.getOrNull(to)
+            if (f != null && t != null) Player.moveInQueue(f, t)
+        }
         refresh()
-        list.setSelection((Player.queue.pos - 1).coerceAtLeast(0))
+        list.setSelection(positions.indexOfFirst { it >= Player.queue.pos - 1 }.coerceAtLeast(0))
     }
 
     fun refresh() {
         val q = Player.queue
-        val lib = Library.index.byId
-        val songs = q.playOrder().mapNotNull { lib[it] }
-        val rows = songs.mapIndexed { i, s -> SongRow(s, songs, i, SongRow.Mode.QUEUE) }
+        // SongRow.index is the play position (jump / ✕ / the current-row mark use it). Opened files and a vanished song
+        // still playing are in the queue too: they get their rows, so the rows after them don't point one place off.
+        val pos = ArrayList<Int>(q.size)
+        val songs = ArrayList<Song>(q.size)
+        q.playOrder().forEachIndexed { i, id -> Player.songFor(id)?.let { songs += it; pos += i } }
+        positions = pos
+        val rows = songs.mapIndexed { i, s -> SongRow(s, songs, pos[i], SongRow.Mode.QUEUE) }
         adapter.rows = rows
         adapter.notifyDataSetChanged()
-        val left = songs.drop(q.pos + 1).sumOf { it.durationMs }
+        val left = songs.filterIndexed { i, _ -> pos[i] > q.pos }.sumOf { it.durationMs }
         info.text = tr("${songs.size} songs · ${Text.time(left)} after this one", "${songs.size} şarkı · bundan sonra ${Text.time(left)}") +
             (if (q.shuffle) tr(" · shuffle", " · karışık") else "") +
             when (q.repeat) { Repeat.OFF -> ""; Repeat.ALL -> tr(" · repeat all", " · tümünü tekrarla"); Repeat.ONE -> tr(" · repeat one", " · birini tekrarla") }

@@ -25,6 +25,12 @@ tab key `voice` ("Record Voice" / "Ses Kaydı"). Resources carry the `voc_` pref
 - Recording runs in `RecorderService` (`foregroundServiceType="microphone"`), started by Record and stopped by
   itself when the file is saved, so it continues with the screen off or in another tab. Its low-importance ongoing
   notification shows "Recording…" with the system's own chronometer and a Stop button.
+- A phone or internet call (Android 12+: the audio mode leaves "normal", ringing included) pauses the recording, which
+  goes on by itself when the call is over; a pause made by the user stays. The listener exists only while recording.
+- Near-full storage: the recorder gets a size limit of the free space less 16 MB, so it stops and saves instead of
+  breaking off unsaved; with less than that free, Record says the storage is full.
+- A recording cut off by the app being killed stays a pending (hidden, unplayable) entry; opening the tab while
+  nothing records removes such entries older than 5 minutes.
 
 ## List
 
@@ -32,7 +38,8 @@ tab key `voice` ("Record Voice" / "Ses Kaydı"). Resources carry the `voc_` pref
   an app sees its own media-store entries. Recordings left by an earlier install don't show.
 - Tap a row: play / pause in place (`MediaPlayer`, seek bar in the row, transient audio focus, pauses when
   headphones are pulled). Playback is released in `onStop`.
-- Hold or ⋮: Share (`ACTION_SEND`, `audio/mp4`, read grant, chooser), Rename (`DISPLAY_NAME`), Delete (confirmed,
+- Hold or ⋮: Share (`ACTION_SEND`, `audio/mp4`, read grant, chooser), Rename (`DISPLAY_NAME`; a name another
+  recording has gets " (2)"; at most 120 characters / 200 bytes), Delete (confirmed,
   plain delete; only if Android says the file isn't ours does it fall back to a trash request on 11+, or the
   system's permission prompt on 10).
 

@@ -48,11 +48,15 @@ class ClockReceiver : BroadcastReceiver() {
     }
 }
 
-/** After a restart or an app update: sets the running pomodoro/timer alarms and notifications again. */
+/**
+ * After a restart or an app update: sets the running pomodoro/timer alarms and notifications again. When the time or
+ * the time zone is changed: keeps running timers at their real time left (see [Engine.onClockChanged]).
+ */
 class ClockBoot : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (i.action != Intent.ACTION_BOOT_COMPLETED && i.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-        PlainLang.init(c)
-        Engine.restore(c)
+        when (i.action) {
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> { PlainLang.init(c); Engine.restore(c) }
+            Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> { PlainLang.init(c); Engine.onClockChanged(c) }
+        }
     }
 }

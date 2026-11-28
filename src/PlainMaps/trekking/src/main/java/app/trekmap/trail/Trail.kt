@@ -20,7 +20,6 @@ import android.os.Handler
 import android.os.Looper
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
-import org.json.JSONObject
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
@@ -42,8 +41,9 @@ object Trail {
 
     var active = false
         private set
-    var startTime = 0L
-        private set
+    /** Trail time: wall-clock based, but a clock change mid-recording can't bend it (see [RecTime]). */
+    private val time = RecTime({ android.os.SystemClock.elapsedRealtime() }, { System.currentTimeMillis() })
+    val startTime: Long get() = time.start
     var planId: String? = null
         private set
     var planName: String? = null
@@ -71,15 +71,9 @@ object Trail {
         private set
     val ascentM: Double get() = asc.total
     /** Paused by the user (tap the power button): GPS off, no points; the paused time doesn't count as trail time. */
-    var paused = false
-        private set
-    private var pausedTotal = 0L
-    private var pausedAt = 0L
+    val paused: Boolean get() = time.paused
     /** Recording time without the pauses (ms). */
-    val movingMs: Long get() {
-        val now = System.currentTimeMillis()
-        return (now - startTime - pausedTotal - (if (paused) now - pausedAt else 0L)).coerceAtLeast(0L)
-    }
+    val movingMs: Long get() = time.movingMs
     val segs = ArrayList<MLine>()
     var listener: (() -> Unit)? = null
     val attached get() = svc != null
@@ -137,13 +131,18 @@ object Trail {
 
     private fun openRaw(ctx: Context) {
         if (!Dev.ENABLED || raw != null) return
-        val f = rawFile(ctx)
-        val fresh = !f.exists()
-        raw = BufferedWriter(FileWriter(f, true), 16384)
-        if (fresh) {
-            raw?.write("# trekmap-raw v1 · ${Dev.versionInfo(ctx)} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}\n")
-            raw?.write("# F,wall,fixTime,ageMs,lat,lon,acc,alt,mslAlt,vAcc,speed,sAcc,bearing,bAcc,sats,meanCn0,maxCn0,batch,decision,mode\n")
-            raw?.write("# E,wall,event,detail\n# B,wall,pct,charging,tempC,currentRaw,chargeMah,powerSave,idle,screenOn,${Env.COLUMNS}\n")
+        // dev log only: a failure here must never stop a recording from starting or resuming
+        try {
+            val f = rawFile(ctx)
+            val fresh = !f.exists()
+            raw = BufferedWriter(FileWriter(f, true), 16384)
+            if (fresh) {
+                raw?.write("# trekmap-raw v1 · ${Dev.versionInfo(ctx)} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}\n")
+                raw?.write("# F,wall,fixTime,ageMs,lat,lon,acc,alt,mslAlt,vAcc,speed,sAcc,bearing,bAcc,sats,meanCn0,maxCn0,batch,decision,mode\n")
+                raw?.write("# E,wall,event,detail\n# B,wall,pct,charging,tempC,currentRaw,chargeMah,powerSave,idle,screenOn,${Env.COLUMNS}\n")
+            }
+        } catch (e: Exception) {
+            Dev.event("trail", "raw log unavailable: $e")
         }
     }
 
@@ -177,8 +176,8 @@ object Trail {
         File(dir, "current.csv").delete()
         rawFile(ctx).delete()
         Photos.deleteRec(ctx)
-        val now = System.currentTimeMillis()
-        resetState(now, pid, pname)
+        resetState(pid, pname)
+        time.begin()
         try {
             writeMeta(ctx)
         } catch (e: Exception) {
@@ -195,23 +194,19 @@ object Trail {
         ensureService(ctx)
     }
 
+    /** current.json, written through a temp file + rename: a crash mid-write can't leave it torn. */
     private fun writeMeta(ctx: Context) {
-        File(recDir(ctx), "current.json").writeText(
-            JSONObject().put("start", startTime).put("planId", planId ?: "").put("planName", planName ?: "")
-                .put("pausedTotal", pausedTotal).put("pausedAt", if (paused) pausedAt else 0L).toString()
-        )
+        Rec.atomicWrite(File(recDir(ctx), "current.json"), Rec.encode(time.meta(planId, planName, bootCount(ctx))))
     }
+
+    /** Android's boot counter (-1 if unknown): tells whether the saved clock anchor still holds after a process restart. */
+    private fun bootCount(ctx: Context): Int =
+        try { android.provider.Settings.Global.getInt(ctx.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1) } catch (_: Exception) { -1 }
 
     /** Pause / resume (tap the power button). Paused: GPS off and nothing recorded; resuming starts a new segment (no straight line across). */
     fun setPaused(ctx: Context, on: Boolean) {
-        if (!active || on == paused) return
-        val now = System.currentTimeMillis()
-        if (on) { paused = true; pausedAt = now }
-        else {
-            pausedTotal += now - pausedAt
-            paused = false; pausedAt = 0L
-            resting = false; filter.reset(); still.reset()
-        }
+        if (!active || !time.setPaused(on)) return
+        if (!on) { resting = false; filter.reset(); still.reset() }
         newSeg = true
         try { writeMeta(ctx) } catch (_: Exception) {}
         devEvent(if (on) "pause" else "resume", alsoApp = true)
@@ -265,6 +260,9 @@ object Trail {
     /** Last stored track point [lat, lon], or null. */
     fun lastPoint(): DoubleArray? = if (sLat.isNaN()) null else doubleArrayOf(sLat, sLon)
 
+    /** First point of the track [lat, lon] (where this recording started), or null. */
+    fun firstPoint(): DoubleArray? = segs.firstOrNull { it.n > 0 }?.let { doubleArrayOf(Geo.lat(it.xy[1]), Geo.lon(it.xy[0])) }
+
     fun hasPermission(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
@@ -291,15 +289,28 @@ object Trail {
     fun restore(ctx: Context): Boolean {
         if (active) return true
         val dir = recDir(ctx)
-        val meta = File(dir, "current.json")
-        if (!meta.exists()) return false
+        val metaF = File(dir, "current.json")
+        val tmpF = File(dir, "current.json.tmp")
+        if (!metaF.exists() && !tmpF.exists()) return false
         return try {
-            val j = JSONObject(meta.readText())
-            resetState(j.getLong("start"), j.optString("planId").ifEmpty { null }, j.optString("planName").ifEmpty { null })
-            pausedTotal = j.optLong("pausedTotal", 0L)
-            pausedAt = j.optLong("pausedAt", 0L)
-            paused = pausedAt > 0L
-            for (s in readCsv(File(dir, "current.csv"))) {
+            val csv = File(dir, "current.csv")
+            // a damaged points file must not cost the recording: go on with what can be read (new points still append)
+            val disk = try { if (csv.exists()) csv.useLines { Rec.parse(it) } else emptyList() } catch (e: Exception) {
+                Dev.event("trail", "current.csv unreadable: $e")
+                emptyList()
+            }
+            // a complete temp file is the newest state (the process died before its rename); a torn one is ignored
+            val decoded = Rec.decode(Rec.readOrNull(tmpF)) ?: Rec.decode(Rec.readOrNull(metaF))
+            val rebuilt = decoded == null
+            // current.json torn by a crash / power loss (older versions wrote it in place): rebuild, never drop the track
+            val m = decoded ?: Rec.Meta(
+                Rec.firstTime(disk).takeIf { it > 0 }
+                    ?: maxOf(metaF.lastModified(), tmpF.lastModified()).takeIf { it > 0 } ?: System.currentTimeMillis(),
+                null, null, 0L, 0L,
+            )
+            resetState(m.planId, m.planName)
+            time.resume(m, m.boot >= 0 && m.boot == bootCount(ctx))
+            for (s in disk) {
                 val line = MLine(s.size + 64)
                 segs.add(line)
                 for (i in 0 until s.size) {
@@ -313,22 +324,46 @@ object Trail {
             newSeg = true // the app was down: start a new segment instead of drawing a fake straight line
             active = true
             appCtx = ctx.applicationContext
+            if (rebuilt) Dev.event("trail", "current.json was damaged — recording rebuilt from ${disk.sumOf { it.size }} points")
+            // save the repaired state / the new clock anchor (after a reboot), and drop a leftover temp file
+            if (rebuilt || tmpF.exists() || time.base != m.clockBase) try { writeMeta(ctx) } catch (_: Exception) {}
             val rf = rawFile(ctx)
             restoredGapMs = if (rf.exists()) System.currentTimeMillis() - rf.lastModified() else 0L
             true
         } catch (e: Exception) {
+            Dev.event("trail", "restore failed: $e")
             false
         }
+    }
+
+    /** Opens current.csv for appending (null if storage refuses; points are then retried with the next fix). */
+    private fun openWriter(ctx: Context): Writer? = try {
+        val f = File(recDir(ctx), "current.csv")
+        // the process died mid-row: start on a fresh line, or the next row (maybe a segment break) is glued onto it
+        val torn = Rec.endsTorn(f)
+        BufferedWriter(FileWriter(f, true), 8192).also { if (torn) it.write("\n") }
+    } catch (e: Exception) {
+        writeProblem(e)
+        null
+    }
+
+    /** Storage refused a write: warn once (the track so far is safe on disk; new points wait in memory). */
+    private fun writeProblem(e: Exception) {
+        if (writeFailed) return
+        writeFailed = true
+        appCtx?.let { Notif.warn(it, tr("Track could not be saved", "İz kaydedilemedi"), tr("Phone storage may be full — free some space to keep recording.", "Telefon hafızası dolu olabilir — kaydın sürmesi için yer açın.")) }
+        Dev.event("trail", "track write failed: $e")
     }
 
     fun attach(s: Service): Boolean {
         if (svc != null) return true
         if (!restore(s)) return false
         svc = s
+        appCtx = s.applicationContext
         lm = s.getSystemService(LocationManager::class.java)
         sm = s.getSystemService(SensorManager::class.java)
         sigMotion = sm?.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)
-        writer = BufferedWriter(FileWriter(File(recDir(s), "current.csv"), true), 8192)
+        writer = openWriter(s)
         gps = if (lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) Gps.SEARCHING else Gps.DISABLED
         appCtx = s.applicationContext
         openRaw(s)
@@ -376,6 +411,16 @@ object Trail {
     }
 
     private fun stopInner(ctx: Context, name: String?, save: Boolean): Entry? {
+        if (!active) return null // a second Save (two dialogs, a late tap): nothing left to stop
+        if (save) {
+            // points still in the buffer must reach the disk before it's read back: if storage refuses, keep
+            // recording (nothing is detached yet) and say why, instead of saving a trail without its last part
+            try { writer?.flush() } catch (e: Exception) {
+                writeProblem(e)
+                throw IllegalStateException(tr("Phone storage is full — free some space, then stop again. The recording goes on.",
+                    "Telefon hafızası dolu — biraz yer açıp yeniden durdurun. Kayıt sürüyor."))
+            }
+        }
         devEvent("stop", if (save) "save" else "discard", alsoApp = true)
         battRow()
         detach()
@@ -385,6 +430,11 @@ object Trail {
         var entry: Entry? = null
         if (save) {
             var data = readCsv(csv).filter { it.size >= 2 }
+            if (data.isEmpty()) {
+                // single-point pieces (e.g. many short pauses): join them rather than lose them
+                val all = readCsv(csv)
+                if (all.sumOf { it.size } >= 2) data = listOf(joinSegs(all))
+            }
             if (data.isEmpty()) {
                 // no usable GPS track, but photos were taken: keep them as a trail through the photo spots
                 val ps = Photos.list(Photos.recDir(ctx)).filter { it.hasPosition }
@@ -399,22 +449,41 @@ object Trail {
                 val n = name ?: (tr("Trail", "Rota") + " ${Fmt.date(startTime)}")
                 val id = Store.newId()
                 val photos = Photos.moveRecToTrack(ctx, id) // before the GPX is written, so photos become waypoints
-                entry = Store.save(
-                    Kind.TRACK, Route(n, data), n, startTime,
-                    movingMs / 1000, asc.total, id, // pauses don't count
-                )
+                entry = try {
+                    Store.save(
+                        Kind.TRACK, Route(n, data), n, startTime,
+                        movingMs / 1000, asc.total, id, // pauses don't count
+                    )
+                } catch (e: Exception) {
+                    // not saved (storage full…): the photos go back to the recording, which goes on
+                    Photos.moveTrackToRec(ctx, id)
+                    throw e
+                }
                 if (photos > 0) Dev.event("trail", "saved with $photos photos")
             }
         }
+        // saved (or discarded): forget the recording first, so a crash in the clean-up below can't bring it back
+        // as a second copy. A leftover current.csv without current.json is never restored (start() deletes it).
+        File(dir, "current.json.tmp").delete()
+        File(dir, "current.json").delete()
         Photos.deleteRec(ctx) // discarded / empty: the photos stay in the Gallery
         // the dev log is kept even for discarded / empty trails — those are often the interesting ones
         archiveRaw(ctx, entry?.id ?: "${if (save) "empty" else "discarded"}_${Dev.stamp()}")
         csv.delete()
-        File(dir, "current.json").delete()
         active = false
-        resetState(0L, null, null)
+        writeFailed = false
+        resetState(null, null)
         listener?.invoke()
         return entry
+    }
+
+    /** One segment from several (in order). */
+    private fun joinSegs(segs: List<Seg>): Seg {
+        val la = DoubleList(); val lo = DoubleList(); val el = DoubleList(); val tm = LongList()
+        for (s in segs) for (i in 0 until s.size) {
+            la.add(s.lat[i]); lo.add(s.lon[i]); el.add(s.ele?.get(i) ?: Double.NaN); tm.add(s.time?.get(i) ?: 0L)
+        }
+        return Seg(la.toArray(), lo.toArray(), el.toArray(), tm.toArray())
     }
 
     fun setUiVisible(v: Boolean) {
@@ -424,12 +493,12 @@ object Trail {
         if (svc != null) applyMode()
     }
 
-    private fun resetState(start: Long, pid: String?, pname: String?) {
-        startTime = start; planId = pid; planName = pname
+    private fun resetState(pid: String?, pname: String?) {
+        planId = pid; planName = pname
         distM = 0.0; eleNow = Double.NaN; asc.reset(); segs.clear()
         filter.fullReset(); still.reset()
         resting = false; useDem = null; newSeg = true
-        paused = false; pausedTotal = 0L; pausedAt = 0L
+        time.reset()
         sLat = Double.NaN; sLon = Double.NaN
         lastLat = Double.NaN; lastLon = Double.NaN; lastAcc = 0f
         lastSats = -1; lastCn0 = Double.NaN; lastSpeed = Float.NaN; lastCourse = Float.NaN
@@ -567,7 +636,8 @@ object Trail {
     // ------------------------------------------------------------------ fixes
     private fun onFix(l: Location, batch: Int) {
         if (!active || paused) return
-        val acc = if (l.hasAccuracy()) l.accuracy else 999f
+        // a NaN / infinite accuracy (seen from mock and some buggy GNSS drivers) would crash the stats line
+        val acc = if (l.hasAccuracy() && l.accuracy.isFinite()) l.accuracy else 999f
         lastLat = l.latitude
         lastLon = l.longitude
         lastAcc = acc
@@ -602,28 +672,30 @@ object Trail {
         }
     }
 
-    private fun storePoint(lat: Double, lon: Double, t: Long, ele: Double) {
-        val w = writer
-        try {
-            if (newSeg || segs.isEmpty()) {
-                segs.add(MLine(256))
-                w?.write("s\n")
-                newSeg = false
-            } else if (!sLat.isNaN()) {
-                distM += Geo.dist(sLat, sLon, lat, lon)
-            }
-            segs[segs.size - 1].add(lat, lon)
-            if (!ele.isNaN()) { asc.push(ele); eleNow = ele }
-            w?.write("p,$t,$lat,$lon,$ele\n")
-        } catch (e: Exception) {
-            if (!writeFailed) {
-                writeFailed = true
-                appCtx?.let { Notif.warn(it, tr("Track could not be saved", "İz kaydedilemedi"), tr("Phone storage may be full — free some space to keep recording.", "Telefon hafızası dolu olabilir — kaydın sürmesi için yer açın.")) }
-                Dev.event("trail", "track write failed: $e")
-            }
+    /** A segment break that hasn't reached current.csv yet (kept until written, so a failed write can't lose it). */
+    private var diskNewSeg = false
+
+    private fun storePoint(lat: Double, lon: Double, t: Long, ele0: Double) {
+        val ele = if (ele0.isFinite()) ele0 else Double.NaN
+        // the live track (memory) always updates; the disk write is retried with the next point if storage refuses
+        if (newSeg || segs.isEmpty()) {
+            segs.add(MLine(256))
+            newSeg = false
+            diskNewSeg = true
+        } else if (!sLat.isNaN()) {
+            distM += Geo.dist(sLat, sLon, lat, lon)
         }
+        segs[segs.size - 1].add(lat, lon)
+        if (!ele.isNaN()) { asc.push(ele); eleNow = ele }
         sLat = lat
         sLon = lon
+        val w = writer ?: svc?.let { s -> openWriter(s).also { writer = it } } ?: return
+        try {
+            if (diskNewSeg) { w.write("s\n"); diskNewSeg = false }
+            w.write(Rec.row(t, lat, lon, ele))
+        } catch (e: Exception) {
+            writeProblem(e)
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -647,7 +719,7 @@ object Trail {
     }
 
     private fun afterBatch() {
-        try { writer?.flush() } catch (_: Exception) {}
+        try { writer?.flush() } catch (e: Exception) { writeProblem(e) }
         // battery snapshot every 5 min, piggy-backing on a wake-up that is happening anyway
         if (System.currentTimeMillis() - lastBattRow > 5 * 60_000L) battRow()
         try { raw?.flush() } catch (_: Exception) {}
@@ -656,29 +728,5 @@ object Trail {
 
     private fun notifyUi() = listener?.invoke()
 
-    private fun readCsv(f: File): List<Seg> {
-        val out = ArrayList<Seg>()
-        if (!f.exists()) return out
-        var la = DoubleList(); var lo = DoubleList(); var el = DoubleList(); var tm = LongList()
-        fun flush() {
-            if (la.size > 0) out.add(Seg(la.toArray(), lo.toArray(), el.toArray(), tm.toArray()))
-            la = DoubleList(); lo = DoubleList(); el = DoubleList(); tm = LongList()
-        }
-        f.forEachLine { line ->
-            if (line == "s") flush()
-            else if (line.startsWith("p,")) {
-                val p = line.split(',')
-                if (p.size >= 5) {
-                    val t = p[1].toLongOrNull()
-                    val a = p[2].toDoubleOrNull()
-                    val b = p[3].toDoubleOrNull()
-                    if (t != null && a != null && b != null) {
-                        la.add(a); lo.add(b); el.add(p[4].toDoubleOrNull() ?: Double.NaN); tm.add(t)
-                    }
-                }
-            }
-        }
-        flush()
-        return out
-    }
+    private fun readCsv(f: File): List<Seg> = if (!f.exists()) emptyList() else f.useLines { Rec.parse(it) }
 }

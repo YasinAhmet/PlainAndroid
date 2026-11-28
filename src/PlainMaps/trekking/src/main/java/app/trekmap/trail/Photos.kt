@@ -52,7 +52,8 @@ object Photos {
         if (dir == null) return emptyList()
         val f = File(dir, INDEX)
         val indexed = try {
-            if (f.exists()) JSONArray(f.readText()).let { a -> (0 until a.length()).map { Photo.from(a.getJSONObject(it)) } } else emptyList()
+            // one bad entry must not cost the others their positions
+            if (f.exists()) JSONArray(f.readText()).let { a -> (0 until a.length()).mapNotNull { try { Photo.from(a.getJSONObject(it)) } catch (_: Exception) { null } } } else emptyList()
         } catch (e: Exception) {
             emptyList() // corrupt index (power loss / full storage): photos are recovered from the files below
         }.filter { File(dir, it.file).exists() }
@@ -106,6 +107,18 @@ object Photos {
         val dst = trackDir(id)
         if (!src.renameTo(dst)) { src.copyRecursively(dst, overwrite = true); src.deleteRecursively() }
         return list(dst).size
+    }
+
+    /** Saving track [id] failed after [moveRecToTrack]: the photos go back to the recording that goes on. */
+    fun moveTrackToRec(ctx: Context, id: String) {
+        val src = trackDir(id)
+        if (!src.exists()) return
+        try {
+            val dst = recDir(ctx)
+            if (dst.exists() || !src.renameTo(dst)) { src.copyRecursively(dst, overwrite = true); src.deleteRecursively() }
+        } catch (e: Exception) {
+            Dev.event("photo", "could not move photos back to the recording: $e")
+        }
     }
 
     fun deleteRec(ctx: Context) { recDir(ctx).deleteRecursively() }
@@ -203,7 +216,7 @@ object Photos {
         val dir = dirOf(e)
         val photos = list(dir)
         fun f(v: Double) = String.format(Locale.US, "%.7f", v)
-        fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        fun esc(s: String) = GpxIo.esc(s) // also drops control characters XML forbids (a pasted name can hold them)
         val kml = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n")
             append("<name>${esc(e.name)}</name>\n")

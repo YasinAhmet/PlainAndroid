@@ -44,16 +44,23 @@ object Library {
     fun volumeUri(s: Song): Uri = uri(s.id, s.isVideo, s.volume.ifEmpty { MediaStore.VOLUME_EXTERNAL_PRIMARY })
     fun volumeUri(t: TrashItem): Uri = uri(t.id, t.video, t.volume.ifEmpty { MediaStore.VOLUME_EXTERNAL_PRIMARY })
 
-    private fun currentGeneration(ctx: Context): Long =
+    private fun currentGeneration(ctx: Context): Long = runCatching {
         MediaStore.getExternalVolumeNames(ctx).sumOf { runCatching { MediaStore.getGeneration(ctx, it) }.getOrDefault(0L) }
+    }.getOrDefault(-2L) // MediaStore not ready (early after boot, storage being mounted): never equal, so the next look loads
 
     /** Cheap check whether MediaStore changed since the last load. */
     fun stale(ctx: Context): Boolean = hasPermission(ctx) && currentGeneration(ctx) != generation
 
     private fun clean(s: String?): String = s?.trim()?.takeUnless { it.equals("<unknown>", true) } ?: ""
 
-    /** Synchronous MediaStore query (≈100 ms for a thousand songs). */
-    fun load(ctx: Context): LibraryIndex {
+    /**
+     * Synchronous MediaStore query (≈100 ms for a thousand songs). A query that fails (permission revoked meanwhile,
+     * MediaStore not ready, a volume going away) keeps the library as it was instead of crashing the caller: the
+     * library-load thread, or a notification / headset button on the main thread.
+     */
+    fun load(ctx: Context): LibraryIndex = try { loadOrThrow(ctx) } catch (e: Exception) { Player.dlog("library load failed: $e"); index }
+
+    private fun loadOrThrow(ctx: Context): LibraryIndex {
         if (!hasPermission(ctx)) return index
         val gen = currentGeneration(ctx)
         val cols = mutableListOf(
@@ -68,7 +75,9 @@ object Library {
         )
         if (Build.VERSION.SDK_INT >= 31) cols += MediaStore.Audio.Media.IS_RECORDING
         val out = ArrayList<Song>()
-        ctx.contentResolver.query(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), cols.toTypedArray(), null, null, null)?.use { c ->
+        // no cursor = MediaStore unavailable, not "no music": keep the library (load() catches this)
+        (ctx.contentResolver.query(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), cols.toTypedArray(), null, null, null)
+            ?: throw IllegalStateException("MediaStore gave no cursor")).use { c ->
             fun i(n: String) = c.getColumnIndexOrThrow(n)
             val iId = i(cols[0]); val iTitle = i(cols[1]); val iArtist = i(cols[2]); val iAlbum = i(cols[3]); val iAA = i(cols[4])
             val iAlbumId = i(cols[5]); val iGenre = i(cols[6]); val iTrack = i(cols[7]); val iDisc = i(cols[8]); val iYear = i(cols[9])
@@ -90,7 +99,7 @@ object Library {
                 if (skip != null) continue
                 out += Song(
                     id = c.getLong(iId),
-                    title = clean(c.getString(iTitle)).ifEmpty { name.substringBeforeLast('.') },
+                    title = clean(c.getString(iTitle)).ifEmpty { name.substringBeforeLast('.').trim().ifEmpty { name } }, // ".mp3": not an empty title
                     artist = clean(c.getString(iArtist)),
                     album = PlainYoutube.album(rel, clean(c.getString(iAlbum))), // its untagged files: the album folder
                     albumArtist = clean(c.getString(iAA)),
@@ -138,7 +147,7 @@ object Library {
                 val (w, h) = Videos.displaySize(c.getInt(9), c.getInt(10), c.getInt(11))
                 out += Song(
                     id = c.getLong(0),
-                    title = clean(c.getString(1)).ifEmpty { name.substringBeforeLast('.') },
+                    title = clean(c.getString(1)).ifEmpty { name.substringBeforeLast('.').trim().ifEmpty { name } },
                     artist = clean(c.getString(2)),
                     album = PlainYoutube.album(rel, ""), albumArtist = "", albumId = -1, genre = "", track = 0, disc = 1, year = 0,
                     durationMs = c.getLong(4), relPath = rel, name = name, size = c.getLong(7), dateAdded = c.getLong(8),

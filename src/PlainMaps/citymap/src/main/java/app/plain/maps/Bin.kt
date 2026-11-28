@@ -92,11 +92,13 @@ class BytesIn(private val b: ByteArray, var pos: Int = 0, private val end: Int =
 
 /** Small blobs stored in the database. */
 object Codec {
-    /** Lines as lon/lat pairs, stored as 1e-6° deltas. */
+    /** Lines as lon/lat pairs, stored as 1e-6° deltas. Points that aren't coordinates (NaN, infinite) are left out. */
     fun shape(parts: List<DoubleArray>): ByteArray {
         val o = BytesOut(64 + parts.sumOf { it.size } * 3)
         o.uv(parts.size)
-        for (p in parts) {
+        for (p0 in parts) {
+            // roundToLong() throws on NaN: one bad point from a feed must not fail a whole sync
+            val p = if (p0.all { ok(it) }) p0 else p0.toList().chunked(2).filter { it.size == 2 && ok(it[0]) && ok(it[1]) }.flatten().toDoubleArray()
             val n = p.size / 2
             o.uv(n)
             var px = 0L; var py = 0L
@@ -108,6 +110,8 @@ object Codec {
         }
         return o.toArray()
     }
+
+    private fun ok(v: Double) = v.isFinite() && kotlin.math.abs(v) <= 1000.0
 
     fun shape(b: ByteArray): List<DoubleArray> {
         val r = BytesIn(b)

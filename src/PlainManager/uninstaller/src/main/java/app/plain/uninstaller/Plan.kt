@@ -25,3 +25,23 @@ object Plan {
         "• ${t.label}" + (if (tags.isEmpty()) "" else "  [${tags.joinToString(", ")}]") + "\n   ${t.pkg}"
     }
 }
+
+/** Search matching that works for Turkish: "indir" finds "İndirilenler", "ınstagram" finds "Instagram". */
+object Search {
+    /**
+     * Lowercase without the locale's quirks: Kotlin's lowercase() (root locale) turns "İ" into "i" plus a combining dot,
+     * so "İndir" never matched "indir"; the dotless "ı" is folded to "i" as well.
+     */
+    fun fold(s: String): String = s.lowercase().replace(COMBINING_DOT.toString(), "").replace(DOTLESS_I, 'i')
+
+    private val COMBINING_DOT = Char(0x0307) // what lowercase() leaves after "i" from "İ"
+    private val DOTLESS_I = Char(0x0131)     // Turkish "ı"
+
+    fun matches(query: String, vararg fields: String): Boolean {
+        val q = fold(query.trim())
+        return q.isEmpty() || fields.any { q in fold(it) }
+    }
+}
+
+/** "Select all visible" leaves out risky apps: those are ticked one by one, after reading why they're risky. */
+fun Plan.bulkPick(items: List<AppItem>): List<String> = items.filter { it.level != Level.RISKY }.map { it.pkg }

@@ -62,11 +62,11 @@ class DuplicatesTest {
     }
 
     @Test fun trackedIdsReadTheDownloadIndex() {
-        val t = "abc:A\tcontent://media/external/audio/media/100\n" +
-            "def:A\tcontent://media/external/audio/media/200\n" +
-            "-def:A\n" +
-            "ghi:V\tcontent://media/external/video/media/300\n" +
-            "old:A\n"
+        val t = "abcabcabcab:A\tcontent://media/external/audio/media/100\n" +
+            "defdefdefde:A\tcontent://media/external/audio/media/200\n" +
+            "-defdefdefde:A\n" +
+            "ghighighigh:V\tcontent://media/external/video/media/300\n" +
+            "oldoldoldol:A\n"
         assertEquals(setOf(100L, 300L), Duplicates.trackedIds(t))
     }
 

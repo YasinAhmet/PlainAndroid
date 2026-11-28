@@ -44,12 +44,12 @@ object Migrate {
 
     fun installed(ctx: Context, pkg: String): Boolean = try {
         ctx.packageManager.getPackageInfo(pkg, 0); true
-    } catch (_: PackageManager.NameNotFoundException) { false }
+    } catch (_: PackageManager.NameNotFoundException) { false } catch (_: Exception) { false }
 
     fun versionName(ctx: Context, pkg: String): String? = try { ctx.packageManager.getPackageInfo(pkg, 0).versionName } catch (_: Exception) { null }
 
     /** The former app is new enough to hand its data over. */
-    fun hasBridge(ctx: Context, pkg: String): Boolean = ctx.packageManager.resolveContentProvider("$pkg.migrate", 0) != null
+    fun hasBridge(ctx: Context, pkg: String): Boolean = try { ctx.packageManager.resolveContentProvider("$pkg.migrate", 0) != null } catch (_: Exception) { false }
 
     /** The import screen must come before the tab: the former app is installed and nothing was decided yet. */
     fun needsDecision(ctx: Context, t: Tab): Boolean {
@@ -71,7 +71,7 @@ object Migrate {
         val info = cr.call(base(s), "info", null, null) ?: throw IOException("${s.name} did not answer")
         val files = ArrayList<Item>()
         cr.query(Uri.withAppendedPath(base(s), "files"), null, null, null, null)?.use { c ->
-            while (c.moveToNext()) files += Item(c.getString(0), c.getLong(1), c.getLong(2))
+            while (c.moveToNext()) files += Item(c.getString(0) ?: continue, c.getLong(1), c.getLong(2))
         } ?: throw IOException("${s.name} did not list its files")
         val prefs = info.getStringArrayList("prefs").orEmpty().filter { it !in SKIP_PREFS }
         return Plan(files.filter { target(ctx, it.path) != null && !it.path.endsWith(".part") }, prefs, info.getInt("trashed", 0))

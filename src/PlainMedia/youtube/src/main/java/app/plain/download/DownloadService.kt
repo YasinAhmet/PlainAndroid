@@ -53,9 +53,14 @@ class DownloadService : Service() {
         @Volatile var running = false
             private set
 
-        fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_RUN))
-        }
+        /**
+         * Starts the worker. False when Android refuses a foreground service right now (API 31+: the app went to the
+         * background between the tap and this call, e.g. "Save (download)" finishing on a worker thread): the jobs
+         * stay queued and start the next time the app is opened, instead of crashing that thread.
+         */
+        fun start(ctx: Context): Boolean = try {
+            ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_RUN)); true
+        } catch (_: IllegalStateException) { false } catch (_: SecurityException) { false }
 
         /** Creates the channel, or renames it after a language change. */
         fun channel(c: Context) {
@@ -98,8 +103,15 @@ class DownloadService : Service() {
             if (synchronized(lock) { downloads.isEmpty() && saver == null }) stopNow()
             return START_NOT_STICKY
         }
+        try {
+            startForeground(NOTIF_ID, progressNotif(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } catch (_: Exception) {
+            // refused (Android 15's daily dataSync time used up, or not allowed from the background): nothing starts,
+            // the queue waits for the next open of the app (no crash, no half-started worker without a notification)
+            if (synchronized(lock) { downloads.isEmpty() && saver == null }) { running = false; stopSelf() }
+            return START_NOT_STICKY
+        }
         running = true
-        startForeground(NOTIF_ID, progressNotif(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         schedule()
         return START_NOT_STICKY
     }

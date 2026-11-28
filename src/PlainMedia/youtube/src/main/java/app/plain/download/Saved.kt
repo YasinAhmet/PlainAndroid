@@ -21,11 +21,14 @@ object Saved {
     fun find(ctx: Context, id: String, kind: Kind): File? {
         if (id.isEmpty()) return null
         val u = Store.savedUri(id, kind) ?: return null
+        // forgotten only when MediaStore says the row is gone (or the uri is unusable); a failed query (provider busy
+        // or restarting) must not drop the "saved" mark, or the next download would make a second copy
+        var gone = false
         val row = try {
-            ctx.contentResolver.query(Uri.parse(u), arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
-                ?.use { c -> if (c.moveToFirst()) (c.getString(0) to c.getString(1)) else null }
-        } catch (_: Exception) { null }
-        if (row == null) { Store.forgetSaved(id, kind, u); return null }
+            val c = ctx.contentResolver.query(Uri.parse(u), arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+            c?.use { if (it.moveToFirst()) (it.getString(0) to it.getString(1)) else { gone = true; null } }
+        } catch (_: IllegalArgumentException) { gone = true; null } catch (_: Exception) { null }
+        if (row == null) { if (gone) Store.forgetSaved(id, kind, u); return null }
         return File(u, row.first, row.second, kind == Kind.AUDIO)
     }
 
@@ -85,4 +88,42 @@ object Saved {
             for (i in ids) try { cr.delete(android.content.ContentUris.withAppendedId(coll, i), null, null) } catch (_: Exception) {}
         }
     }
+}
+
+/**
+ * files/downloaded.txt, the "ever saved" index (pure, unit-tested; the Music tab reads the same file). Lines:
+ * "key" (a mark without a file, before 3.3), "key<TAB>content://…" (a later line wins) and "-key" (forget the file).
+ * key = "<videoId>:A" or "<videoId>:V".
+ */
+object DoneIndex {
+    /**
+     * Fills [done] and [uris] from [text].
+     *  - A YouTube id may itself start with '-' ("-x8Gh3kQbZc:A"): "-" means "forget" only when no uri follows and
+     *    what comes after it is a whole key with an 11-character id; otherwise the line is an ordinary entry.
+     *  - A last line without its newline was cut short (killed or disk full while appending): ignored, so a
+     *    half-written uri can't point at some other file.
+     *  - Lines that aren't "<id>:A|V" are skipped; a uri that isn't content:// is dropped (the mark itself is kept).
+     */
+    fun parse(text: String, done: MutableSet<String>, uris: MutableMap<String, String>) {
+        val lines = text.split('\n')
+        val complete = if (text.endsWith("\n")) lines else lines.dropLast(1)
+        for (l in complete) {
+            val t = l.trim()
+            if (t.isEmpty()) continue
+            if (t.startsWith("-") && '\t' !in t && isKey(t.substring(1)) && t.substringBefore(':').length == 12) {
+                uris.remove(t.substring(1)); continue
+            }
+            val k = t.substringBefore('\t').trim()
+            if (!isKey(k)) continue
+            done += k
+            val u = t.substringAfter('\t', "").trim()
+            if (u.startsWith("content://")) uris[k] = u
+        }
+    }
+
+    /** "<id>:A" / "<id>:V" with no blanks inside. */
+    fun isKey(k: String): Boolean = k.length >= 3 && (k.endsWith(":A") || k.endsWith(":V")) && k.none { it.isWhitespace() }
+
+    fun encode(done: Collection<String>, uris: Map<String, String>): String =
+        done.joinToString("\n", postfix = "\n") { k -> uris[k]?.let { "$k\t$it" } ?: k }
 }

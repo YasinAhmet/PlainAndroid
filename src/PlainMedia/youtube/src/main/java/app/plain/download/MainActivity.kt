@@ -30,7 +30,10 @@ import app.plain.lang.tr
 
 class MainActivity : Activity() {
     val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor()
+    // one background thread. After onDestroy (shutdown) a late execute (a reply posted back, e.g. sync() after
+    // "Empty trash" or refreshCached() after a cache trim) is dropped instead of crashing with RejectedExecutionException
+    private val io = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.LinkedBlockingQueue(), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
 
     private lateinit var input: EditText
     private lateinit var status: TextView

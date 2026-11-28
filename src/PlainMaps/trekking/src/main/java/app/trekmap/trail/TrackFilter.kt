@@ -125,7 +125,7 @@ class AscentCounter(private val threshold: Double) {
     fun reset() { total = 0.0; ref = Double.NaN }
 
     fun push(e: Double) {
-        if (e.isNaN()) return
+        if (!e.isFinite()) return // an infinite spike would make the total (and the saved trail's JSON) unusable
         if (ref.isNaN() || e < ref) { ref = e; return }
         if (e - ref >= threshold) { total += e - ref; ref = e }
     }

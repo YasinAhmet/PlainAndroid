@@ -47,19 +47,27 @@ object Text {
         return null
     }
 
-    /** "06:40:00" (or past midnight, "25:10:00") to seconds; null if empty. */
+    /**
+     * "06:40:00" (or past midnight, "25:10:00") to seconds; null if empty or not a time (minutes or seconds out of
+     * range, negative or absurd hours: a garbled cell must not become a departure days away).
+     */
     fun time(s: String): Int? {
         val t = s.trim()
         if (t.isEmpty()) return null
         val p = t.split(':')
         if (p.size < 2) return null
-        val h = p[0].toIntOrNull() ?: return null
-        val m = p[1].toIntOrNull() ?: return null
-        val sec = p.getOrNull(2)?.toIntOrNull() ?: 0
+        val h = p[0].trim().toIntOrNull() ?: return null
+        val m = p[1].trim().toIntOrNull() ?: return null
+        val sec = p.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+        if (h !in 0..99 || m !in 0..59 || sec !in 0..60) return null
         return h * 3600 + m * 60 + sec
     }
 
-    /** Splits one CSV line (quotes are honoured, though the İETT files don't use them). */
+    /**
+     * Splits one CSV line. A field that starts with a quote (after blanks) is quoted: delimiters inside it are text and
+     * "" is a quote. A stray quote inside an unquoted field ("12\" BUS") is plain text, so it can't swallow the
+     * columns after it. The İETT files use no quotes at all (the fast path).
+     */
     fun split(line: String, d: Char): MutableList<String> {
         val out = ArrayList<String>(12)
         if (line.indexOf('"') < 0) {
@@ -72,21 +80,43 @@ object Text {
             }
             return out
         }
+        scan(line, d, out)
+        return out
+    }
+
+    /** True when [line] ends inside a quoted field (the field goes on in the next line). */
+    fun openQuote(line: String, d: Char): Boolean = line.indexOf('"') >= 0 && scan(line, d, null)
+
+    /** The quote-aware splitter; returns true if the line ends inside a quoted field. */
+    private fun scan(line: String, d: Char, out: MutableList<String>?): Boolean {
         val sb = StringBuilder()
         var q = false
         var i = 0
         while (i < line.length) {
             val c = line[i]
-            when {
-                q && c == '"' && i + 1 < line.length && line[i + 1] == '"' -> { sb.append('"'); i++ }
-                c == '"' -> q = !q
-                !q && c == d -> { out.add(sb.toString()); sb.setLength(0) }
+            if (q) {
+                if (c == '"') {
+                    if (i + 1 < line.length && line[i + 1] == '"') { sb.append('"'); i++ } else q = false
+                } else sb.append(c)
+            } else when {
+                c == d -> { out?.add(sb.toString()); sb.setLength(0) }
+                c == '"' && sb.isBlank() -> { sb.setLength(0); q = true }
                 else -> sb.append(c)
             }
             i++
         }
-        out.add(sb.toString())
-        return out
+        out?.add(sb.toString())
+        return q
+    }
+
+    /**
+     * A numeric character reference ("&#351;", "&#x15F;"): its text, or null when it is not a valid code point
+     * (a long number must not throw, and emoji above U+FFFF need two chars).
+     */
+    fun entity(digits: String, radix: Int): String? {
+        val v = digits.toIntOrNull(radix) ?: return null
+        if (v <= 0 || v > 0x10FFFF || v in 0xD800..0xDFFF) return null
+        return String(Character.toChars(v))
     }
 
     /**
@@ -115,8 +145,9 @@ object Text {
         /** Next row, or null at the end. Values are trimmed and mojibake-repaired. */
         fun next(): List<String>? {
             while (true) {
-                val line = r.readLine() ?: return null
+                var line = r.readLine() ?: return null
                 if (line.isBlank()) continue
+                if (openQuote(line, delim)) line = continued(line)
                 var f = split(line, delim)
                 // drop a trailing empty field from a trailing delimiter
                 if (f.size == header.size + 1 && f.last().isEmpty()) f = f.subList(0, f.size - 1)
@@ -135,7 +166,31 @@ object Text {
         }
 
         fun get(row: List<String>, col: Int) = if (col in row.indices) row[col] else ""
+
+        /**
+         * A quoted field with line breaks in it: the row goes on until the quote closes. If it doesn't close within a
+         * few lines (a stray quote, not a real field), the line stays alone and the lines after it are read as rows.
+         */
+        private fun continued(first: String): String {
+            val sb = StringBuilder(first)
+            try {
+                r.mark(MARK)
+                for (k in 0 until 20) {
+                    val more = r.readLine() ?: break
+                    sb.append('\n').append(more)
+                    if (sb.length > MARK / 4) break
+                    if (!openQuote(sb.toString(), delim)) return sb.toString()
+                }
+                r.reset()
+            } catch (_: java.io.IOException) {
+                // a line longer than the read-ahead: keep what was joined rather than fail the whole file
+                return sb.toString()
+            }
+            return first
+        }
     }
+
+    private const val MARK = 1 shl 20
 
     /** Lower-case, Turkish letters folded to ASCII, punctuation to spaces: used for search. */
     fun norm(s: String): String {

@@ -2,6 +2,7 @@ package app.plain.home
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Locale
 
 class AppsTest {
     private val list = listOf(
@@ -15,6 +16,42 @@ class AppsTest {
     @Test fun sortsCaseInsensitivelyAndSkipsSelf() {
         val names = Apps.visible(list, emptySet(), "app.plain.home").map { it.label }
         assertEquals(listOf("Camera", "Claude", "discord", "WhatsApp"), names)
+    }
+
+    @Test fun turkishAlphabetOrder() {
+        val tr = Locale.forLanguageTag("tr-TR")
+        val apps = listOf("Dolap", "Çanta", "Cüzdan", "Şeker", "Saat", "Tamam", "İnstagram", "Ilgaz", "Ödeme", "Otobüs")
+            .map { AppEntry("p.$it", "A", it) }
+        assertEquals(listOf("Cüzdan", "Çanta", "Dolap", "Ilgaz", "İnstagram", "Otobüs", "Ödeme", "Saat", "Şeker", "Tamam"),
+            Apps.visible(apps, emptySet(), "x", tr).map { it.label })
+        // the same names in English order: the accents don't count
+        assertEquals(listOf("Çanta", "Cüzdan", "Dolap"),
+            Apps.visible(apps.filter { it.label in setOf("Dolap", "Çanta", "Cüzdan") }, emptySet(), "x", Locale.ENGLISH).map { it.label })
+    }
+
+    @Test fun sameNamesKeepAFixedOrder() {
+        val a = AppEntry("com.b", "Main", "Camera")
+        val b = AppEntry("com.a", "Main", "Camera")
+        val c = AppEntry("com.c", "Main", "camera")
+        val d = AppEntry("com.a", "Second", "Camera")
+        val once = Apps.visible(listOf(a, b, c, d), emptySet(), "x", Locale.ENGLISH)
+        for (seed in 1..20) {
+            val shuffled = listOf(a, b, c, d).shuffled(java.util.Random(seed.toLong()))
+            assertEquals(once, Apps.visible(shuffled, emptySet(), "x", Locale.ENGLISH))
+        }
+        assertEquals(listOf(b, d, a, c), once)   // "Camera" before "camera", then by package/activity
+    }
+
+    @Test fun severalLaunchersInOnePackageAndManyApps() {
+        val many = (0 until 5000).map { AppEntry("pkg.$it", "A", "App ${4999 - it}") } +
+            AppEntry("pkg.0", "B", "App second icon") + AppEntry("", "", "")
+        val shown = Apps.visible(many, setOf("pkg.0/A"), "self", Locale.ENGLISH)
+        assertEquals(5001, shown.size)
+        assertEquals("", shown.first().label)                       // an empty label never crashes the sort
+        assertEquals(1, shown.count { it.pkg == "pkg.0" })
+        val sections = Layout.build(shown, emptyMap())
+        assertEquals(listOf(Layout.OTHER), sections.map { it.title })
+        assertEquals(5001, sections[0].apps.size)
     }
 
     @Test fun skipsHidden() {

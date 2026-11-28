@@ -26,8 +26,9 @@ class CatalogTest {
         val bundled = Catalog.parse(json)
         val newer = bundled[0].copy(versionCode = 6, versionName = "1.5")
         val same = bundled[1]
-        val extra = bundled[1].copy(pkg = "app.plain.new", name = "New")
-        val m = Catalog.merge(bundled, listOf(newer, same, extra, bundled[2]))
+        // online entries always carry a download link (one without can't be installed, see CatalogEdgeTest)
+        val extra = bundled[1].copy(pkg = "app.plain.new", name = "New", url = "https://x/New.apk")
+        val m = Catalog.merge(bundled, listOf(newer, same, extra, bundled[2].copy(url = "https://x/PlainSetup.apk")))
         assertEquals(listOf("app.localmusic", "app.plain.home", "app.plain.new", "app.plain.setup"), m.map { it.entry.pkg })
         assertEquals(listOf(Source.ONLINE, Source.BUNDLED, Source.ONLINE, Source.ONLINE), m.map { it.source })
         assertEquals(2, Catalog.merge(bundled, null).size) // offline: no Setup row

@@ -50,6 +50,12 @@ class MapView(ctx: Context) : View(ctx) {
         const val HOLD_MIN_M = 100.0
         const val HOLD_MAX_M = 400.0
         private const val HOLD_GROW_S = 1.5
+
+        /**
+         * One overlay worker for the process (a daemon thread): a worker per MapView was never shut down, so every
+         * activity re-creation (language change, process kept) left a thread behind.
+         */
+        private val OVERLAY = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "map-overlay").apply { isDaemon = true } }
     }
 
     var cx = Geo.mx(28.98)
@@ -428,7 +434,7 @@ class MapView(ctx: Context) : View(ctx) {
     // the screen. Panning only moves that bitmap (pinching scales it until a sharp one is ready),
     // so a selection with two dozen long routes pans as smoothly as the bare map. Everything the
     // worker touches (the paints below and each Line's Path) is used by the worker only.
-    private val overlayExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val overlayExec get() = OVERLAY
     private var overlayVersion = 0
     private var front: android.graphics.Bitmap? = null
     private var frontVersion = -1
@@ -590,7 +596,8 @@ class MapView(ctx: Context) : View(ctx) {
         val target = density * 90 * mpp
         if (target <= 0 || target.isNaN()) return
         val p10 = 10.0.pow(floor(log10(target)))
-        val nice = listOf(5.0, 2.0, 1.0).map { it * p10 }.first { it <= target }
+        // (log10 can round a value just under a power of ten up to it: then 1 × p10 is still the fallback)
+        val nice = listOf(5.0, 2.0, 1.0).map { it * p10 }.firstOrNull { it <= target } ?: (p10 / 10)
         val len = (nice / mpp).toFloat()
         val x0 = density * 12
         val y0 = height - padBottom - density * 14

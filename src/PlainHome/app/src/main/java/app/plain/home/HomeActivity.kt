@@ -2,6 +2,7 @@ package app.plain.home
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -9,12 +10,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherApps
+import android.content.pm.ShortcutInfo
+import android.content.res.Configuration
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.provider.AlarmClock
 import android.provider.Settings
 import android.text.TextUtils
@@ -39,16 +44,19 @@ import app.plain.lang.tr
 import app.plain.update.PlainUpdate
 import app.plain.ui.Ic
 import app.plain.ui.Sheet
+import java.text.Collator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Minimal home screen: clock + date on top, then apps in rows under section headers
  * (the user's old HiOS folders). Stock apps outside those sections are hidden on the user's
  * phone; a fresh install (a friend's phone) shows them and puts its dialer + SMS app in Temel.
  * Dark by default; the ◐ button switches to light and the choice is remembered.
- * Long-press an icon: App info / Move to / Hide. Long-press the clock: show hidden apps again.
+ * Long-press an icon: the app's own shortcuts, App info / Move to / Hide. Long-press the clock: show hidden apps again.
+ * Home while already home: closes an open menu and scrolls back to the top.
  */
 class HomeActivity : Activity() {
 
@@ -61,6 +69,9 @@ class HomeActivity : Activity() {
     private var icons: Map<String, Drawable> = emptyMap()
     private var dirty = true
     private var isResumed = false
+    private var densityDpi = 0
+    /** The menu sheet on screen, if any (Home closes it). */
+    private var openSheet: Dialog? = null
 
     private lateinit var root: LinearLayout
     private lateinit var time: TextClock
@@ -85,6 +96,7 @@ class HomeActivity : Activity() {
         PlainLang.init(this)
         super.onCreate(savedInstanceState)
         dark = prefs.getBoolean("dark", true)
+        densityDpi = resources.configuration.densityDpi
         if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
         buildUi()
         applyColors()
@@ -127,10 +139,18 @@ class HomeActivity : Activity() {
         super.onDestroy()
     }
 
-    /** Home pressed while already home: back to the top of the list. */
+    /** Home pressed while already home: an open menu closes, and the list goes back to the top. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        openSheet?.takeIf { it.isShowing }?.let { try { it.dismiss() } catch (_: Exception) {} }
+        openSheet = null
         if (::scroll.isInitialized) scroll.smoothScrollTo(0, 0)
+    }
+
+    /** Sizes are set in dp when the screen is built, so a new display size (or font scale) rebuilds it. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (newConfig.densityDpi != densityDpi) { densityDpi = newConfig.densityDpi; recreate() }
     }
 
     @Deprecated("Home screen ignores Back")
@@ -303,27 +323,39 @@ class HomeActivity : Activity() {
         m
     }
 
+    /**
+     * Reads the launchable apps on a worker thread. A launcher must never crash: an app that is being installed,
+     * removed or disabled while it is read is skipped (the broadcast that follows reads the list again), the same
+     * activity listed twice shows once, and an app without a label shows its package name.
+     */
     private fun reload() {
         dirty = false
-        worker.execute {
-            val pm = packageManager
-            val found = pm.queryIntentActivities(
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-            val list = ArrayList<AppEntry>(found.size)
-            val iconMap = HashMap<String, Drawable>(found.size)
-            for (ri in found) {
-                val ai = ri.activityInfo
-                val stock = ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0
-                val e = AppEntry(ai.packageName, ai.name, ri.loadLabel(pm).toString(), stock)
-                list += e
-                iconMap[e.key] = ri.loadIcon(pm)
-            }
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-                all = list
-                icons = iconMap
-                refreshGrid()
-            }
+        if (worker.isShutdown) return
+        try { worker.execute { readApps() } } catch (_: RejectedExecutionException) {}
+    }
+
+    private fun readApps() {
+        val pm = packageManager
+        val found = try {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+        } catch (_: Exception) { runOnUiThread { dirty = true }; return }
+        val list = ArrayList<AppEntry>(found.size)
+        val iconMap = HashMap<String, Drawable>(found.size)
+        for (ri in found) try {
+            val ai = ri.activityInfo ?: continue
+            val stock = ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0
+            val label = ri.loadLabel(pm).toString().trim()
+                .ifEmpty { ai.applicationInfo.loadLabel(pm).toString().trim() }.ifEmpty { ai.packageName }
+            val e = AppEntry(ai.packageName, ai.name, label, stock)
+            if (e.key in iconMap) continue
+            iconMap[e.key] = ri.loadIcon(pm)
+            list += e
+        } catch (_: Exception) {}
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            all = list
+            icons = iconMap
+            refreshGrid()
         }
     }
 
@@ -393,13 +425,39 @@ class HomeActivity : Activity() {
         Toast.makeText(this, tr("Can't open that", "Açılamadı"), Toast.LENGTH_SHORT).show(); false
     }
 
+    /**
+     * The app's own shortcuts ("New message", "Navigate home"…), as other launchers show them on a held icon.
+     * Android hands them only to the default home app; none otherwise (or when they can't be read).
+     */
+    private fun shortcuts(e: AppEntry): List<ShortcutInfo> = try {
+        val la = getSystemService(LauncherApps::class.java)
+        if (la == null || !la.hasShortcutHostPermission()) emptyList()
+        else la.getShortcuts(LauncherApps.ShortcutQuery().setPackage(e.pkg).setActivity(ComponentName(e.pkg, e.cls))
+            .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC),
+            Process.myUserHandle()).orEmpty()
+            .filter { it.isEnabled && !it.shortLabel.isNullOrBlank() }
+            .sortedWith(compareBy<ShortcutInfo>({ if (it.isDeclaredInManifest) 0 else 1 }, { it.rank }))
+            .take(4)
+    } catch (_: Exception) { emptyList() }
+
+    private fun startShortcut(s: ShortcutInfo) {
+        try { getSystemService(LauncherApps::class.java)?.startShortcut(s, null, null) }
+        catch (_: Exception) { Toast.makeText(this, tr("Can't open that", "Açılamadı"), Toast.LENGTH_SHORT).show() }
+    }
+
     private fun appMenu(@Suppress("UNUSED_PARAMETER") anchor: View, e: AppEntry) {
         val current = Layout.sectionOf(e, overrides(), phoneDefaults)
         val sheet = Sheet(this).header(e.label, tr("In “${sectionName(current)}”", "“${sectionName(current)}” bölümünde")) { iv ->
             try { iv.setImageDrawable(packageManager.getActivityIcon(ComponentName(e.pkg, e.cls))) } catch (_: Exception) {}
             iv.setPadding(dp(6f), dp(6f), dp(6f), dp(6f))
         }
-            .item(Ic.INFO, tr("App info", "Uygulama bilgisi"), more = true) { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}"))) }
+        val cuts = shortcuts(e)
+        if (cuts.isNotEmpty()) {
+            sheet.section(tr("Shortcuts", "Kısayollar"))
+            cuts.forEach { s -> sheet.item(Ic.OPEN, s.shortLabel.toString()) { startShortcut(s) } }
+            sheet.section(null)
+        }
+        sheet.item(Ic.INFO, tr("App info", "Uygulama bilgisi"), more = true) { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}"))) }
             .item(Ic.EYE_OFF, tr("Hide", "Gizle"), sub = tr("Long-press the clock to bring it back", "Geri getirmek için saate uzun basın")) {
                 prefs.edit().putStringSet("hidden", hidden() + e.key).apply()
                 refreshGrid()
@@ -412,7 +470,7 @@ class HomeActivity : Activity() {
                 refreshGrid()
             }
         }
-        sheet.show()
+        openSheet = sheet.show()
     }
 
     /**
@@ -425,7 +483,7 @@ class HomeActivity : Activity() {
         val ov = overrides()
         val stockHidden = all.filter { it.pkg != packageName && Layout.isAutoHidden(it, ov, showStock(), phoneDefaults) }
         val names = (h.map { k -> all.firstOrNull { it.key == k }?.label ?: k.substringBefore('/') } +
-            stockHidden.map { it.label }).distinct().sorted()
+            stockHidden.map { it.label }).distinct().sortedWith(Collator.getInstance())
         val sheet = Sheet(this).header("Plain Home", when {
             names.isNotEmpty() -> tr("${names.size} hidden apps", "${names.size} gizli uygulama")
             else -> tr("Nothing is hidden. Long-press an app to move or hide it.", "Gizli uygulama yok. Taşımak ya da gizlemek için uygulamaya uzun basın.")
@@ -444,7 +502,7 @@ class HomeActivity : Activity() {
         sheet.section(tr("App", "Uygulama"))
             .item(Ic.LANGUAGE, tr("Language", "Dil"), value = Sheet.languageValue(), more = true, reset = Sheet.languageReset(this)) { Sheet.language(this) { recreate() } }
             .item(Ic.UPDATE, tr("Check for updates", "Güncellemeleri denetle"), value = Sheet.version(this)) { PlainUpdate.check(this) }
-            .show()
+        openSheet = sheet.show()
     }
 
 

@@ -311,6 +311,13 @@ object Geo {
     /** Phone roll from gravity (x right, y up, in m/s²): 0 upright, + when turned clockwise. */
     fun roll(gx: Float, gy: Float): Float = Math.toDegrees(kotlin.math.atan2(-gx.toDouble(), gy.toDouble())).toFloat()
 
+    /**
+     * A finger moved ([mx], [my] px) across the preview: −1 = a swipe to the left, 1 = to the right, 0 = no clear
+     * sideways swipe (shorter than [minPx], or more up / down than sideways).
+     */
+    fun sideSwipe(mx: Float, my: Float, minPx: Float): Int =
+        if (!(abs(mx) >= minPx && abs(mx) > abs(my) * 1.5f)) 0 else if (mx < 0) -1 else 1
+
     /** How far [roll] is from the nearest level position (upright, either landscape, upside down). */
     fun offLevel(roll: Float): Float {
         val r = roll - (roll / 90f).roundToInt() * 90f

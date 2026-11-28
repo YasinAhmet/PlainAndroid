@@ -15,12 +15,14 @@ import kotlin.math.min
 
 /**
  * One bitmap fitted to the screen; pinch / double-tap zoom (up to 8x), drag to pan while zoomed.
- * At normal size a sideways fling means next / previous and a tap toggles the bars.
+ * At normal size a sideways fling means next / previous, an up / down fling [onVertical], and a tap toggles the bars.
  */
 class ZoomImage(ctx: Context) : View(ctx) {
     var onTap: (() -> Unit)? = null
     var onSwipe: ((Int) -> Unit)? = null
     var onZoomed: ((Float) -> Unit)? = null
+    /** A vertical fling at normal size: +1 = down, −1 = up. */
+    var onVertical: ((Int) -> Unit)? = null
 
     private var bmp: Bitmap? = null
     private var zoom = 1f
@@ -101,7 +103,13 @@ class ZoomImage(ctx: Context) : View(ctx) {
             return true
         }
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-            if (scaled || zoom > 1.01f || abs(vx) < abs(vy) * 1.2f) return false
+            if (scaled || zoom > 1.01f) return false
+            if (abs(vy) > abs(vx) * 1.5f) {
+                val v = Fling.vertical(if (e1 != null) e2.y - e1.y else 0f, vx, vy, resources.displayMetrics.density)
+                if (v != 0) onVertical?.invoke(v)
+                return v != 0
+            }
+            if (abs(vx) < abs(vy) * 1.2f) return false
             onSwipe?.invoke(if (vx < 0) 1 else -1)
             return true
         }
@@ -113,5 +121,19 @@ class ZoomImage(ctx: Context) : View(ctx) {
         scaler.onTouchEvent(e)
         if (!scaler.isInProgress) gestures.onTouchEvent(e)
         return true
+    }
+}
+
+/** Pure gesture rules (unit-tested). */
+object Fling {
+    /**
+     * A fling at normal size: 1 = down, −1 = up, 0 = not a clear vertical fling. [dist] = px moved down (negative
+     * = up), [vx] / [vy] in px/s, [density] = px per dp. It must be mostly vertical, at least 96 dp long, at least
+     * 700 dp/s, and the speed must point the way the finger went (not a tap's wobble or a pan's end).
+     */
+    fun vertical(dist: Float, vx: Float, vy: Float, density: Float): Int {
+        if (abs(vy) <= abs(vx) * 1.5f) return 0
+        if (abs(dist) < 96 * density || abs(vy) < 700 * density || (dist > 0) != (vy > 0)) return 0
+        return if (vy > 0) 1 else -1
     }
 }

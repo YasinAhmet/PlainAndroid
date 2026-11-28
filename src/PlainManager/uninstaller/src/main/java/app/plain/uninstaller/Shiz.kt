@@ -58,6 +58,9 @@ object Shiz {
         } catch (_: Throwable) { null }
     }
 
+    /** A `pm` command takes a second or two; one that hangs (Shizuku stopped half-way) must not hold the batch forever. */
+    private const val TIMEOUT_MS = 90_000L
+
     /** Runs `sh -c [cmd]` as the shell user. Blocking: call from a background thread. Never throws. */
     fun run(cmd: String): ShellResult {
         val m = newProcess ?: return ShellResult(-1, "", tr("Shizuku API not available", "Shizuku API'si kullanılamıyor"))
@@ -66,8 +69,14 @@ object Shiz {
             try {
                 p.outputStream.close()
                 var err = ""
+                var out = "" // read after join(), which makes the reader thread's write visible
                 val errThread = thread(name = "shizuku-stderr") { err = readAll(p.errorStream) }
-                val out = readAll(p.inputStream)
+                val outThread = thread(name = "shizuku-stdout") { out = readAll(p.inputStream) }
+                outThread.join(TIMEOUT_MS)
+                if (outThread.isAlive) {
+                    try { p.destroy() } catch (_: Throwable) {}
+                    return ShellResult(-1, "", tr("No answer from Shizuku (timed out)", "Shizuku yanıt vermedi (zaman aşımı)"))
+                }
                 val exit = p.waitFor()
                 errThread.join(5000)
                 ShellResult(exit, out, err)

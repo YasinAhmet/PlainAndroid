@@ -82,6 +82,22 @@ class Network(
  * within [Network.TRANSFER] metres of each other.
  */
 object Router {
+    /** Start and destination closer than this are the same place: walk (the finder would offer a one-stop ride). */
+    const val SAME_PLACE_M = 250.0
+
+    fun samePlace(aLat: Double, aLon: Double, bLat: Double, bLon: Double) = Geo.dist(aLat, aLon, bLat, bLon) < SAME_PLACE_M
+
+    /**
+     * The options to show: the first [k] of [sorted], plus the one whose key is [prefer] (a saved route opened again)
+     * when it is a candidate but ranked lower (a night line by day, say). [key] gives an option's line sequence.
+     */
+    fun <T> withPreferred(sorted: List<T>, k: Int, prefer: String?, key: (T) -> String): List<T> {
+        val top = sorted.take(k)
+        if (prefer == null || top.any { key(it) == prefer }) return top
+        val p = sorted.firstOrNull { key(it) == prefer } ?: return top
+        return top + p
+    }
+
     class Leg(val v: Int, val from: Int, val to: Int)
 
     class Journey(val legs: List<Leg>, val startDist: Int, val endDist: Int, val rideMeters: Int, val walkMeters: Int) {

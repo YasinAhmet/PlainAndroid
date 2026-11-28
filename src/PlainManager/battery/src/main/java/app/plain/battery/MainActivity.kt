@@ -2,14 +2,17 @@ package app.plain.battery
 
 import android.app.Activity
 import android.app.AppOpsManager
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Process
+import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -213,7 +216,7 @@ class MainActivity : Activity() {
         }
         val cap = Usage.capacity(latest.capacityMah, samples.lastOrNull())
 
-        val recent = Rates.recent(tracker.history(), latest)
+        val recent = Rates.recent(historyFor(latest), latest)
         val charging = samples.lastOrNull()?.charging == true
         val baseline = tracker.baseline()
         val prev = tracker.previousBaseline()
@@ -269,12 +272,12 @@ class MainActivity : Activity() {
                     for (k in pkgs.take(6)) append("\n").append(k)
                     if (pkgs.size > 6) append(tr("\n+${pkgs.size - 6} more", "\n+${pkgs.size - 6} daha"))
                 }
-                appRow(c, icon(pkgs.firstOrNull { tracker.appLabel(it) != null }), tracker.label(p.uid, latest),
+                val app = pkgs.firstOrNull { tracker.appLabel(it) != null }
+                val name = tracker.label(p.uid, latest)
+                val flip = { if (!expanded.remove(p.uid)) expanded += p.uid; render() }
+                appRow(c, icon(app), name,
                     Usage.format(p.mah, cap), if (cap != null) Usage.formatMah(p.mah) else null,
-                    p.mah / top, p.uid == me, details) {
-                    if (!expanded.remove(p.uid)) expanded += p.uid
-                    render()
-                }
+                    p.mah / top, p.uid == me, details, onLong = { appMenu(name, app, p.uid in expanded, flip) }) { flip() }
             }
             if (list.size > 15) {
                 body.addView(button(if (showAllApps) tr("Show top 15", "İlk 15'i göster") else tr("Show all ${list.size}", "Tümünü göster (${list.size})")) { showAllApps = !showAllApps; render() })
@@ -313,9 +316,33 @@ class MainActivity : Activity() {
         val c = card()
         val top = fg.first().second
         for ((pkg, min) in fg.take(20)) {
-            appRow(c, icon(pkg), tracker.appLabel(pkg) ?: pkg, tr("%.0f min", "%.0f dk").format(Locale.US, min), null,
-                min / top, false, null) {}
+            val name = tracker.appLabel(pkg) ?: pkg
+            appRow(c, icon(pkg), name, tr("%.0f min", "%.0f dk").format(Locale.US, min), null,
+                min / top, false, null, onLong = { appMenu(name, pkg, false, null) }) {}
         }
+    }
+
+    /** History snapshots for the Apps tab, read again only when a new snapshot was taken (not on every row tap). */
+    private var historyCache: Pair<Long, List<Snapshot>>? = null
+
+    private fun historyFor(latest: Snapshot): List<Snapshot> {
+        historyCache?.let { if (it.first == latest.takenAt) return it.second }
+        return tracker.history().also { historyCache = latest.takenAt to it }
+    }
+
+    /**
+     * Hold on an app row: its details (same as a tap) and Android's App info page, where a draining app can be
+     * stopped or its background battery use restricted.
+     */
+    private fun appMenu(name: String, pkg: String?, open: Boolean, flip: (() -> Unit)?) {
+        if (isFinishing || isDestroyed) return
+        val s = Sheet(this, ACCENT).header(name, pkg)
+        if (flip != null) s.item(Ic.INFO, if (open) tr("Hide details", "Ayrıntıları gizle") else tr("Details", "Ayrıntılar")) { flip() }
+        if (pkg != null) s.item(Ic.BATTERY, tr("App info", "Uygulama bilgisi"),
+            sub = tr("Stop it or limit its background battery use", "Durdurun ya da arka planda pil kullanımını kısıtlayın"), more = true) {
+            try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))) } catch (_: Exception) {}
+        }
+        s.show()
     }
 
     // ---- History: one card per day ----
@@ -535,13 +562,14 @@ class MainActivity : Activity() {
     /** One app: icon, name, value; a bar under the name (relative to the biggest row) and a small secondary value. */
     private fun appRow(
         parent: LinearLayout, icon: Drawable?, name: String, value: String, secondary: String?,
-        fraction: Double, mine: Boolean, details: String?, onClick: () -> Unit,
+        fraction: Double, mine: Boolean, details: String?, onLong: (() -> Unit)? = null, onClick: () -> Unit,
     ) {
         val color = if (mine) GREEN else ACCENT
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(0, px(7), 0, px(7))
             setOnClickListener { onClick() }
+            if (onLong != null) setOnLongClickListener { onLong(); true }
         }
         row.addView(iconView(icon, name), LinearLayout.LayoutParams(px(32), px(32)))
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, 0, 0) }

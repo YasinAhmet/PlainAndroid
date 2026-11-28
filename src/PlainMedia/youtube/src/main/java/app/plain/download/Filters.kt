@@ -117,7 +117,7 @@ object AgoParse {
     private val RX = Regex("(\\d+)\\s+(second|minute|min|hour|day|week|month|year)s?\\s+ago", RegexOption.IGNORE_CASE)
     fun seconds(s: String): Long? {
         val m = RX.find(s) ?: return if (s.contains("just now", true)) 0L else null
-        val n = m.groupValues[1].toLong()
+        val n = m.groupValues[1].toLongOrNull()?.coerceAtMost(1_000_000L) ?: return null // "99999999999999999999 days" would throw
         return n * when (m.groupValues[2].lowercase()) {
             "second" -> 1L; "minute", "min" -> 60L; "hour" -> 3600L; "day" -> 86400L; "week" -> 7 * 86400L
             "month" -> 30 * 86400L; else -> 365 * 86400L

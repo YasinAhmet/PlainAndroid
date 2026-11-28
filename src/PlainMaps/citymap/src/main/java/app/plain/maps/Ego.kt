@@ -26,8 +26,8 @@ object Ego {
     /** HTML text: tags removed, entities decoded, spaces collapsed. */
     fun text(html: String): String {
         val t = html.replace(Regex("<[^>]+>"), " ")
-            .replace(Regex("&#x([0-9a-fA-F]+);")) { it.groupValues[1].toInt(16).toChar().toString() }
-            .replace(Regex("&#(\\d+);")) { it.groupValues[1].toInt().toChar().toString() }
+            .replace(Regex("&#x([0-9a-fA-F]+);")) { Text.entity(it.groupValues[1], 16) ?: it.value }
+            .replace(Regex("&#(\\d+);")) { Text.entity(it.groupValues[1], 10) ?: it.value }
             .replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
         return t.replace(Regex("\\s+"), " ").trim()
     }
@@ -48,6 +48,22 @@ object Ego {
         return m.groupValues[1].toInt() * 3600 + m.groupValues[2].toInt() * 60
     }
 
+    /**
+     * A day's column that runs past midnight ("… 23:30, 23:45, 00:15") lists the late trips last: those count from the
+     * same service day (24:15), as GTFS writes them, so Friday night's 00:15 is still shown on Saturday at 00:10.
+     * Only a drop of more than 12 hours counts, so a slightly unsorted column is left as it is.
+     */
+    fun afterMidnight(t: List<Int>): IntArray {
+        var off = 0
+        var prev = Int.MIN_VALUE
+        return IntArray(t.size) { i ->
+            var v = t[i] + off
+            if (prev != Int.MIN_VALUE && v < prev - 43_200) { off += 86_400; v += 86_400 }
+            prev = v
+            v
+        }
+    }
+
     /** One line's page, or null if it has no stops. */
     fun parseLine(code: String, html: String): Line? {
         fun kv(key: String): String? {
@@ -62,7 +78,7 @@ object Ego {
         if (ta >= 0) {
             val tb = html.indexOf("</table>", ta)
             for (m in Regex("<td class=\"hs-times\">(.*?)</td>", RegexOption.DOT_MATCHES_ALL).findAll(html.substring(ta, if (tb < 0) html.length else tb))) {
-                cols.add(m.groupValues[1].split("<br").mapNotNull { clock(it) }.toIntArray())
+                cols.add(afterMidnight(m.groupValues[1].split("<br").mapNotNull { clock(it) }))
             }
         }
         // stops
@@ -116,6 +132,7 @@ object Ego {
                 var seg: DoubleArray? = null
                 // the line's own OSM shape, if both stops lie near it in riding order
                 if (own != null) for (part in own) {
+                    if (part.size < 4) continue // (an empty part would index point 0)
                     val ia = Poly.nearestVertex(part, a[0], a[1]); val ib = Poly.nearestVertex(part, b[0], b[1])
                     if (Geo.dist(a[0], a[1], part[2 * ia + 1], part[2 * ia]) > 150 || Geo.dist(b[0], b[1], part[2 * ib + 1], part[2 * ib]) > 150) continue
                     if (ia < ib) { seg = part.copyOfRange(2 * ia, 2 * ib + 2); break }
@@ -155,7 +172,33 @@ object Ego {
     /** [interpolate] = false leaves stops between known ones to [route]. */
     fun place(lines: List<Line>, osm: List<OsmStop>, interpolate: Boolean = true): Placed {
         val pos = HashMap<String, DoubleArray>()
-        for (s in osm) s.ref?.split(';')?.forEach { r -> val k = r.trim(); if (k.isNotEmpty() && k !in pos) pos[k] = doubleArrayOf(s.lat, s.lon) }
+        // OSM stops by EGO number. A number can also exist in another town of the province (its own stop numbers):
+        // then the copy nearest to the stop's placed neighbours on its lines wins, not whichever the extract had first.
+        val cands = LinkedHashMap<String, MutableList<DoubleArray>>()
+        for (s in osm) s.ref?.split(';')?.forEach { r -> val k = r.trim(); if (k.isNotEmpty()) cands.getOrPut(k) { ArrayList(1) }.add(doubleArrayOf(s.lat, s.lon)) }
+        val ambiguous = HashMap<String, List<DoubleArray>>()
+        for ((k, l) in cands) {
+            if (l.size == 1 || l.all { Geo.dist(it[0], it[1], l[0][0], l[0][1]) < 2000 }) pos[k] = l[0] else ambiguous[k] = l
+        }
+        if (ambiguous.isNotEmpty()) {
+            repeat(2) {
+                for (l in lines) {
+                    val st = l.stops
+                    for (k in st.indices) {
+                        val no = st[k].first
+                        if (no in pos) continue
+                        val cs = ambiguous[no] ?: continue
+                        var p = k - 1; while (p >= 0 && st[p].first !in pos) p--
+                        var n = k + 1; while (n < st.size && st[n].first !in pos) n++
+                        val near = listOfNotNull(st.getOrNull(p)?.let { pos[it.first] }, st.getOrNull(n)?.let { pos[it.first] })
+                        if (near.isEmpty()) continue
+                        pos[no] = cs.minBy { c -> near.minOf { Geo.dist(c[0], c[1], it[0], it[1]) } }
+                    }
+                }
+            }
+            // never next to a placed stop: the first copy, as before
+            for ((k, cs) in ambiguous) pos.putIfAbsent(k, cs[0])
+        }
         val byRef = pos.size
         val byName = HashMap<String, MutableList<OsmStop>>()
         for (s in osm) if (s.name.isNotEmpty()) byName.getOrPut(Text.norm(s.name)) { ArrayList() }.add(s)

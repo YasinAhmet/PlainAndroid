@@ -21,8 +21,16 @@ class ForwardActivity : Activity() {
         } catch (_: Exception) { null }
         val fwd = Intent(intent).setComponent(null)
         fwd.flags = intent.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        Hub.open(this, (Hub.tab(tab) ?: Hub.lastTab(this)).key, fwd)
-        finish()
+        // (a tab this phone can't run, or an alias naming no tab, goes to the last used tab instead)
+        val key = (Hub.tab(tab)?.takeIf { it in Hub.visibleTabs } ?: Hub.lastTab(this)).key
+        try {
+            Hub.open(this, key, fwd)
+        } catch (_: SecurityException) {
+            // the sender set a read/write grant on a link it can't give: hand the rest on without the grant
+            fwd.flags = 0
+            try { Hub.open(this, key, fwd) } catch (_: Exception) {}
+        } catch (_: Exception) {}
+        finish()   // (always: a NoDisplay screen that doesn't finish is a crash)
     }
 
     companion object {

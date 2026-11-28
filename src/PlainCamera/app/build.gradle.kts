@@ -15,8 +15,8 @@ android {
         applicationId = "app.plain.camera"
         minSdk = 29
         targetSdk = 35
-        versionCode = 13
-        versionName = "2.7"
+        versionCode = 14
+        versionName = "2.8"
     }
 
     // Release key shared by all Plain apps: A:/Projects/PlainSigning (keep a backup of that folder).

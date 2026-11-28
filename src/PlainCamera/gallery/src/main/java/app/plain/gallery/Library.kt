@@ -48,6 +48,14 @@ object Paging {
     }
 
     fun count(n: Int): String = String.format(Locale.US, "%,d", n)
+
+    /** [w] × [h] scaled down (never up) so the long side is at most [maxLong]; each side at least 1 px. */
+    fun fitSize(w: Int, h: Int, maxLong: Int): Pair<Int, Int> {
+        val long = maxOf(w, h)
+        if (long <= maxLong || long <= 0 || maxLong <= 0) return w to h
+        val k = maxLong.toDouble() / long
+        return Math.round(w * k).toInt().coerceIn(1, maxLong) to Math.round(h * k).toInt().coerceIn(1, maxLong)
+    }
 }
 
 /** Every image and video the media store knows, newest first. Shared by the grid and the viewer. */

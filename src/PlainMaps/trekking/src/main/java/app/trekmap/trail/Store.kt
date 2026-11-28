@@ -28,15 +28,42 @@ object Store {
 
     fun init(ctx: Context) { root = ctx.filesDir }
 
+    /** For unit tests: keep the files under [dir]. */
+    internal fun initDir(dir: File) { root = dir }
+
     fun dir(k: Kind) = File(root, k.dir).also { it.mkdirs() }
     fun gpx(k: Kind, id: String) = File(dir(k), "$id.gpx")
     private fun meta(k: Kind, id: String) = File(dir(k), "$id.json")
 
-    fun list(k: Kind): List<Entry> =
-        (dir(k).listFiles() ?: emptyArray())
-            .filter { it.name.endsWith(".json") }
-            .mapNotNull { read(k, it) }
-            .sortedByDescending { it.time }
+    fun list(k: Kind): List<Entry> {
+        val files = dir(k).listFiles() ?: emptyArray()
+        val out = files.filter { it.name.endsWith(".json") }.mapNotNull { read(k, it) }.toMutableList()
+        // a GPX whose index file is missing or damaged (the app died between the two writes, power loss…) is
+        // still the user's trail: rebuild its index from the GPX instead of hiding it
+        val known = out.mapTo(HashSet()) { it.id }
+        for (g in files) {
+            if (!g.name.endsWith(".gpx")) continue
+            val id = g.name.removeSuffix(".gpx")
+            if (id !in known && validId(id)) recover(k, id, g)?.let { out += it }
+        }
+        return out.sortedByDescending { it.time }
+    }
+
+    /** Index entry rebuilt from a GPX alone (and saved, so this happens once). */
+    private fun recover(k: Kind, id: String, g: File): Entry? = try {
+        val r = g.inputStream().use { GpxIo.parse(it) }
+        val t0 = r.firstTime()
+        var t1 = 0L
+        for (s in r.segs) { val t = s.time ?: continue; for (v in t) if (v > t1) t1 = v }
+        val e = Entry(
+            k, id, r.name?.takeIf { it.isNotBlank() } ?: id, if (t0 > 0) t0 else g.lastModified(), r.lengthM(),
+            if (k == Kind.TRACK && t0 > 0 && t1 > t0) (t1 - t0) / 1000 else 0L, r.ascentM(), r.bbox(),
+        )
+        try { writeMeta(e) } catch (_: Exception) {}
+        e
+    } catch (ex: Exception) {
+        null
+    }
 
     fun get(k: Kind, id: String?): Entry? {
         if (id.isNullOrEmpty() || !validId(id)) return null
@@ -72,8 +99,15 @@ object Store {
         id: String = newId(),
     ): Entry {
         val e = Entry(k, id, name, time, route.lengthM(), durS, ascM, route.bbox())
-        writeGpx(e, route)
-        writeMeta(e)
+        try {
+            writeGpx(e, route)
+            writeMeta(e)
+        } catch (ex: Exception) {
+            // half a save (storage full…) must not leave a GPX behind that shows up as a trail later
+            gpx(k, id).delete(); File(gpx(k, id).path + ".tmp").delete()
+            meta(k, id).delete(); File(meta(k, id).path + ".tmp").delete()
+            throw ex
+        }
         return e
     }
 
@@ -107,21 +141,25 @@ object Store {
         tmp.outputStream().use { GpxIo.write(it, route, e.name, desc(e), wpts) }
         if (!tmp.renameTo(f)) {
             f.delete()
-            tmp.renameTo(f)
+            if (!tmp.renameTo(f)) throw java.io.IOException("could not write ${f.name}")
         }
     }
 
+    // JSON can't hold NaN / Infinity (put() throws): one bad value must not make a trail unsavable
+    private fun fin(v: Double) = if (v.isFinite()) v else 0.0
+
     private fun writeMeta(e: Entry) {
-        meta(e.kind, e.id).writeText(
+        Rec.atomicWrite(
+            meta(e.kind, e.id),
             JSONObject()
-                .put("name", e.name).put("time", e.time).put("dist", e.distM)
-                .put("dur", e.durS).put("asc", e.ascM).put("bbox", e.bbox?.encode() ?: "")
-                .toString()
+                .put("name", e.name).put("time", e.time).put("dist", fin(e.distM))
+                .put("dur", e.durS).put("asc", fin(e.ascM)).put("bbox", e.bbox?.encode() ?: "")
+                .toString(),
         )
     }
 
     private fun desc(e: Entry): String? =
-        if (e.kind == Kind.TRACK) "${Fmt.dist(e.distM)} · ${Fmt.dur(e.durS)} · ascent ${e.ascM.roundToInt()} m" else null
+        if (e.kind == Kind.TRACK) "${Fmt.dist(e.distM)} · ${Fmt.dur(e.durS)} · ascent ${fin(e.ascM).roundToInt()} m" else null
 
     fun newId() =
         SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + "_" + Integer.toHexString(Random().nextInt(0xF000) + 0x1000)

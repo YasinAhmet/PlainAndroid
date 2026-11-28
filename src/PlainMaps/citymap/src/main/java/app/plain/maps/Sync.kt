@@ -186,11 +186,16 @@ class Sync(
         }
         if (!resume) {
             newF.delete(); workF.delete()
-            File(newF.path + "-journal").delete(); File(workF.path + "-journal").delete()
+            // the journals too (a stale -wal next to a new file would be replayed into it), and the old sync's downloads
+            for (f in listOf(newF, workF)) for (s in listOf("-journal", "-wal", "-shm")) File(f.path + s).delete()
+            dl.listFiles()?.forEach { it.delete() }
         }
         out = SQLiteDatabase.openOrCreateDatabase(newF, null)
         work = SQLiteDatabase.openOrCreateDatabase(workF, null)
         for (d in listOf(out, work)) {
+            // Note (2026-11-28): rawQuery is lazy, so this PRAGMA is only prepared, never run, and SQLite's default
+            // journal stays on. Keep it that way: a step stopped mid-transaction (Stop, an Overpass error inside a
+            // square's transaction) needs a working ROLLBACK, which journal_mode=OFF doesn't have.
             d.rawQuery("PRAGMA journal_mode=OFF", null).close()
             d.execSQL("PRAGMA synchronous=OFF")
         }
@@ -344,11 +349,12 @@ class Sync(
             val att = try {
                 val arr = org.json.JSONObject(txt).getJSONArray("attachments")
                 (0 until arr.length()).map { arr.getJSONObject(it) }
-                    .map { Triple(it.optString("fileName").lowercase(), it.optString("id"), it.optString("uploadedAt")) }
+                    .map { Triple(it.optString("fileName").substringAfterLast('/').trim().lowercase(), it.optString("id"), it.optString("uploadedAt")) }
             } catch (e: org.json.JSONException) { throw IOException(tr("$op catalogue unreadable", "$op kataloğu okunamadı")) }
             val base = url.substringBefore("/OpenDataPublic/") + "/OpenDataPublic/attachments/"
             val want = need + "shapes" + "stop_times"
-            val list = want.mapNotNull { n -> att.firstOrNull { it.first == "$n.txt" }?.let { n to it } }
+            // a re-upload can leave the old file listed next to the new one: the newest copy of each file
+            val list = want.mapNotNull { n -> att.filter { it.first == "$n.txt" && it.second.isNotEmpty() }.maxByOrNull { it.third }?.let { n to it } }
             if (list.none { it.first == "stop_times" }) throw IOException(tr("$op feed has no stop_times", "$op verisinde stop_times yok"))
             list.forEachIndexed { i, (n, a) ->
                 val out = File(dl, "$n.txt")
@@ -379,7 +385,7 @@ class Sync(
         files["shapes"]?.let { f ->
             say(0.15f, tr("$op: reading route shapes", "$op: güzergâh çizimleri okunuyor"))
             val wanted = t.patterns.map { it.shapeId() }.filter { it.isNotEmpty() }.toHashSet()
-            f.inputStream().buffered(1 shl 16).use { Transit.readGtfsShapes(it, wanted, 1.2e-5, t.shapes) { cancel.get() } }
+            f.inputStream().buffered(1 shl 16).use { Transit.readGtfsShapes(it, wanted, 1.2e-5, t.shapes, { cancel.get() }, City.searchArea) }
         }
         say(0.17f, tr("$op: saving ${t.patterns.size} routes", "$op: ${t.patterns.size} güzergâh kaydediliyor"))
         writeBus(t)
@@ -429,7 +435,7 @@ class Sync(
                 sStop.executeInsert()
             }
             // one line per public line number; its name is the one of its busiest variant
-            val byRef = t.patterns.groupBy { t.routes[it.route].short.ifEmpty { "?" } }
+            val byRef = t.patterns.groupBy { t.routes[it.route].ref }
             val lineId = HashMap<String, Int>()
             val sLine = out.compileStatement("INSERT INTO line VALUES(?,?,?,?,0,?)")
             var li = 0
@@ -456,7 +462,7 @@ class Sync(
                     id
                 } else 0
                 val stopIds = IntArray(p.stops.size) { p.stops[it] + 1 }
-                sVar.bindLong(1, vid); sVar.bindLong(2, lineId[r.short.ifEmpty { "?" }]!!.toLong()); sVar.bindLong(3, p.dir.toLong())
+                sVar.bindLong(1, vid); sVar.bindLong(2, lineId[r.ref]!!.toLong()); sVar.bindLong(3, p.dir.toLong())
                 sVar.bindString(4, p.headsign()); sVar.bindString(5, r.code); sVar.bindLong(6, sid.toLong())
                 sVar.bindBlob(7, Codec.ints(stopIds)); sVar.bindBlob(8, Codec.ints(p.dists)); sVar.bindLong(9, p.trips.size.toLong())
                 sVar.executeInsert()
@@ -613,11 +619,28 @@ class Sync(
     private fun core() {
         if (done("core")) return
         val f = File(dl, "core.osm.pbf")
-        retry(tr("Map download", "Harita indirmesi")) {
+        // a sync stopped while reading the extract continues with the finished download (Net.download only renames a
+        // complete file into place; a fresh sync clears the folder first, see openDbs) instead of fetching 50–170 MB again
+        if (f.isFile && f.length() > 0) say(0.27f, tr("Map: using the download of the stopped sync", "Harita: durdurulan eşitlemenin indirmesi kullanılıyor"))
+        else retry(tr("Map download", "Harita indirmesi")) {
             Net.download(net, City.mapUrl, f, { d, t ->
                 say(0.2f + 0.07f * (if (t > 0) d.toFloat() / t else 0f), tr("Map: downloading the city (${d / 1048576} MB)", "Harita: şehir indiriliyor (${d / 1048576} MB)"))
             }, { cancel.get() })
         }
+        try {
+            coreRead(f)
+        } catch (e: InterruptedException) {
+            throw e
+        } catch (e: Throwable) {
+            // an unreadable extract (cut short, damaged; out of memory too) is fetched again next time rather than
+            // failing every resume the same way
+            f.delete()
+            throw e
+        }
+        f.delete()
+    }
+
+    private fun coreRead(f: File) {
         say(0.27f, tr("Map: reading the city", "Harita: şehir okunuyor"))
         val ex = PbfExtract(f)
         // EGO needs OSM's bus stops (their "ref" is the EGO stop number) and bus routes; OSM-only cities take their bus lines from the routes
@@ -707,7 +730,6 @@ class Sync(
                 mark("core")
             }
         }
-        f.delete()
     }
 
     // ------------------------------------------------------------------ bus lines from OSM routes (no timetables)

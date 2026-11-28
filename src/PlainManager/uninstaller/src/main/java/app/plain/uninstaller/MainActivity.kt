@@ -20,6 +20,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.LruCache
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -77,7 +78,8 @@ class MainActivity : Activity() {
     private var query = ""
     private val selected = LinkedHashSet<String>()
     private var loading = true
-    private val icons = HashMap<String, Drawable>()
+    // Bounded: scrolling through a few hundred system apps must not keep every icon (and its bitmaps) alive.
+    private val icons = LruCache<String, Drawable>(160)
     private val iconPending = HashSet<String>()
 
     // Restore tab state
@@ -324,6 +326,8 @@ class MainActivity : Activity() {
 
         val listBox = FrameLayout(this)
         appList = listView(appAdapter) { pos -> visible.getOrNull(pos)?.let { toggle(it.pkg) } }
+        // Hold a row: open it, its App info page (to disable it instead), copy the package name.
+        appList.setOnItemLongClickListener { _, _, pos, _ -> visible.getOrNull(pos)?.let { appMenu(it) }; true }
         appsEmpty = text(tr("Loading apps…", "Uygulamalar yükleniyor…"), 14f, C.LABEL, lines = 0).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) }
         listBox.addView(appList, FrameLayout.LayoutParams(MATCH, MATCH))
         listBox.addView(appsEmpty, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
@@ -486,8 +490,7 @@ class MainActivity : Activity() {
 
     private fun refilter() {
         chips.forEach { (f, v) -> v.setChip(f == filter) }
-        val q = query.lowercase()
-        visible = apps.filter { matchesFilter(it) && (q.isEmpty() || q in it.label.lowercase() || q in it.pkg.lowercase()) }
+        visible = apps.filter { matchesFilter(it) && Search.matches(query, it.label, it.pkg) }
         appsEmpty.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         if (!loading && visible.isEmpty()) {
             appsEmpty.text = if (query.isNotEmpty()) tr("No apps match \"$query\".", "\"$query\" ile eşleşen uygulama yok.") else when (filter) {
@@ -505,8 +508,33 @@ class MainActivity : Activity() {
     }
 
     private fun selectAllVisible() {
-        visible.forEach { selected.add(it.pkg) }
+        val pick = Plan.bulkPick(visible)
+        selected.addAll(pick)
+        val left = visible.size - pick.size
+        if (left > 0) toast(tr("Risky apps not selected ($left): tick them one by one", "Riskli uygulamalar seçilmedi ($left): onları tek tek işaretleyin"))
         updateSelection()
+    }
+
+    /** The hold menu of an app row. */
+    private fun appMenu(a: AppItem) {
+        if (isFinishing || isDestroyed) return
+        val s = Sheet(this, C.ACCENT).header(a.label, a.pkg)
+        s.item(Ic.SELECT, if (a.pkg in selected) tr("Unselect", "Seçimi kaldır") else tr("Select", "Seç")) { toggle(a.pkg) }
+        val launch = try { packageManager.getLaunchIntentForPackage(a.pkg) } catch (_: Exception) { null }
+        if (launch != null) s.item(Ic.OPEN, tr("Open", "Aç")) {
+            try { startActivity(launch) } catch (_: Exception) { toast(tr("Couldn't open it", "Açılamadı")) }
+        }
+        s.item(Ic.INFO, tr("App info", "Uygulama bilgisi"), sub = tr("Force stop, or disable instead of removing",
+            "Durmaya zorlayın ya da kaldırmak yerine devre dışı bırakın"), more = true) {
+            try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${a.pkg}"))) }
+            catch (_: Exception) { toast(tr("Couldn't open App info", "Uygulama bilgisi açılamadı")) }
+        }
+        s.item(Ic.COPY, tr("Copy package name", "Paket adını kopyala")) {
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("package", a.pkg))
+            toast(tr("Copied", "Kopyalandı"))
+        }
+        if (a.level == Level.RISKY) Safety.riskReason(a.pkg, defaults, a.system)?.let { s.note(tr("Risky: ", "Riskli: ") + it) }
+        s.show()
     }
 
     private fun updateSelection() {
@@ -524,7 +552,7 @@ class MainActivity : Activity() {
 
     private fun iconFor(pkg: String, into: ImageView) {
         into.tag = pkg
-        val cached = icons[pkg]
+        val cached = icons.get(pkg)
         if (cached != null) { into.setImageDrawable(cached); return }
         into.setImageDrawable(null)
         if (!iconPending.add(pkg)) return
@@ -533,7 +561,7 @@ class MainActivity : Activity() {
             main.post {
                 if (destroyed) return@post
                 iconPending.remove(pkg)
-                icons[pkg] = d
+                icons.put(pkg, d)
                 if (tab == Tab.APPS) appAdapter.notifyDataSetChanged()
                 if (tab == Tab.RESTORE) restoreAdapter.notifyDataSetChanged()
             }
@@ -631,7 +659,7 @@ class MainActivity : Activity() {
     private fun confirmRisky(targets: List<Target>, viaShizuku: Boolean) {
         val risky = Plan.risky(targets)
         if (risky.isEmpty()) { run(targets, viaShizuku); return }
-        val msg = risky.joinToString("\n\n") { t -> "• ${t.label}\n   ${Safety.riskReason(t.pkg, defaults) ?: t.pkg}" } +
+        val msg = risky.joinToString("\n\n") { t -> "• ${t.label}\n   ${Safety.riskReason(t.pkg, defaults, t.system) ?: t.pkg}" } +
             tr("\n\nOnly continue if you know you don't need these.",
                 "\n\nYalnızca bunlara ihtiyacınız olmadığından eminseniz devam edin.")
         longMessage(tr("Remove ${risky.size} risky apps?", "${risky.size} riskli uygulama kaldırılsın mı?"), msg)
@@ -653,11 +681,11 @@ class MainActivity : Activity() {
         val (dialog, status, bar) = progressDialog(tr("Uninstalling", "Kaldırılıyor"), targets.size)
         worker.execute {
             val results = ArrayList<Pair<Target, String?>>()
-            for ((i, pair) in Plan.shizukuCommands(targets).withIndex()) {
+            for ((i, t) in targets.withIndex()) {
                 if (destroyed) break
-                val (t, cmd) = pair
                 main.post { if (!destroyed) { status.text = tr("${i + 1} of ${targets.size}: ${t.label}", "${i + 1}/${targets.size}: ${t.label}"); bar.progress = i } }
-                val r = Shiz.run(cmd)
+                // One odd package name must not end the whole batch (and leave the progress dialog up for good).
+                val r = try { Shiz.run(Commands.uninstall(t.pkg, t.system)) } catch (e: Exception) { ShellResult(-1, "", e.message ?: "") }
                 val ok = Commands.uninstallOk(r)
                 if (ok && t.system) Apps.appendLog(this, LogEntry(System.currentTimeMillis(), LogEntry.REMOVED, t.pkg, t.label))
                 results.add(t to if (ok) null else r.message())
@@ -765,6 +793,8 @@ class MainActivity : Activity() {
                 restoreFromShizuku = fromShizuku
                 restoreSelected.retainAll(items.mapTo(HashSet()) { it.pkg })
                 updateRestoreSelection()
+                // Shizuku became ready while this (Android-only) list was loading: list again through Shizuku.
+                if (!ready && shizuku == Shiz.State.READY && tab == Tab.RESTORE) loadRestore()
             }
         }
     }
@@ -823,7 +853,7 @@ class MainActivity : Activity() {
             for ((i, r) in chosen.withIndex()) {
                 if (destroyed) break
                 main.post { if (!destroyed) { status.text = tr("${i + 1} of ${chosen.size}: ${r.label}", "${i + 1}/${chosen.size}: ${r.label}"); bar.progress = i } }
-                val res = Shiz.run(Commands.restore(r.pkg))
+                val res = try { Shiz.run(Commands.restore(r.pkg)) } catch (e: Exception) { ShellResult(-1, "", e.message ?: "") }
                 val ok = Commands.restoreOk(res)
                 if (ok) Apps.appendLog(this, LogEntry(System.currentTimeMillis(), LogEntry.RESTORED, r.pkg, r.label))
                 results.add(Target(r.pkg, r.label, true, false) to if (ok) null else res.message())

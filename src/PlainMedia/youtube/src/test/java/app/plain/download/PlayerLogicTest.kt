@@ -202,7 +202,8 @@ class PlayerLogicTest {
     @Test fun httpParsing() {
         assertArrayEquals(longArrayOf(100, 199), Http.range("bytes=100-199"))
         assertArrayEquals(longArrayOf(5, -1), Http.range("bytes=5-"))
-        assertNull(Http.range(null)); assertNull(Http.range("bytes=-500"))
+        assertNull(Http.range(null))
+        assertArrayEquals(longArrayOf(-1, 500), Http.range("bytes=-500")) // the last 500 bytes (EdgeCaseTest: span)
         val head = Http.readHead(ByteArrayInputStream("GET /v/3 HTTP/1.1\r\nRange: bytes=0-\r\nHost: x\r\n\r\nBODY".toByteArray()))
         assertEquals(listOf("GET /v/3 HTTP/1.1", "Range: bytes=0-", "Host: x"), head)
         val out = java.io.ByteArrayOutputStream()

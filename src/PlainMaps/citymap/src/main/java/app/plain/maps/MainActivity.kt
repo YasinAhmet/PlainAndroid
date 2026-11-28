@@ -128,13 +128,16 @@ open class MainActivity : Activity() {
         buildUi()
         val prefs = City.prefs(this)
         map.cx = Geo.mx(City.centerLon); map.cy = Geo.my(City.centerLat)
-        prefs.getString("view", null)?.split(',')?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 3 }?.let {
-            map.cx = it[0]; map.cy = it[1]; map.zoom = it[2]
-        }
+        // a NaN or out-of-range value (a bad write) would leave the map stuck on nothing at every start
+        prefs.getString("view", null)?.split(',')?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 3 && it.all { v -> v.isFinite() } }
+            ?.takeIf { it[0] in 0.0..1.0 && it[1] in 0.0..1.0 }?.let {
+                map.cx = it[0]; map.cy = it[1]; map.zoom = it[2].coerceIn(MapView.MIN_Z, MapView.MAX_Z)
+            }
         // the last known position, kept across restarts (drawn grey once it is over a minute old)
-        prefs.getString("fix", null)?.split(',')?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 4 }?.let {
-            map.setMe(it[0], it[1], it[2].toFloat(), it[3].toLong())
-        }
+        prefs.getString("fix", null)?.split(',')?.mapNotNull { it.toDoubleOrNull() }?.takeIf { it.size == 4 && it.all { v -> v.isFinite() } }
+            ?.takeIf { it[0] in -90.0..90.0 && it[1] in -180.0..180.0 }?.let {
+                map.setMe(it[0], it[1], it[2].toFloat().coerceAtLeast(0f), it[3].toLong().coerceAtMost(System.currentTimeMillis()))
+            }
         openStore()
     }
 
@@ -157,11 +160,12 @@ open class MainActivity : Activity() {
     }
 
     private fun openStore() {
-        bg.execute {
+        inBg {
             val ok = store.open()
             renderer.clear()
             tiles.clear()
             main.post {
+                if (isDestroyed) return@post
                 generation = SyncState.generation
                 map.invalidate()
                 if (reopenSettings) {
@@ -187,6 +191,7 @@ open class MainActivity : Activity() {
         else "OpenStreetMap'te çizili otobüs hatlarını ve duraklarını"
 
     private fun askFirstSync() {
+        if (isFinishing || isDestroyed) return
         android.app.AlertDialog.Builder(this)
             .setTitle(tr("Download ${City.localName} data?", "${City.localName} verisi indirilsin mi?"))
             .setMessage(tr("The ${City.localName} tab works offline after one sync: the map, places, metro/tram/ferry lines and ${busWhat()}. " +
@@ -317,12 +322,28 @@ open class MainActivity : Activity() {
             background = ripple(outlineOval(fill = C.PANEL))
             contentDescription = tr("Route", "Rota")
             setOnClickListener { hideKeyboard(); search.clearFocus(); openRoute() }
+            // hold: straight to the saved routes (also "My routes ▾" in the route sheet)
+            setOnLongClickListener {
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                hideKeyboard(); search.clearFocus()
+                if (!store.ready) show(Screen.Welcome, replaceAll = true) else myRoutes()
+                true
+            }
         }
         fabs.addView(routeBtn, lpL(dp(50), dp(50)).apply { rightMargin = dp(10) })
         gpsBtn = Icon(this, Icon.GPS).apply {
             color = C.DIM
             background = ripple(outlineOval(fill = C.PANEL))
             setOnClickListener { gpsTap() }
+            // hold: location off at once, wherever the tap cycle is (on, following, panned away)
+            setOnLongClickListener {
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                if (gps.on) {
+                    gps.stop(); map.follow = false; gotFix = false; map.invalidate(); updateGpsBtn()
+                    android.widget.Toast.makeText(this@MainActivity, tr("Location off", "Konum kapalı"), android.widget.Toast.LENGTH_SHORT).show()
+                } else gpsTap()
+                true
+            }
         }
         fabs.addView(gpsBtn, lpL(dp(50), dp(50)))
         bottom.addView(fabs, lpL(MATCH, WRAP).apply { rightMargin = dp(12); bottomMargin = dp(10) })
@@ -542,10 +563,18 @@ open class MainActivity : Activity() {
 
     /** Runs [work] off the main thread, then [done] on it unless the screen changed meanwhile. */
     private fun <T : Any> load(t: Int, work: () -> T?, done: (T) -> Unit) {
-        bg.execute {
+        inBg {
             val r = try { work() } catch (_: Exception) { null }
-            main.post { if (t == token && r != null) done(r) }
+            main.post { if (!isDestroyed && t == token && r != null) done(r) }
         }
+    }
+
+    /**
+     * Runs [r] on the background thread. A result posted after the activity was destroyed (back pressed while a tap
+     * was loading) can still lead here; the executor is shut down then, and execute() would throw.
+     */
+    private fun inBg(r: () -> Unit) {
+        try { bg.execute(r) } catch (_: java.util.concurrent.RejectedExecutionException) {}
     }
 
     private fun header(title: CharSequence, sub: CharSequence?, badge: View? = null) {
@@ -585,9 +614,9 @@ open class MainActivity : Activity() {
         if (picking != 0 && stack.lastOrNull() is Screen.Route) {
             val which = picking
             picking = 0
-            bg.execute {
+            inBg {
                 val p = pointNamed(lat, lon)
-                main.post { if (which == 1) from = p else to = p; render() }
+                main.post { if (isDestroyed) return@post; if (which == 1) from = p else to = p; render() }
             }
             return
         }
@@ -634,7 +663,8 @@ open class MainActivity : Activity() {
         val rows = best.mapNotNull { (vid, si) ->
             val v = store.variant(vid) ?: return@mapNotNull null
             val st = byId[si[0]] ?: return@mapNotNull null
-            val next = Times.next(store.trips(vid), v.dists, si[1], n.sec, n.today, n.yesterday, 3)
+            // one more than shown, to tell whether the last one shown is the day's last
+            val next = Times.next(store.trips(vid), v.dists, si[1], n.sec, n.today, n.yesterday, 4)
             Near(v, st.first, si[1], st.second, next, emptyList())
         }
         // one row per line and direction: the nearest stop, else the variant with the next departure
@@ -671,10 +701,17 @@ open class MainActivity : Activity() {
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
     }
 
-    private fun times(next: List<Int>, now: Int, v: Store.Variant): String = when {
+    /** " · 5 min, 18 min, 23:40 (last)": the first [shown] of [next] (asked for one more, see [Times.lastShown]). */
+    private fun times(next: List<Int>, now: Int, v: Store.Variant, shown: Int = 3): String = when {
         v.ntrips == 0 -> if (v.mode == Mode.BUS) "" else tr(" · no timetable offline", " · çevrimdışı saat yok")
         next.isEmpty() -> tr(" · no more today", " · bugün sefer kalmadı")
-        else -> " · " + next.joinToString(", ") { Times.mins(it, now) }
+        else -> " · " + departures(next, now, shown)
+    }
+
+    /** The first [shown] departures as "5 min", "23:40", with the day's last one marked. */
+    private fun departures(next: List<Int>, now: Int, shown: Int): String {
+        val last = Times.lastShown(next, shown)
+        return next.take(shown).mapIndexed { i, t -> Times.mins(t, now) + if (i == last) tr(" (last)", " (son)") else "" }.joinToString(", ")
     }
 
     private fun showWeb(rows: List<Near>, focusX: Double, focusY: Double) {
@@ -713,7 +750,7 @@ open class MainActivity : Activity() {
             val rows = store.serving(listOf(s.id)).mapNotNull { sv ->
                 val v = store.variant(sv[1]) ?: return@mapNotNull null
                 if (sv[2] == v.stops.size - 1 && v.stops.size > 1) return@mapNotNull null
-                Triple(v, sv[2], Times.next(store.trips(v.id), v.dists, sv[2], n.sec, n.today, n.yesterday, 4))
+                Triple(v, sv[2], Times.next(store.trips(v.id), v.dists, sv[2], n.sec, n.today, n.yesterday, 5))
             }.groupBy { it.first.line.toString() + "|" + it.first.headsign }
                 .map { (_, l) -> l.minWith(compareBy({ it.third.firstOrNull() ?: Int.MAX_VALUE }, { -it.first.ntrips })) }
                 .sortedWith(compareBy({ it.third.firstOrNull() ?: Int.MAX_VALUE }, { it.first.ref }))
@@ -741,7 +778,7 @@ open class MainActivity : Activity() {
             if (d.rows.isEmpty()) views.add(note(tr("No departures from this stop in the timetable.", "Saat çizelgesinde bu duraktan kalkış yok.")))
             d.rows.forEachIndexed { i, r ->
                 val v = r.first
-                views.add(row(badge(v.ref, lineColor(v, i)), "→ " + v.headsign.ifEmpty { v.lineName }, warn(v) + times(r.third, n.sec, v).removePrefix(" · ").ifEmpty { v.lineName }) {
+                views.add(row(badge(v.ref, lineColor(v, i)), "→ " + v.headsign.ifEmpty { v.lineName }, warn(v) + times(r.third, n.sec, v, shown = 4).removePrefix(" · ").ifEmpty { v.lineName }) {
                     show(Screen.LineS(v.id, st.id))
                 })
             }
@@ -834,9 +871,9 @@ open class MainActivity : Activity() {
         val sheet = Sheet(this, C.ACCENT).header(tr(d.v.ref + " variants", d.v.ref + " · güzergâhlar"), tr("Other routes this line runs", "Bu hattın diğer güzergâhları"))
         for (o in d.others) sheet.item(Ic.ROUTE, "→ ${o.headsign}", sub = tr("${o.stops.size} stops", "${o.stops.size} durak") +
             (if (o.ntrips > 0) tr(" · ${o.ntrips} trips/week", " · haftada ${o.ntrips} sefer") else "")) {
-            bg.execute {
+            inBg {
                 val f = nearestStopIn(o, d.stops[s.focus])
-                main.post { s.variant = o.id; s.focus = f; render() }
+                main.post { if (isDestroyed) return@post; s.variant = o.id; s.focus = f; render() }
             }
         }
         sheet.show()
@@ -909,7 +946,11 @@ open class MainActivity : Activity() {
             info(tr("Address", "Adres"), addr)
             info(tr("Opening hours", "Çalışma saatleri"), tags["opening_hours"]?.replace(";", "\n"))
             val phone = tags["phone"] ?: tags["contact:phone"] ?: tags["mobile"] ?: tags["contact:mobile"]
-            info(tr("Phone", "Telefon"), phone) { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone!!.split(';').first().replace(" ", "")))) }
+            info(tr("Phone", "Telefon"), phone) {
+                // a phone without a dialer app (debloated, tablet) must not crash on the tap
+                try { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone!!.split(';').first().replace(" ", "")))) }
+                catch (_: Exception) { android.widget.Toast.makeText(this, tr("No phone app to call with", "Arama yapacak telefon uygulaması yok"), android.widget.Toast.LENGTH_SHORT).show() }
+            }
             val web = tags["website"] ?: tags["contact:website"] ?: tags["url"]
             info(tr("Website", "Web sitesi"), web) { open(web!!) }
             info("Instagram", tags["contact:instagram"]) { open(tags["contact:instagram"]!!.let { if (it.startsWith("http")) it else "https://instagram.com/$it" }) }
@@ -1152,16 +1193,18 @@ open class MainActivity : Activity() {
         val placeCats = placeCats
         val n = cats?.size ?: placeCats.size
         bar.addView(button(tr("Place types ($n/${placeCats.size})", "Yer türleri ($n/${placeCats.size})"), if (cats != null) C.ACCENT else C.CARD, if (cats != null) C.ACCENT else C.TEXT) {
+            // a bottom sheet like every other menu (was a list dialog); swiping it away changes nothing
             val checked = BooleanArray(placeCats.size) { cats == null || placeCats[it].first in cats }
-            android.app.AlertDialog.Builder(this).setTitle(tr("Show these places", "Bu yerleri göster"))
-                .setMultiChoiceItems(placeCats.map { it.second }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
-                .setPositiveButton(tr("Apply", "Uygula")) { _, _ ->
+            val sh = Sheet(this, C.ACCENT).header(tr("Show these places", "Bu yerleri göster"), tr("Switch types on or off, then Apply", "Türleri açıp kapatın, sonra Uygula'ya dokunun"))
+                .item(Ic.CHECK, tr("Apply", "Uygula")) {
                     val sel = placeCats.indices.filter { checked[it] }.map { placeCats[it].first }
                     searchCats = if (sel.size == placeCats.size) null else sel.toSet()
                     render()
                 }
-                .setNeutralButton(tr("All", "Tümü")) { _, _ -> searchCats = null; render() }
-                .setNegativeButton(tr("Cancel", "İptal"), null).show()
+                .item(Ic.RESTORE, tr("All", "Tümü")) { searchCats = null; render() }
+                .section(tr("Place types", "Yer türleri"))
+            placeCats.forEachIndexed { i, (_, label) -> sh.toggle(null, label, checked[i]) { on -> checked[i] = on } }
+            sh.show()
         }, lpL(WRAP, WRAP).apply { rightMargin = dp(6) })
         if (pack == null && q.isNotBlank()) bar.addView(button(tr("+ Pack", "+ Paket"), C.CARD, C.TEXT) { addToPack(q.trim()) })
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
@@ -1184,23 +1227,24 @@ open class MainActivity : Activity() {
 
     private val legColors = intArrayOf(0xFFFFD740.toInt(), 0xFF40C4FF.toInt(), 0xFFFF80AB.toInt(), 0xFF69F0AE.toInt())
 
-    private fun routeOptions(net: Network, a: Pt, b: Pt): List<RouteOpt> {
+    /** The best 3 options, plus the saved route's line sequence [prefer] when it is among the candidates but ranked lower. */
+    private fun routeOptions(net: Network, a: Pt, b: Pt, prefer: String? = null): List<RouteOpt> {
         val n = now()
         // a few more candidates than shown, so lines that don't run now (night lines by day, say) can drop behind
-        val opts = Router.find(net, a.lat, a.lon, b.lat, b.lon, k = 8).mapNotNull { j ->
+        val opts = Router.find(net, a.lat, a.lon, b.lat, b.lon, k = if (prefer != null) 16 else 8).mapNotNull { j ->
             val legs = j.legs.mapIndexed { i, l ->
                 val v = store.variant(net.varId[l.v]) ?: return@mapNotNull null
                 val st = store.stops(intArrayOf(v.stops[l.from], v.stops[l.to]))
                 val board = st[v.stops[l.from]] ?: return@mapNotNull null
                 val alight = st[v.stops[l.to]] ?: return@mapNotNull null
-                val next = if (v.ntrips > 0) Times.next(store.trips(v.id), v.dists, l.from, n.sec, n.today, n.yesterday, 3) else emptyList()
+                val next = if (v.ntrips > 0) Times.next(store.trips(v.id), v.dists, l.from, n.sec, n.today, n.yesterday, 4) else emptyList()
                 LegInfo(v, board, alight, l.from, l.to, next, slice(v, l.from, l.to), if (v.mode == Mode.BUS) legColors[i % legColors.size] else v.color)
             }
             RouteOpt(j, legs)
         }
         // a bus leg with no departure in the next two hours makes an option "not now"
         fun notNow(o: RouteOpt) = o.legs.any { l -> l.v.mode == Mode.BUS && l.v.ntrips > 0 && (l.next.firstOrNull()?.let { it - n.sec > 2 * 3600 } ?: true) }
-        return opts.sortedWith(compareBy({ notNow(it) }, { it.j.changes }, { it.j.score })).take(3)
+        return Router.withPreferred(opts.sortedWith(compareBy({ notNow(it) }, { it.j.changes }, { it.j.score })), 3, prefer) { it.key }
     }
 
     /** The part of a line between two of its stops (normalised mercator). */
@@ -1281,25 +1325,39 @@ open class MainActivity : Activity() {
             body(*views.toTypedArray())
             return
         }
+        // the same place twice (both set to "Me", or two taps on one stop): the finder would offer a one-stop ride
+        if (Router.samePlace(a.lat, a.lon, b.lat, b.lon)) {
+            val d = Fmt.dist(Geo.dist(a.lat, a.lon, b.lat, b.lon))
+            views.add(note(tr("Start and destination are only $d apart: no line needed. Set one of them again with Map or Me.",
+                "Başlangıç ile varış arası yalnızca $d: hat gerekmez. Birini Harita ya da Ben ile yeniden seçin.")))
+            prefer = null
+            body(*views.toTypedArray())
+            return
+        }
         views.add(note(tr("Finding routes…", "Rotalar aranıyor…")))
         body(*views.toTypedArray())
         val finding = views.last()
+        val wanted = prefer
         load(t, {
             val net = store.network() ?: return@load null
-            routeOptions(net, a, b)
+            routeOptions(net, a, b, wanted)
         }) { opts ->
             sheetBody.removeView(finding)
+            val pref = prefer
+            prefer = null
             if (opts.isEmpty()) {
                 sheetBody.addView(note(tr("No line connection found within 500 m of both ends and two changes. Try points closer to a stop.",
                     "İki uca 500 m mesafede, en çok iki aktarmalı hat bağlantısı bulunamadı. Bir durağa daha yakın noktalar deneyin.")))
                 return@load
             }
-            val pref = prefer
-            prefer = null
+            // a saved route whose lines are gone since the last sync (renumbered, dropped): say so, show today's options
+            if (pref != null && opts.none { it.key == pref }) sheetBody.addView(note(
+                tr("The saved lines (${pref.replace(">", " › ")}) don't connect these places now; they may have changed in the last sync. These are today's options.",
+                    "Kayıtlı hatlar (${pref.replace(">", " › ")}) bu iki yeri artık bağlamıyor; son eşitlemede değişmiş olabilirler. Bugünkü seçenekler bunlar."), C.ACCENT))
             val n = now()
             opts.forEachIndexed { i, o ->
                 val first = o.legs.first()
-                val dep = first.next.firstOrNull()?.let { tr(" · next ${Times.mins(it, n.sec)}", " · sonraki ${Times.mins(it, n.sec)}") }
+                val dep = first.next.firstOrNull()?.let { tr(" · next ", " · sonraki ") + departures(first.next, n.sec, 1) }
                     ?: if (first.v.ntrips == 0) "" else tr(" · no more today", " · bugün sefer kalmadı")
                 val km = String.format(java.util.Locale.US, "%.1f", o.j.rideMeters / 1000.0)
                 val end = Fmt.dist(o.j.endDist.toDouble())
@@ -1348,7 +1406,7 @@ open class MainActivity : Activity() {
                     else tr("Change: ${prev.name} → ${l.board.name} (about ${Fmt.dist(gap)})", "Aktarma: ${prev.name} → ${l.board.name} (yaklaşık ${Fmt.dist(gap)})"), C.ACCENT))
             }
             val dep = when {
-                l.next.isNotEmpty() -> tr("next ", "sonraki ") + l.next.joinToString(", ") { Times.mins(it, n.sec) }
+                l.next.isNotEmpty() -> tr("next ", "sonraki ") + departures(l.next, n.sec, 3)
                 l.v.mode != Mode.BUS -> tr("no timetable offline", "çevrimdışı saat yok")
                 else -> tr("no more today", "bugün sefer kalmadı")
             }
@@ -1447,9 +1505,9 @@ open class MainActivity : Activity() {
 
     private fun pick(h: Store.Hit) {
         when (h.kind) {
-            Store.HitKind.LINE -> bg.execute {
+            Store.HitKind.LINE -> inBg {
                 val v = store.variantsOfLine(h.id.toInt()).firstOrNull()
-                main.post { if (v != null) show(Screen.LineS(v.id, v.stops.firstOrNull() ?: 0)) }
+                main.post { if (v != null && !isDestroyed) show(Screen.LineS(v.id, v.stops.firstOrNull() ?: 0)) }
             }
             Store.HitKind.STOP -> { map.centerOn(h.lat, h.lon, maxOf(map.zoom, 16.0)); show(Screen.StopS(h.id.toInt())) }
             Store.HitKind.PLACE -> { map.centerOn(h.lat, h.lon, maxOf(map.zoom, 16.5)); show(Screen.PlaceS(h.id)) }
@@ -1485,7 +1543,7 @@ open class MainActivity : Activity() {
         val views = ArrayList<View>()
         val info = text("…", 14f).apply { setPadding(dp(6), dp(4), dp(6), dp(8)) }
         views.add(info)
-        bg.execute {
+        inBg {
             val s = if (store.ready) {
                 val at = store.meta("synced_at")?.toLongOrNull()
                 tr("Last sync: ", "Son eşitleme: ") + (at?.let { Fmt.date(it) } ?: "?") + "\n" +

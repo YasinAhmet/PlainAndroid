@@ -25,8 +25,16 @@ class ShareProvider : ContentProvider() {
         fun debugUri(f: File): Uri = Uri.parse("content://$AUTH/debug/${f.name}")
         fun cacheUri(f: File): Uri = Uri.Builder().scheme("content").authority(AUTH).appendPath("cache").appendPath(f.name).build()
         fun captureUri(name: String): Uri = Uri.Builder().scheme("content").authority(AUTH).appendPath("capture").appendPath(name).build()
-        /** Safe, short file name (filesystems allow 255 bytes; non-ASCII letters take up to 3). */
-        fun fileName(name: String) = name.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").trim().take(80).trim().ifEmpty { "trail" } + ".gpx"
+        /**
+         * Safe, short file name (filesystems allow 255 bytes; non-ASCII letters take up to 3). Runs of dots become one
+         * and none lead or trail: "Walk..." must not give "Walk....zip", which the ".." guard in [resolve] refuses
+         * (the receiving app then fails to open the shared zip / kmz), nor a hidden ".gpx".
+         */
+        fun fileName(name: String) = name.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").replace(DOTS, ".")
+            .trim { it == ' ' || it == '.' }.take(80)
+            .let { if (it.isNotEmpty() && it.last().isHighSurrogate()) it.dropLast(1) else it } // never half a letter
+            .trim { it == ' ' || it == '.' }.ifEmpty { "trail" } + ".gpx"
+        private val DOTS = Regex("\\.{2,}")
     }
 
     private fun resolve(uri: Uri): Pair<File, Entry?> {

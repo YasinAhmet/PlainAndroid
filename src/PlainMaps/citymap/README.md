@@ -18,13 +18,13 @@ Everything that differs between the cities is in `City.kt`. Each app shows:
 | Do this | Get this |
 |---|---|
 | **Tap anywhere on the map** | Every line that stops within 100 m (press and hold to grow the circle up to 400 m, release to pick), drawn on the map in matching colours. Each row shows the nearest stop, its distance and the next departures. |
-| **Tap a stop** (zoom 15+) | The lines at that stop, sorted by next departure. |
+| **Tap a stop** (zoom 15+) | The lines at that stop, sorted by next departure. The day's last departure is marked "(last)" (here, in the lists of nearby lines and in route options). |
 | **Tap a place dot** (zoom 16+) | Address, opening hours, phone (tap to dial), website, plus the lines within 400 m. |
 | **Tap a line in a list** | Its route and stops on the map, with the stop list and the next time at each stop. Also: **Other direction**, **Variants**, **Timetable** (weekdays / Saturday / Sunday, at the chosen stop). |
 | **Search bar** | Lines (e.g. `500T`, `M2`), stops, places and streets. Turkish letters are optional (`kadikoy` finds Kadıköy). |
 | **Route button** (top bar, next to Settings) | The contact route finder. Set From and To on the map, from your last location, or with **Route from/to here** on a stop, place or tapped point. It returns the 3 best options. Options are ordered by fewest changes first, then shortest ride. Lines that don't run in the next two hours (night lines by day) go to the back. Tap an option for its legs and changes, and to save it. |
-| **My routes ▾** | Saved routes. Tap one to open it (the route is found again and the saved line sequence is selected) or delete it. |
-| **Location button** | Off at every start. The last fix is remembered across restarts and drawn grey once it is more than a minute old. One tap starts GPS and follows you. A second tap after panning centres on you again; a tap while following turns it off. Location also stops whenever the app leaves the screen. |
+| **My routes ▾** (or **hold the Route button**) | Saved routes. Tap one to open it (the route is found again and the saved line sequence is selected, even when it isn't among the 3 best right now) or delete it. If its lines no longer connect the two places after a sync, a note says so and today's options are shown. |
+| **Location button** | Off at every start. The last fix is remembered across restarts and drawn grey once it is more than a minute old. One tap starts GPS and follows you. A second tap after panning centres on you again; a tap while following turns it off. **Hold** it to turn location off at once. Location also stops whenever the app leaves the screen. |
 | **Settings › Full sync** | Downloads everything again over Wi-Fi. |
 | **Settings › Situational sync** | Fetches the operator's current announcements (shown with ⚠ on lines, stops and in lists) and today's departure times for all bus lines, without downloading the map. Istanbul: İETT's web services, about 30 s. Ankara: EGO's announcement list and timetable pages, a few minutes. |
 | **Settings › Lines on the map** | Bus web thickness and brightness, metro/tram/ferry thickness, and the thickness of selected lines. |
@@ -85,6 +85,16 @@ box around every stop plus 3 km (`fitToStops`), cut from the regional extract wh
 Quirks: ESHOT's calendar dates run out (the 2026-08 feed ended 2026-10-05) but only the weekday pattern is used, so it
 keeps working; Kocaeli's trip_headsign is the line's name in both directions, so the last stop's name is shown instead;
 shapes.txt rows are not in sequence order (they are sorted). Real-file tests: `ESHOT_ZIP` and `KOCAELI_DIR` in RealDataTest.
+
+Feed hardening (2026-11-28, tested in EdgeCaseTest): quoted CSV fields may hold delimiters, `""` and line breaks, and a
+stray quote inside a field no longer swallows the columns after it; a stop without coordinates is left out of its trips but
+its time still counts (a first stop without a position used to make the trip start at its last stop's time); a timetable
+that has ended is dropped only where the same route has a current one on the same days (else every departure showed
+twice), and the same departure listed twice is shown once; stations and entrances no trip calls at are left out; shape
+points that are NaN or outside the search area are skipped; a route with only a long name keeps its own line number.
+Kocaeli: when a file is listed twice, the newest upload is taken. EGO: a column that runs past midnight
+(`… 23:45, 00:15`) keeps the late trips on the same service day (24:15), and a stop number that also exists in another
+town is placed by its neighbours on the line.
 
 ## Antalya (since Plain Maps 3.6): OpenStreetMap only
 

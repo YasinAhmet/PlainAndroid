@@ -147,7 +147,7 @@ class PhotoViewer(
                 // skip work for photos swiped far past
                 val idx = all.indexOfFirst { it.file == ph.file }
                 if (idx < 0 || abs(idx - i) > 2 || full.get(ph.file) != null) return@execute
-                val b = try { Photos.decode(File(dir, ph.file), maxPx, Bitmap.Config.RGB_565) } catch (e: Exception) { null }
+                val b = try { Photos.decode(File(dir, ph.file), maxPx, Bitmap.Config.RGB_565) } catch (e: Throwable) { null } // OutOfMemoryError too: this process records the trail
                 act.runOnUiThread {
                     if (closed) return@runOnUiThread
                     if (b == null) { if (show && all.getOrNull(i)?.file == ph.file) act.toast(tr("Could not open the photo.", "Fotoğraf açılamadı.")); return@runOnUiThread }
@@ -192,7 +192,10 @@ class PhotoViewer(
             .setTitle(tr("Remove this photo from the trail?", "Bu fotoğraf rotadan kaldırılsın mı?"))
             .setMessage(tr("It disappears from the map and the trail's exports. The copy in your phone's Gallery stays.", "Haritadan ve rotanın dışa aktarımlarından kalkar. Telefonun Galeri'sindeki kopya kalır."))
             .setPositiveButton(tr("Remove", "Kaldır")) { _, _ ->
-                Photos.remove(dir, ph)
+                try { Photos.remove(dir, ph) } catch (e: Exception) { // storage full / folder gone: say so, change nothing
+                    act.toast(tr("Could not remove the photo: ${e.message}", "Fotoğraf kaldırılamadı: ${e.message}"))
+                    return@setPositiveButton
+                }
                 Dev.event("photo", "removed ${ph.file} from ${dir.name}")
                 full.remove(ph.file)
                 all.removeAt(i)

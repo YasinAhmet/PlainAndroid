@@ -61,16 +61,12 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import app.plain.hub.Hub
@@ -114,7 +110,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     private lateinit var blink: View
     private lateinit var topBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
-    private lateinit var aspectSp: Spinner
+    private lateinit var aspectBtn: TextView
     private lateinit var basicTab: TextView
     private lateinit var advTab: TextView
     private lateinit var overlay: GuideOverlay
@@ -211,6 +207,13 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     private var reader: ImageReader? = null
     private var preview: Surface? = null
     private var opening = false
+    /** A flip / lens change came while a camera was still opening: close that one when it opens and start again. */
+    private var reopenWanted = false
+    /** Both a front and a back camera exist (else flip, button or double tap, does nothing). */
+    private var canFlip = true
+    /** onPause with a photo still on its way: the camera closes a moment later (null = nothing pending). */
+    private var deferredClose: Runnable? = null
+    private var deferredThread: HandlerThread? = null
     private var resumed = false
     private var idlePaused = false
     private var photoSizes = emptyList<Dim>()
@@ -249,6 +252,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     private var recordUri: Uri? = null
     private var recordOwned = false
     private var recording = false
+    /** The recorder really runs (false while the recording session is still being set up). */
+    private var recordStarted = false
     private var recordStart = 0L
 
     private var lastUri: Uri? = null
@@ -304,7 +309,19 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         super.onResume()
         resumed = true
         orient.enable()
-        readerThread = HandlerThread("jpeg").also { it.start(); readerHandler = Handler(it.looper) }
+        // back before a deferred close ran: the camera is still open and its reader still uses that thread
+        val dc = deferredClose
+        val kept = deferredThread
+        deferredClose = null
+        deferredThread = null
+        if (dc != null) main.removeCallbacks(dc)
+        if (dc != null && kept != null && kept.isAlive && device != null) {
+            readerThread = kept
+            readerHandler = Handler(kept.looper)
+        } else {
+            if (dc != null) { closeCamera(); kept?.quitSafely() }
+            readerThread = HandlerThread("jpeg").also { it.start(); readerHandler = Handler(it.looper) }
+        }
         startCamera()
         poke()
         syncAdvanced()
@@ -321,6 +338,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         val have = lastUri.takeIf { thumb.drawable != null }
         try {
             saver.execute {
+                // housekeeping first: a video left half-written by a killed app (nothing records while we resume)
+                Media.dropStalePending(this, STALE_PENDING_SEC)
                 val l = try { Media.latestOwn(this) } catch (_: Exception) { return@execute }
                 val bmp = if (l == null || l.first == have) null else Media.thumb(this, l.first, dp(96))
                 runOnUiThread {
@@ -342,11 +361,15 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         main.removeCallbacks(precaptureTimeout)
         precapture = 0
         if (recording) stopRecording(reopen = false)
-        // a photo still on its way from the sensor: give it a moment before closing
+        // a photo still on its way from the sensor: give it a moment before closing (onResume takes it back)
         val pending = synchronized(shots) { shots.isNotEmpty() }
         val t = readerThread
-        if (pending) main.postDelayed({ if (!resumed) { closeCamera(); t?.quitSafely() } }, 1500)
-        else { closeCamera(); t?.quitSafely() }
+        if (pending) {
+            val r = Runnable { deferredClose = null; deferredThread = null; closeCamera(); t?.quitSafely() }
+            deferredClose = r
+            deferredThread = t
+            main.postDelayed(r, 1500)
+        } else { closeCamera(); t?.quitSafely() }
         readerThread = null
         super.onPause()
     }
@@ -378,10 +401,13 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE -> secure = true
         }
         if (caller != Caller.NONE) {
-            outputUri = i.getParcelableExtra(MediaStore.EXTRA_OUTPUT)
-            maxDurationMs = i.getIntExtra(MediaStore.EXTRA_DURATION_LIMIT, 0) * 1000
-            maxBytes = i.getLongExtra(MediaStore.EXTRA_SIZE_LIMIT, 0L)
-            lowQuality = i.getIntExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1) == 0
+            // other apps' extras: a wrong type (a String output, a long duration…) must not crash or be misread
+            val x = try { i.extras } catch (_: Exception) { null }
+            fun extra(k: String): Any? = try { x?.get(k) } catch (_: Exception) { null }
+            outputUri = extra(MediaStore.EXTRA_OUTPUT) as? Uri
+            maxDurationMs = Sizes.durationLimitMs(extra(MediaStore.EXTRA_DURATION_LIMIT))
+            maxBytes = (extra(MediaStore.EXTRA_SIZE_LIMIT) as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
+            lowQuality = (extra(MediaStore.EXTRA_VIDEO_QUALITY) as? Number)?.toInt() == 0
         }
     }
 
@@ -406,7 +432,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     override fun onKeyDown(code: Int, e: KeyEvent): Boolean {
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_CAMERA) {
             poke()
-            if (e.repeatCount == 0 && device != null) onShutter()
+            // paused to save battery: the key wakes the camera (as a tap on the message does)
+            if (e.repeatCount == 0 && idlePaused) { idlePaused = false; hideMessage(); startCamera(); syncAdvanced() }
+            else if (e.repeatCount == 0 && device != null) onShutter()
             return true
         }
         return super.onKeyDown(code, e)
@@ -449,7 +477,15 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 MotionEvent.ACTION_MOVE -> if (abs(e.x - dx) >= slop || abs(e.y - dy) >= slop) main.removeCallbacks(hold)
                 MotionEvent.ACTION_UP -> {
                     main.removeCallbacks(hold)
-                    if (!held && abs(e.x - dx) < slop && abs(e.y - dy) < slop) {
+                    val side = Geo.sideSwipe(e.x - dx, e.y - dy, dp(72).toFloat())
+                    if (!held && side != 0) {
+                        // swipe sideways: the next / previous of PHOTO | VIDEO (swipe left = VIDEO), as the tabs below
+                        val to = if (side < 0) Mode.VIDEO else Mode.PHOTO
+                        if (caller == Caller.NONE && !recording && to != mode) {
+                            texture.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            setMode(to)
+                        }
+                    } else if (!held && abs(e.x - dx) < slop && abs(e.y - dy) < slop) {
                         // double tap: switch between the front and back camera; a single tap focuses at once (no wait)
                         val t = e.eventTime
                         if (t - lastTapT < ViewConfiguration.getDoubleTapTimeout() && hypot(e.x - lastTapX, e.y - lastTapY) < dp(80) && !recording) {
@@ -480,10 +516,11 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             setBackgroundColor(0x66000000)
             setPadding(dp(6), dp(4), dp(6), dp(4))
         }
-        aspectSp = dropdown()
+        // the aspect ("4:3 ▾"): a tap opens the choices as a bottom sheet
+        aspectBtn = label("", 13f).apply { isSingleLine = true; setOnClickListener { chooseAspect() } }
         basicTab = label(tr("BASIC", "TEMEL"), 13f).apply { setOnClickListener { setAdvanced(false) } }
         advTab = label(tr("ADVANCED", "GELİŞMİŞ"), 13f).apply { setOnClickListener { setAdvanced(true) } }
-        topBar.addView(aspectSp, LinearLayout.LayoutParams(-2, dp(44)))
+        topBar.addView(aspectBtn, LinearLayout.LayoutParams(-2, dp(44)))
         topBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         topBar.addView(basicTab, LinearLayout.LayoutParams(-2, dp(44)))
         topBar.addView(advTab, LinearLayout.LayoutParams(-2, dp(44)))
@@ -595,42 +632,33 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         updateUi()
     }
 
-    private fun dropdown() = Spinner(this, Spinner.MODE_DROPDOWN).apply {
-        setPopupBackgroundDrawable(outline(BTN_LINE, dp(8).toFloat(), dp(1)))
-        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { onPicked(this@apply, pos) }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
+    /** The aspect button shows the current choice ("4:3 ▾"). */
+    private fun showAspect() {
+        aspectBtn.text = if (aspects.isEmpty()) aspect.display else aspect.display + "  ▾"
+        aspectBtn.contentDescription = tr("Aspect ratio: ", "En-boy oranı: ") + aspect.display
     }
 
-    private fun setItems(sp: Spinner, items: List<String>, sel: Int) {
-        val ad = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
-            override fun getView(pos: Int, cv: View?, parent: ViewGroup): View =
-                (super.getView(pos, cv, parent) as TextView).apply {
-                    setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); isSingleLine = true
-                }
-            override fun getDropDownView(pos: Int, cv: View?, parent: ViewGroup): View =
-                (super.getDropDownView(pos, cv, parent) as TextView).apply {
-                    setTextColor(if (pos == sp.selectedItemPosition) ACCENT else TEXT2)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                }
-        }
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        sp.adapter = ad
-        if (sel in items.indices) sp.setSelection(sel, false)
+    /** The aspects this camera offers, as a bottom sheet (no flat dropdowns in Plain apps). */
+    private fun chooseAspect() {
+        if (recording || aspects.isEmpty()) return
+        Sheet.choose(this, tr("Aspect ratio", "En-boy oranı"), aspects.map { it.display }, aspects.indexOf(aspect), ACCENT) { i -> pickAspect(i) }
     }
 
-    private fun onPicked(sp: Spinner, pos: Int) {
-        if (sp !== aspectSp) return
+    private fun pickAspect(pos: Int) {
         val a = aspects.getOrNull(pos) ?: return
-        if (a == aspect) return
-        prefs.edit().putString(aspectKey(), a.name).apply()
-        reconfigure()
+        if (a == aspect || recording) return
+        // a photo still on its way would be lost if the new size replaces the JPEG reader: switch once it's in
+        afterShots {
+            if (recording) return@afterShots
+            prefs.edit().putString(aspectKey(), a.name).apply()
+            reconfigure()
+        }
     }
 
     private fun updateUi() {
         val idleUi = !recording
-        aspectSp.isEnabled = idleUi
+        aspectBtn.isEnabled = idleUi
+        aspectBtn.alpha = if (idleUi) 1f else 0.4f
         basicTab.setTextColor(if (!advanced) ACCENT else LABEL)
         advTab.setTextColor(if (advanced) ACCENT else LABEL)
         basicTab.isEnabled = idleUi
@@ -741,21 +769,56 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     private fun setMode(md: Mode) {
         if (md == mode || recording) return
-        mode = md
-        prefs.edit().putString("mode", md.name).apply()
-        flash = prefs.getInt(flashKey(), 0)
-        reconfigure()
-        if (openPanel != null) showPanel(openPanel)
-        syncAdvanced()
+        // a photo still on its way would be lost when the session drops its JPEG reader: switch once it's in
+        afterShots {
+            if (md == mode || recording) return@afterShots
+            mode = md
+            prefs.edit().putString("mode", md.name).apply()
+            flash = prefs.getInt(flashKey(), 0)
+            reconfigure()
+            if (openPanel != null) showPanel(openPanel)
+            syncAdvanced()
+        }
     }
 
     private fun flip() {
-        if (recording) return
-        facing = if (front) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT
-        prefs.edit().putInt("facing", facing).apply()
-        if (openPanel == "Lens") showPanel(null)
+        if (recording || !canFlip) return
+        afterShots {
+            if (recording) return@afterShots
+            facing = if (front) CameraCharacteristics.LENS_FACING_BACK else CameraCharacteristics.LENS_FACING_FRONT
+            prefs.edit().putInt("facing", facing).apply()
+            if (openPanel == "Lens") showPanel(null)
+            restartCamera()
+        }
+    }
+
+    /** Closes the camera and opens the one the settings now ask for; one still opening is replaced once it opens. */
+    private fun restartCamera() {
         closeCamera()
-        startCamera()
+        if (opening) reopenWanted = true else startCamera()
+    }
+
+    /** A photo is between the shutter and the saver (flash metering, steady wait, or the sensor's JPEG on its way). */
+    private fun photoPending() = precapture != 0 || steadyWaiting || synchronized(shots) { shots.isNotEmpty() }
+    private var waitingShots = false
+
+    /**
+     * Runs [action] (it closes the camera or drops the JPEG reader) once no photo is pending, at most ~2 s later;
+     * dropped when the activity pauses meanwhile. A second request while one waits is ignored (no double flip).
+     */
+    private fun afterShots(action: () -> Unit) {
+        if (!photoPending()) { action(); return }
+        if (waitingShots) return
+        waitingShots = true
+        var tries = 0
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (!resumed) { waitingShots = false; return }
+                if (photoPending() && ++tries < 20) { main.postDelayed(this, 100); return }
+                waitingShots = false
+                action()
+            }
+        }, 100)
     }
 
     /** Picks aspect + size from the saved settings and what the sensor offers. */
@@ -774,7 +837,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             else -> sizeList.firstOrNull()
         } ?: Dim(1280, 720)
         previewDim = Sizes.preview(previewSizes, size.ratio) ?: Dim(1280, 720)
-        setItems(aspectSp, aspects.map { it.display }, aspects.indexOf(aspect))
+        showAspect()
     }
 
     private fun reconfigure() {
@@ -865,7 +928,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             loadCamera(id)
             facing = cm.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ?: facing
         } catch (e: Exception) { showMessage(tr("Can't read the camera: ${e.message}", "Kamera okunamıyor: ${e.message}")); return }
-        flipBtn.visibility = if (pickCamera(CameraCharacteristics.LENS_FACING_FRONT) != null && pickCamera(CameraCharacteristics.LENS_FACING_BACK) != null) View.VISIBLE else View.INVISIBLE
+        canFlip = try { pickCamera(CameraCharacteristics.LENS_FACING_FRONT) != null && pickCamera(CameraCharacteristics.LENS_FACING_BACK) != null } catch (_: Exception) { false }
+        flipBtn.visibility = if (canFlip) View.VISIBLE else View.INVISIBLE
         chooseSizes()
         layoutPreview()
         updateUi()
@@ -876,15 +940,26 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         } catch (e: SecurityException) {
             opening = false
         } catch (e: Exception) {
+            // disabled by a policy, or held by another app right now
             opening = false
-            showMessage(tr("Can't open the camera:\n${e.message}", "Kamera açılamıyor:\n${e.message}"))
+            showMessage(tr("Can't open the camera:\n${e.message}\n\nTap to try again.", "Kamera açılamıyor:\n${e.message}\n\nTekrar denemek için dokunun.")) { hideMessage(); startCamera() }
         }
+    }
+
+    /** An open that is no longer wanted (paused meanwhile, or flipped while opening): true when [d] was dropped. */
+    private fun staleOpen(d: CameraDevice): Boolean {
+        if (resumed && !idlePaused && !reopenWanted) return false
+        try { d.close() } catch (_: Exception) {}
+        val again = reopenWanted
+        reopenWanted = false
+        if (again) startCamera()
+        return true
     }
 
     private val stateCb = object : CameraDevice.StateCallback() {
         override fun onOpened(d: CameraDevice) {
             opening = false
-            if (!resumed || idlePaused) { d.close(); return }
+            if (staleOpen(d)) return
             device = d
             hideMessage()
             createSession()
@@ -892,14 +967,19 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
         override fun onDisconnected(d: CameraDevice) {
             opening = false
-            d.close()
-            if (device === d) { device = null; session = null }
+            // taken by another app (or the camera went away), open or still opening: stop cleanly (a recording is
+            // kept) and say so, instead of a frozen preview
+            if (device === d) closeCamera()
+            try { d.close() } catch (_: Exception) {}
+            if (reopenWanted) { reopenWanted = false; startCamera(); return }
+            if (resumed && !idlePaused) showMessage(tr("Another app took the camera.\nTap to try again.", "Kamerayı başka bir uygulama aldı.\nTekrar denemek için dokunun.")) { hideMessage(); startCamera() }
         }
 
         override fun onError(d: CameraDevice, error: Int) {
             opening = false
-            d.close()
-            if (device === d) { device = null; session = null }
+            if (device === d) closeCamera()   // stops (and keeps) a recording, drops a pending photo request
+            try { d.close() } catch (_: Exception) {}
+            if (reopenWanted) { reopenWanted = false; startCamera(); return }
             showMessage(if (error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE)
                 tr("Another app is using the camera.\nTap to try again.", "Kamerayı başka bir uygulama kullanıyor.\nTekrar denemek için dokunun.")
             else tr("The camera stopped (error $error).\nTap to try again.", "Kamera durdu (hata $error).\nTekrar denemek için dokunun.")) { hideMessage(); startCamera() }
@@ -928,10 +1008,17 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
     }
 
 
-    /** Preview + (photo) JPEG reader or (recording) the video encoder's surface. */
-    private fun createSession(then: (() -> Unit)? = null) {
-        val d = device ?: return
-        val st = texture.surfaceTexture ?: return
+    /** Counts session requests: callbacks of a request that a newer one replaced are ignored. */
+    private var sessionGen = 0
+
+    /**
+     * Preview + (photo) JPEG reader or (recording) the video encoder's surface. False when no session could be
+     * asked for (no camera or no preview surface); [then] then never runs.
+     */
+    private fun createSession(then: (() -> Unit)? = null): Boolean {
+        val d = device ?: return false
+        val st = texture.surfaceTexture ?: return false
+        val gen = ++sessionGen
         try { session?.close() } catch (_: Exception) {}
         session = null
         st.setDefaultBufferSize(previewDim.w, previewDim.h)
@@ -952,7 +1039,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         val cfg = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outs.map { OutputConfiguration(it) }, mainExecutor,
             object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(s: CameraCaptureSession) {
-                    if (device !== d) { s.close(); return }
+                    if (device !== d || gen != sessionGen) { s.close(); return }
                     session = s
                     // a completed focus lock survives the rebuild as a fixed lens distance; one still
                     // scanning is simply started again on the same point
@@ -964,11 +1051,12 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
                 override fun onConfigureFailed(s: CameraCaptureSession) {
                     s.close()
+                    if (device !== d || gen != sessionGen) return   // replaced meanwhile: not this request's problem
                     if (recorder != null) abortRecording()
                     toast(tr("This camera can't use ${size.w}×${size.h} here. Pick another size.", "Bu kamera burada ${size.w}×${size.h} kullanamıyor. Başka bir boyut seçin."))
                 }
             })
-        try { d.createCaptureSession(cfg) } catch (e: Exception) { toast(tr("Camera setup failed: ${e.message}", "Kamera kurulamadı: ${e.message}")) }
+        return try { d.createCaptureSession(cfg); true } catch (e: Exception) { toast(tr("Camera setup failed: ${e.message}", "Kamera kurulamadı: ${e.message}")); false }
     }
 
     private fun common(b: CaptureRequest.Builder) {
@@ -1230,7 +1318,10 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 return
             }
             takePhoto()
-        } else if (recording) stopRecording() else startRecording()
+        } else if (recording) {
+            // a second tap while the recording session is still being set up would stop a recorder that never started
+            if (recordStarted) stopRecording()
+        } else startRecording()
     }
 
     private val steadyTimeout = Runnable { fireSteady() }
@@ -1313,7 +1404,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             ByteArray(buf.remaining()).also { buf.get(it) }
         } finally { img.close() }
         val shot = synchronized(shots) { shots.removeFirstOrNull() } ?: Shot(System.currentTimeMillis(), 0)
-        try { saver.execute { savePhoto(bytes, shot) } } catch (_: Exception) {}
+        // shot and Back pressed at once: the saver is already shut down, so save right here (this thread lives
+        // until the deferred close) instead of dropping the photo
+        try { saver.execute { savePhoto(bytes, shot) } } catch (_: RejectedExecutionException) { savePhoto(bytes, shot) }
     }
 
     private fun savePhoto(raw: ByteArray, shot: Shot) {
@@ -1331,33 +1424,67 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     /** IMAGE_CAPTURE: write into the caller's file (or hand back a small picture) and return at once. */
     private fun deliverPhoto(jpeg: ByteArray) {
+        val out = outputUri
         try {
             val result = Intent()
-            val out = outputUri
             if (out != null) Media.writeTo(this, out, jpeg)
             else result.putExtra("data", Jpeg.small(jpeg, 320))
             runOnUiThread { setResult(RESULT_OK, result); finish() }
-        } catch (e: Exception) {
-            runOnUiThread { callerBusy = false; toast(tr("Couldn't hand the photo over: ${e.message}", "Fotoğraf iletilemedi: ${e.message}")) }
+        } catch (e: Throwable) {
+            if (out == null) {
+                runOnUiThread { callerBusy = false; toast(tr("Couldn't hand the photo over: ${e.message}", "Fotoğraf iletilemedi: ${e.message}")) }
+                return
+            }
+            // the calling app's EXTRA_OUTPUT can't be written (no access, a file:// path…): another try would fail the
+            // same way, so keep the photo in the camera roll and go back to the app as "cancelled"
+            val kept = try { Media.savePhoto(this, jpeg, System.currentTimeMillis()); true } catch (_: Exception) { false }
+            runOnUiThread {
+                toast(if (kept) tr("Couldn't hand the photo to the app. It's saved in the camera roll instead.", "Fotoğraf uygulamaya iletilemedi. Bunun yerine kamera rulosuna kaydedildi.")
+                    else tr("Couldn't hand the photo over: ${e.message}", "Fotoğraf iletilemedi: ${e.message}"))
+                setResult(RESULT_CANCELED)
+                finish()
+            }
         }
     }
+
+    /** Opens [u] for the recorder ("rw", else "w"); null when it can't be written. */
+    private fun openFd(u: Uri): ParcelFileDescriptor? =
+        (try { contentResolver.openFileDescriptor(u, "rw") } catch (_: Exception) { null })
+            ?: try { contentResolver.openFileDescriptor(u, "w") } catch (_: Exception) { null }
 
     // ================================================================== video
     private fun startRecording() {
         if (device == null || session == null || recorder != null) return
+        // stop (and keep the file) before the storage runs out: a video cut off by a full disk can't be saved
+        val limit = Sizes.recordLimit(maxBytes, Media.freeBytes(), Sizes.VIDEO_RESERVE)
+        if (limit <= 0L) { toast(tr("The phone's storage is full.", "Telefonun depolama alanı dolu.")); return }
         val time = System.currentTimeMillis()
         val out = outputUri
-        val owned = !(caller == Caller.VIDEO && out != null)
-        val uri: Uri
-        val pfd: ParcelFileDescriptor
+        var owned = !(caller == Caller.VIDEO && out != null)
+        var made: Uri? = null   // our own pending entry: removed again when anything below fails
+        var file: Pair<Uri, ParcelFileDescriptor>? = null
         try {
-            uri = if (owned) Media.newEntry(this, true, time) else out!!
-            pfd = (try { contentResolver.openFileDescriptor(uri, "rw") } catch (_: Exception) { null }
-                ?: contentResolver.openFileDescriptor(uri, "w"))!!
+            if (!owned) {
+                file = openFd(out!!)?.let { out to it }
+                // the calling app's EXTRA_OUTPUT can't be written: record into our own file and hand back its uri
+                if (file == null) owned = true
+            }
+            if (owned) {
+                val m = Media.newEntry(this, true, time)
+                made = m
+                file = openFd(m)?.let { m to it }
+            }
         } catch (e: Exception) {
+            made?.let { Media.delete(this, it) }
             toast(tr("Can't create the video file: ${e.message}", "Video dosyası oluşturulamıyor: ${e.message}"))
             return
         }
+        if (file == null) {
+            made?.let { Media.delete(this, it) }
+            toast(tr("Can't create the video file.", "Video dosyası oluşturulamıyor."))
+            return
+        }
+        val (uri, pfd) = file
         @Suppress("DEPRECATION")
         val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else MediaRecorder()
         try {
@@ -1381,10 +1508,18 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             }
             rec.setOrientationHint(Sizes.jpegOrientation(sensorOrientation, deviceDeg, front))
             if (maxDurationMs > 0) rec.setMaxDuration(maxDurationMs)
-            if (maxBytes > 0) rec.setMaxFileSize(maxBytes)
+            if (limit < Long.MAX_VALUE) rec.setMaxFileSize(limit)
             rec.setOnInfoListener { _, what, _ ->
                 if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED || what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED)
-                    main.post { if (recording) stopRecording() }
+                    main.post {
+                        if (!recording) return@post
+                        // our own size limit (free storage, or the largest file the phone writes): say why it stopped
+                        val capped = what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED && caller == Caller.NONE
+                        stopRecording()
+                        if (capped) toast(if (Media.freeBytes() < Sizes.VIDEO_RESERVE * 2)
+                            tr("Storage almost full: the video was stopped and saved.", "Depolama neredeyse dolu: video durduruldu ve kaydedildi.")
+                        else tr("The video reached the largest file size and was saved.", "Video en büyük dosya boyutuna ulaştı ve kaydedildi."))
+                    }
             }
             rec.prepare()
         } catch (e: Exception) {
@@ -1400,10 +1535,14 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         recordOwned = owned
         recordSurface = rec.surface
         recording = true
+        recordStarted = false
+        recordStart = SystemClock.elapsedRealtime()
         updateUi()
-        createSession {
+        val asked = createSession {
+            if (recorder !== rec) return@createSession   // stopped or aborted meanwhile
             try {
                 rec.start()
+                recordStarted = true
                 recordStart = SystemClock.elapsedRealtime()
                 shutterFeedback(MediaActionSound.START_VIDEO_RECORDING)
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1414,6 +1553,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 abortRecording()
             }
         }
+        // no session could even be asked for: don't leave the UI stuck in "recording"
+        if (!asked) abortRecording()
     }
 
     private val tick = object : Runnable {
@@ -1426,7 +1567,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     private fun stopRecording(reopen: Boolean = true) {
         val rec = recorder ?: return
+        val lasted = if (recordStarted) SystemClock.elapsedRealtime() - recordStart else 0L
         recording = false
+        recordStarted = false
         recorder = null
         recordSurface = null
         main.removeCallbacks(tick)
@@ -1441,14 +1584,24 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         val owned = recordOwned
         recordUri = null
         if (ok) shutterFeedback(MediaActionSound.STOP_VIDEO_RECORDING)
-        if (uri != null && owned) saver.execute {
-            if (!ok) { Media.delete(this, uri); return@execute }
-            Media.publish(this, uri)
-            if (caller == Caller.NONE) {
-                val bmp = Media.thumb(this, uri, dp(96))
-                runOnUiThread { lastUri = uri; lastVideo = true; thumb.setImageBitmap(bmp); updateUi() }
+        if (uri != null && owned) try {
+            saver.execute {
+                if (!ok) { Media.delete(this, uri); return@execute }
+                // an exception on the saver thread would end the app: a failed publish is reported instead
+                val published = try { Media.publish(this, uri); true } catch (_: Exception) { false }
+                if (!published) { runOnUiThread { toast(tr("Couldn't save the video.", "Video kaydedilemedi.")) }; return@execute }
+                if (caller == Caller.NONE) {
+                    val bmp = Media.thumb(this, uri, dp(96))
+                    runOnUiThread { lastUri = uri; lastVideo = true; thumb.setImageBitmap(bmp); updateUi() }
+                }
             }
+        } catch (_: RejectedExecutionException) {
+            // closing down: publish right here so the video isn't left hidden
+            if (ok) try { Media.publish(this, uri) } catch (_: Exception) {} else Media.delete(this, uri)
         }
+        // stop() fails when nothing usable was recorded: too short, or the recording broke off
+        val lost = if (lasted >= 3000) tr("The video couldn't be saved.", "Video kaydedilemedi.")
+            else tr("The video was too short to keep.", "Video saklamak için çok kısaydı.")
         if (caller == Caller.VIDEO) {
             if (ok && uri != null) {
                 // the media store entry must be visible before the caller opens it
@@ -1457,8 +1610,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 finish()
                 return
             }
-            toast(tr("The video was too short.", "Video çok kısaydı."))
-        } else if (!ok) toast(tr("The video was too short to keep.", "Video saklamak için çok kısaydı."))
+            toast(lost)
+        } else if (!ok) toast(lost)
         updateUi()
         if (reopen && device != null) createSession()
     }
@@ -1469,13 +1622,15 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         recorder = null
         recordSurface = null
         recording = false
+        recordStarted = false
         main.removeCallbacks(tick)
         timer.visibility = View.GONE
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         rec.release()
         try { recordPfd?.close() } catch (_: Exception) {}
         recordPfd = null
         val uri = recordUri
-        if (uri != null && recordOwned) saver.execute { Media.delete(this, uri) }
+        if (uri != null && recordOwned) try { saver.execute { Media.delete(this, uri) } } catch (_: RejectedExecutionException) { Media.delete(this, uri) }
         recordUri = null
         updateUi()
         if (device != null) createSession()
@@ -1490,7 +1645,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         advanced = on
         if (caller == Caller.NONE) prefs.edit().putBoolean("advanced", on).apply()
         if (!on) { aeLocked = false; gate.reset(); steadyWaiting = false }
-        if (lensChange && device != null) { closeCamera(); startCamera() } else reconfigure()
+        if (lensChange && (device != null || opening)) restartCamera() else reconfigure()
         syncAdvanced()
     }
 
@@ -1503,7 +1658,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             Apply.UI -> {}
             Apply.CAMERA -> repeat()
             Apply.SESSION -> reconfigure()
-            Apply.RESTART -> { closeCamera(); startCamera() }
+            Apply.RESTART -> restartCamera()
         }
         updateUi()
         syncAdvanced()
@@ -1683,7 +1838,9 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             "Quality" -> {
                 add(optionRow(tr("Size", "Boyut"), sizeList.map { if (mode == Mode.PHOTO) Sizes.photoLabel(it) else Sizes.videoLabel(it) }, { sizeList[it] == size }) { i ->
                     val s = sizeList[i]
-                    if (s != size && !recording) {
+                    // (after a photo still on its way: a new size replaces the JPEG reader)
+                    if (s != size && !recording) afterShots {
+                        if (recording) return@afterShots
                         prefs.edit().putString(sizeKey(aspect), s.toString()).apply()
                         reconfigure()
                         showPanel("Quality")
@@ -1837,7 +1994,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         flash = prefs.getInt(flashKey(), 0)
         aeLocked = false
         if (adv.manualFocus && manualFocusOk) dropLock()
-        if (lensChange && device != null) { closeCamera(); startCamera() } else reconfigure()
+        if (lensChange && (device != null || opening)) restartCamera() else reconfigure()
         updateUi()
         syncAdvanced()
         showPanel("Profiles")
@@ -2031,6 +2188,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     companion object {
         private const val PRE = "precapture"
+        /** Our own pending photos / videos older than this are left over from a killed app (see Media.dropStalePending). */
+        private const val STALE_PENDING_SEC = 3600L
         private const val AF_START = "af-start"
         private const val GALLERY_VIEWER = "app.plain.gallery.ViewerActivity"
         /** Plain Gallery: swipe through the camera roll from the opened item. */

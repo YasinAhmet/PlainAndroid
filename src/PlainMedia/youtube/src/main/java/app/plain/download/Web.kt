@@ -257,6 +257,7 @@ class ThumbLoader(private val ctx: Context, private val calls: Calls) {
         cache.get(url)?.let { iv.setImageBitmap(it); return }
         iv.setImageDrawable(null)
         val g = calls.gen
+        if (pool.isShutdown) return // the screen is gone (a late post after shutdown() would throw RejectedExecutionException)
         pending[iv] = pool.submit {
             val bm = try {
                 if (calls.gen != g) return@submit
@@ -301,5 +302,5 @@ class ThumbLoader(private val ctx: Context, private val calls: Calls) {
         pool.queue.clear()
     }
 
-    fun shutdown() { cancel(); pool.shutdownNow(); cache.evictAll() }
+    fun shutdown() { cancel(); pool.shutdownNow(); cache.evictAll(); pending.clear() }
 }

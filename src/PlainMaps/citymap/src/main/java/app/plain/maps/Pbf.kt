@@ -57,6 +57,12 @@ class Pb(@JvmField val b: ByteArray, @JvmField var pos: Int, @JvmField val end: 
  * Elements come out as [OsmEl], like an Overpass answer, so the same code builds the map.
  */
 class PbfExtract(private val file: File) {
+    private companion object {
+        /** OSM PBF limits: a BlobHeader under 64 KiB, a Blob (and its unpacked data) at most 32 MiB. */
+        const val MAX_HEADER = 64 * 1024
+        const val MAX_BLOB = 32 * 1024 * 1024
+    }
+
     /** Which elements to keep (on tags; tags arrive as a flat key/value array). */
     var wantRelation: (Map<String, String>) -> Boolean = { false }
     var wantWay: (Map<String, String>) -> Boolean = { false }
@@ -84,13 +90,15 @@ class PbfExtract(private val file: File) {
 
     private fun blocks(cb: (Block) -> Unit) {
         val inf = Inflater()
-        DataInputStream(file.inputStream().buffered(1 shl 16)).use { inp ->
+        try { DataInputStream(file.inputStream().buffered(1 shl 16)).use { inp ->
             var hdrBuf = ByteArray(256)
             var blobBuf = ByteArray(1 shl 16)
             var rawBuf = ByteArray(1 shl 20)
             var n = 0
             while (true) {
                 val hl = try { inp.readInt() } catch (_: EOFException) { break }
+                // the format's own limits: a damaged file must fail as damaged, not allocate gigabytes
+                if (hl !in 0..MAX_HEADER) throw IOException(tr("The map file is damaged", "Harita dosyası bozuk"))
                 if (hl > hdrBuf.size) hdrBuf = ByteArray(hl)
                 inp.readFully(hdrBuf, 0, hl)
                 var type = ""; var size = 0
@@ -100,6 +108,7 @@ class PbfExtract(private val file: File) {
                     3 -> size = h.varint().toInt()
                     else -> h.skip()
                 }
+                if (size !in 0..MAX_BLOB) throw IOException(tr("The map file is damaged", "Harita dosyası bozuk"))
                 if (size > blobBuf.size) blobBuf = ByteArray(size)
                 inp.readFully(blobBuf, 0, size)
                 if (type == "OSMHeader" && bbox == null) { header(blobBuf, size, inf); continue }
@@ -117,13 +126,15 @@ class PbfExtract(private val file: File) {
                 val dlen: Int
                 if (rawStart >= 0) { data = blobBuf.copyOfRange(rawStart, rawStart + rawLen); dlen = rawLen }
                 else if (zStart >= 0) {
+                    if (rawSize !in 0..MAX_BLOB) throw IOException(tr("The map file is damaged", "Harita dosyası bozuk"))
                     if (rawSize > rawBuf.size) rawBuf = ByteArray(rawSize)
                     inf.reset()
                     inf.setInput(blobBuf, zStart, zLen)
                     var got = 0
                     while (got < rawSize) {
                         val k = inf.inflate(rawBuf, got, rawSize - got)
-                        if (k == 0 && (inf.finished() || inf.needsInput())) break
+                        // (a damaged stream can ask for a preset dictionary: that would loop forever)
+                        if (k == 0 && (inf.finished() || inf.needsInput() || inf.needsDictionary())) break
                         got += k
                     }
                     data = rawBuf; dlen = got
@@ -131,8 +142,9 @@ class PbfExtract(private val file: File) {
                 cb(block(data, dlen))
                 if (++n % 50 == 0 && cancelled()) throw InterruptedException()
             }
+        } } finally {
+            inf.end()
         }
-        inf.end()
     }
 
     /** The extract's bounding box (w, s, e, n), from the file header. */
@@ -151,6 +163,7 @@ class PbfExtract(private val file: File) {
         val data: ByteArray
         if (rawStart >= 0) data = blob.copyOfRange(rawStart, rawStart + rawLen)
         else {
+            if (zStart < 0 || rawSize !in 0..MAX_BLOB) return // no box: the caller falls back to the city's area
             data = ByteArray(rawSize)
             inf.reset(); inf.setInput(blob, zStart, zLen); inf.inflate(data)
         }

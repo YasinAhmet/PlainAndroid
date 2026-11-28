@@ -100,7 +100,9 @@ class NotesActivity : Activity() {
             when {
                 recorder != null -> updateRecStatus()
                 player != null -> updatePlay()
-                else -> show()
+                // only reminders' "in 5 min" and the day in "today 14:05" change: don't rebuild a long list for nothing
+                notes.any { it.remindAt > 0 } || shownDay != dayOf(System.currentTimeMillis()) -> show()
+                else -> refreshChip()
             }
             val next = if (recorder != null || player?.isPlaying == true) 250L else 30_000L
             main.postDelayed(this, next)
@@ -193,7 +195,9 @@ class NotesActivity : Activity() {
         }
         updateAction()
         b?.getString("draft")?.let { field.setText(it) }
-        handle(intent)
+        // the intent that started this tab, once: not again when Android recreates it (it would overwrite the draft
+        // or play the note again)
+        if (b == null) handle(intent)
     }
 
     override fun onSaveInstanceState(out: Bundle) {
@@ -210,7 +214,7 @@ class NotesActivity : Activity() {
     /** Text shared from another app becomes the draft; a reminder notification opens (and plays) its note. */
     private fun handle(i: Intent?) {
         when (i?.action) {
-            Intent.ACTION_SEND -> i.getStringExtra(Intent.EXTRA_TEXT)?.let {
+            Intent.ACTION_SEND -> i.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }?.let {
                 val subject = i.getStringExtra(Intent.EXTRA_SUBJECT)
                 field.setText(if (!subject.isNullOrBlank() && !it.contains(subject)) "$subject\n$it" else it)
                 field.setSelection(field.text.length)
@@ -282,9 +286,14 @@ class NotesActivity : Activity() {
         show()
     }
 
+    private var shownDay = -1
+
+    private fun dayOf(t: Long) = Calendar.getInstance().apply { timeInMillis = t }.let { it.get(Calendar.YEAR) * 1000 + it.get(Calendar.DAY_OF_YEAR) }
+
     private fun show() {
         if (!::list.isInitialized) return
         val now = System.currentTimeMillis()
+        shownDay = dayOf(now)
         list.removeAllViews()
         rows.clear()
         playSub = null
@@ -300,7 +309,12 @@ class NotesActivity : Activity() {
             rest.forEach { list.addView(row(it, now)) }
         }
         empty.visibility = if (notes.isEmpty()) View.VISIBLE else View.GONE
-        if (detected != null) onTyped()   // a "in 10 min" chip keeps its time current
+        refreshChip()
+    }
+
+    /** The composer's "in 10 min" chip keeps its time current (typed or picked with the bell). */
+    private fun refreshChip() {
+        if (detected != null) onTyped() else if (pickedAt > 0 && ::bell.isInitialized) updateChip()
     }
 
     private fun heading(t: String) = text(PlainLang.upper(t), 12f, C.LABEL, bold = true).apply {
@@ -430,11 +444,14 @@ class NotesActivity : Activity() {
             else -> When.find(t, now)?.at ?: 0L   // "in 10 min" counts from the moment it's saved
         }
         val n = Note(id = Notes.newId(this), text = t, created = now, remindAt = at)
-        Notes.put(this, n)
+        if (!Notes.put(this, n)) { cantSave(); return }   // the text stays in the field
         clearComposer()
         if (at > 0) { askNotify(); toast(tr("Reminds ", "Hatırlatma: ") + When.label(at, System.currentTimeMillis())) }
         scrollTo(n.id)
     }
+
+    private fun cantSave() = Toast.makeText(this, tr("Couldn't save the note. Is the phone's storage full?",
+        "Not saklanamadı. Telefonun depolama alanı dolu mu?"), Toast.LENGTH_LONG).show()
 
     private fun scrollTo(id: Long) = main.post { rows[id]?.let { r -> scroll.smoothScrollTo(0, (r.top - dp(40)).coerceAtLeast(0)) } }
 
@@ -555,7 +572,7 @@ class NotesActivity : Activity() {
             else -> When.find(t, now)?.at ?: 0L
         }
         val n = Note(id = recId, text = t, audio = f.name, audioMs = realLength(f, dur), created = now, remindAt = at)
-        Notes.put(this, n)
+        if (!Notes.put(this, n)) { f.delete(); cantSave(); return }
         clearComposer()
         if (at > 0) askNotify()
         scrollTo(n.id)
@@ -662,8 +679,8 @@ class NotesActivity : Activity() {
 
     private fun updatePlay() {
         val p = player ?: return
-        val pos = try { p.currentPosition.toLong() } catch (_: Exception) { return }
-        playSub?.text = When.duration(pos) + " / " + When.duration(p.duration.toLong())
+        val (pos, len) = try { p.currentPosition.toLong() to p.duration.toLong() } catch (_: Exception) { return }
+        playSub?.text = When.duration(pos) + " / " + When.duration(len)
     }
 
     // ------------------------------------------------------------------ editing, sheets
@@ -682,7 +699,9 @@ class NotesActivity : Activity() {
             .setView(box)
             .setPositiveButton(tr("Save", "Sakla")) { _, _ ->
                 val t = e.text.toString().trim()
-                if (t.isEmpty() && n.audio == null) confirmDelete(n) else Notes.put(this, n.copy(text = t))
+                // the note as it is now: its reminder may have gone off (or been snoozed) while this was open
+                val cur = Notes.get(this, n.id) ?: n
+                if (t.isEmpty() && cur.audio == null) confirmDelete(cur) else if (!Notes.put(this, cur.copy(text = t))) cantSave()
             }
             .setNegativeButton(tr("Cancel", "İptal"), null)
             .create()
@@ -739,7 +758,7 @@ class NotesActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(tr("Delete this note?", "Bu not silinsin mi?"))
             .setMessage(n.title)
-            .setPositiveButton(tr("Delete", "Sil")) { _, _ -> if (n.id == playingId) stopPlay(); Notes.delete(this, n) }
+            .setPositiveButton(tr("Delete", "Sil")) { _, _ -> if (n.id == playingId) stopPlay(); if (!Notes.delete(this, n)) cantSave() }
             .setNegativeButton(tr("Cancel", "İptal"), null)
             .show()
     }

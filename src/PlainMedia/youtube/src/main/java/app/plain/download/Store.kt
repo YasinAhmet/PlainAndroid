@@ -49,13 +49,7 @@ object Store {
         JobCodec.afterRestart(loaded)
         jobs.addAll(loaded)
         try {
-            if (doneFile.exists()) doneFile.forEachLine { l ->
-                // "key" (before 3.3) or "key<TAB>uri"; a later line wins, "-key" drops the uri
-                val t = l.trim()
-                if (t.startsWith("-")) { savedUris.remove(t.substring(1)); return@forEachLine }
-                val k = t.substringBefore('\t'); val u = t.substringAfter('\t', "")
-                if (k.isNotEmpty()) { done += k; if (u.isNotEmpty()) savedUris[k] = u }
-            }
+            if (doneFile.exists()) DoneIndex.parse(doneFile.readText(), done, savedUris)
         } catch (_: Exception) {}
         // finished jobs (3.3: completed caches are saved downloads too, so "cache" jobs with a file count)
         // (not the pre-3.3 "Cache" jobs that still point into Cached/: the one-time merge decides about those)
@@ -222,7 +216,18 @@ object Store {
         val k = doneKey(id, kind)
         if (savedUris[k] == uri && k in done) return
         done += k; savedUris[k] = uri
-        try { doneFile.appendText("$k\t$uri\n") } catch (_: Exception) {}
+        appendDone("$k\t$uri")
+    }
+
+    /**
+     * One line appended to downloaded.txt. A last line left without its newline (the app was killed or the disk was
+     * full mid-write) is closed first, so the new line isn't glued onto it.
+     */
+    private fun appendDone(line: String) {
+        try {
+            val open = doneFile.length() > 0 && java.io.RandomAccessFile(doneFile, "r").use { f -> f.seek(f.length() - 1); f.read() != '\n'.code }
+            doneFile.appendText((if (open) "\n" else "") + line + "\n")
+        } catch (_: Exception) {}
     }
 
     /** The saved file is gone (deleted / trashed elsewhere): it can be downloaded again. */
@@ -259,8 +264,14 @@ object Store {
         notifyListeners()
     }
 
+    /** Whole index rewritten through a temp file + rename, so a kill mid-write can't leave it cut short (it is also read by the Music tab). */
     private fun rewriteDone() {
-        try { doneFile.writeText(done.joinToString("\n", postfix = "\n") { k -> savedUris[k]?.let { "$k\t$it" } ?: k }) } catch (_: Exception) {}
+        val text = DoneIndex.encode(done, savedUris)
+        try {
+            val tmp = File(doneFile.path + ".tmp")
+            tmp.writeText(text)
+            if (!tmp.renameTo(doneFile)) { doneFile.writeText(text); tmp.delete() }
+        } catch (_: Exception) {}
     }
 
     private fun markDone(j: Job) {
@@ -269,7 +280,7 @@ object Store {
         if (u != null) { setSaved(j.videoId, j.kind, u); return }
         if (j.cache) return
         val k = doneKey(j.videoId, j.kind)
-        if (done.add(k)) try { doneFile.appendText(k + "\n") } catch (_: Exception) {}
+        if (done.add(k)) appendDone(k)
     }
 
     // ---- follows + feed cache (UI thread only) ----

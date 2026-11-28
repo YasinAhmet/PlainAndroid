@@ -114,9 +114,10 @@ object Text {
         else -> "$n B"
     }
 
-    /** Sort key: folded, leading "the " and punctuation ignored. */
+    /** Sort key: folded, leading "the " and punctuation ignored ("The  Beatles", "The - Band" too, not before "A"). */
     fun sortKey(s: String): String {
         val f = fold(s).trimStart { !it.isLetterOrDigit() }
-        return f.removePrefix("the ")
+        if (!f.startsWith("the") || f.length <= 3 || f[3].isLetterOrDigit()) return f // "Theatre", "The" alone stay
+        return f.substring(3).trimStart { !it.isLetterOrDigit() }.ifEmpty { f }
     }
 }

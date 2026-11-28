@@ -154,8 +154,10 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         Dev.event("ui", "app visible · tab ${if (trail != null) "trail" else "plan"} · trail recording ${Trail.active} · battery ${Dev.battery(this)}")
+        // without permission (revoked mid-hike) this starts nothing but marks the recording "No location permission",
+        // so the screen says why the track stopped instead of "Starting…" — then ask again
+        Trail.ensureService(this)
         if (Trail.active && !Trail.hasPermission(this)) withLocationPermission { Trail.ensureService(this) }
-        else Trail.ensureService(this)
         Trail.setUiVisible(true)
         plan?.onVisible(true)
         trail?.onVisible(true)
@@ -356,7 +358,8 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 toast(msg)
-                if (!Trail.active) {
+                // the activity may be gone by now (rotation is handled, but Back / a kill isn't): don't build a screen on it
+                if (!Trail.active && !isFinishing && !isDestroyed) {
                     showPlan()
                     plan?.showSection(1)
                 }
@@ -400,8 +403,11 @@ class MainActivity : Activity() {
         else toast(tr("Trail recording needs Precise location permission.", "Rota kaydı için Hassas konum izni gerekir."))
     }
 
-    /** Settings: the three toggles. [onApplied] runs after any change so screens can react immediately. */
-    fun showSettings(onApplied: () -> Unit) {
+    /**
+     * Settings: the toggles. [onApplied] runs after any change so screens can react immediately; [extra] adds a
+     * screen's own rows at the top (the sheet twin of its hidden gestures).
+     */
+    fun showSettings(extra: ((Sheet) -> Unit)? = null, onApplied: () -> Unit) {
         fun option(sheet: Sheet, icon: Int, key: String, def: Boolean, title: String, desc: String) =
             sheet.toggle(icon, title, prefs.getBoolean(key, def), sub = desc) { v ->
                 prefs.edit().putBoolean(key, v).apply()
@@ -409,6 +415,7 @@ class MainActivity : Activity() {
                 onApplied()
             }
         val s = Sheet(this, C.TRACK).header(tr("Settings", "Ayarlar"), tr("Trail recording and the map", "Rota kaydı ve harita"))
+        extra?.invoke(s)
         s.section(tr("Map", "Harita"))
         option(s, Ic.ROUTE, "snap", true, tr("Snap planned trails to paths", "Planlanan rotaları patikalara oturt"),
             tr("Each tap of a plan follows OpenStreetMap footpaths and tracks (the dashed paths). Needs Wi-Fi; off = straight lines.",

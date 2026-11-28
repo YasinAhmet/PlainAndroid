@@ -44,18 +44,37 @@ object LinkedPlaylists {
     } catch (_: Exception) { null }
 
     /**
-     * downloaded.txt -> video id -> MediaStore id of its saved file (audio preferred over video).
-     * Lines: "key" (a mark without file), "key<TAB>uri" (a later line wins), "-key" (the file was forgotten).
+     * downloaded.txt -> video key ("<id>:A|V") -> content:// uri of its saved file. The same rules as the Youtube tab's
+     * reader (app.plain.download.DoneIndex.parse): "key<TAB>uri" (a later line wins), "key" (a mark without a file),
+     * "-key" (the file was forgotten).
+     *  - A YouTube id can itself start with '-' (about 1 in 64): "-x8GhAbCdEf:A<TAB>content://…" is an ordinary entry.
+     *    "-" means "forget" only on a line without a uri whose rest is a whole key with an 11-character id.
+     *  - A last line without its newline was cut short (the app was killed, the disk was full): ignored.
+     *  - Lines that aren't "<id>:A|V" are skipped; a uri that isn't content:// is not a saved file.
      */
-    fun savedIds(text: String): Map<String, Long> {
+    fun savedUris(text: String): Map<String, String> {
         val uris = HashMap<String, String>()
-        for (line in text.lineSequence()) {
-            val t = line.trim()
+        val lines = text.split('\n')
+        for (l in if (text.endsWith("\n")) lines else lines.dropLast(1)) {
+            val t = l.trim()
             if (t.isEmpty()) continue
-            if (t.startsWith("-")) { uris.remove(t.substring(1)); continue }
-            val u = t.substringAfter('\t', "")
-            if (u.isNotEmpty()) uris[t.substringBefore('\t')] = u
+            if (t.startsWith("-") && '\t' !in t && isKey(t.substring(1)) && t.substringBefore(':').length == 12) {
+                uris.remove(t.substring(1)); continue
+            }
+            val k = t.substringBefore('\t').trim()
+            if (!isKey(k)) continue
+            val u = t.substringAfter('\t', "").trim()
+            if (u.startsWith("content://")) uris[k] = u
         }
+        return uris
+    }
+
+    /** "<id>:A" / "<id>:V" with no blanks inside. */
+    private fun isKey(k: String): Boolean = k.length >= 3 && (k.endsWith(":A") || k.endsWith(":V")) && k.none { it.isWhitespace() }
+
+    /** downloaded.txt -> video id -> MediaStore id of its saved file (audio preferred over video). */
+    fun savedIds(text: String): Map<String, Long> {
+        val uris = savedUris(text)
         val out = HashMap<String, Long>()
         for (kind in listOf("V", "A")) for ((k, u) in uris) { // audio last: it wins
             if (!k.endsWith(":$kind")) continue

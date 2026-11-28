@@ -48,9 +48,11 @@ abstract class CachedSource(protected val ctx: Context, val meta: CacheMeta) {
     fun fillBlocking(cancelled: () -> Boolean, progress: (Float) -> Unit) {
         meta.lastUsed = System.currentTimeMillis()
         Store.cache.save(meta)
+        markInUse()
         try {
             while (!closed && !cancelled()) {
                 if (transient) throw IOException(tr("Not enough free storage (keeps 3 GB free)", "Yeterli boş alan yok (3 GB boş tutulur)"))
+                if (removed()) throw IOException(tr("The cached copy was removed", "Önbellekteki kopya kaldırıldı"))
                 if (!fillStep()) break
                 progress(meta.fraction)
             }
@@ -62,10 +64,11 @@ abstract class CachedSource(protected val ctx: Context, val meta: CacheMeta) {
     fun start() {
         meta.lastUsed = System.currentTimeMillis()
         Store.cache.save(meta)
+        markInUse()
         if (meta.complete) return // replay: no network at all
         thread = Thread({
             try {
-                while (!closed && fillStep()) {}
+                while (!closed && !removed() && fillStep()) {}
             } catch (e: Exception) {
                 if (!closed) synchronized(lock) { error = e; lock.notifyAll() }
             } finally {
@@ -80,10 +83,18 @@ abstract class CachedSource(protected val ctx: Context, val meta: CacheMeta) {
         synchronized(lock) { lock.notifyAll() }
         thread?.join(1500)
         persist()
+        if (inUse) { inUse = false; Store.cache.inUse(meta.kind, meta.key, false) }
         if (transient && !meta.complete) Store.cache.remove(meta.kind, meta.key)
     }
 
-    fun persist() = synchronized(lock) { Store.cache.save(meta) }
+    /** While open, the LRU trim (of this or a parallel cache job) and "Clear" leave this entry alone. */
+    private var inUse = false
+    private fun markInUse() { if (!inUse) { inUse = true; Store.cache.inUse(meta.kind, meta.key, true) } }
+
+    /** The entry's folder was deleted underneath (Remove on its Cached row): stop filling, don't bring it back. */
+    protected fun removed() = !dir.exists()
+
+    fun persist() = synchronized(lock) { if (!removed()) Store.cache.save(meta) }
 
     /** Bookkeeping after [n] new bytes: keep both caches inside their limits and 3 GB free. */
     protected fun wrote(n: Long) {
@@ -159,7 +170,12 @@ class ProgressiveSource(
                 val (nu, nua) = r(); url = nu; ua = nua
                 return true
             }
-            if (code == 416) { synchronized(lock) { if (meta.total <= 0) meta.total = start }; return true }
+            if (code == 416) {
+                // past the end of a stream of unknown size: that's its size. Anything else (a 416 for a range inside
+                // the stream, or at 0) is an error and goes through the retry delay below instead of an instant loop.
+                if (start > 0 && synchronized(lock) { if (meta.total <= 0) { meta.total = start; lock.notifyAll(); true } else false }) return true
+                throw IOException("HTTP 416")
+            }
             if (code != 206 && !(code == 200 && start == 0L)) throw IOException("HTTP $code")
             val t = Text.totalFromContentRange(con.getHeaderField("Content-Range")).takeIf { it > 0 } ?: if (code == 200) con.contentLengthLong else -1
             if (t > 0 && meta.total != t) synchronized(lock) { meta.total = t; lock.notifyAll() }
@@ -170,7 +186,7 @@ class ProgressiveSource(
                     val n = inp.read(buf)
                     if (n < 0) break
                     synchronized(lock) {
-                        raf.seek(pos); raf.write(buf, 0, n)
+                        try { raf.seek(pos); raf.write(buf, 0, n) } catch (e: IOException) { throw StorageFull(e) }
                         meta.done.add(pos, pos + n)
                         meta.size = meta.done.covered()
                         lock.notifyAll()
@@ -186,9 +202,9 @@ class ProgressiveSource(
         } catch (e: IOException) {
             con?.disconnect()
             if (closed || e is Cancelled) return false
-            if (e is NoWifi || e is Expired) throw e
+            if (e is NoWifi || e is Expired || e is StorageFull) throw e
             // Plain network errors are retried for as long as the player is open (some ISP caches reset most TLS
-            // handshakes; one segment needed 17 s of retries in the PC test). Only no-Wi-Fi / refused end it.
+            // handshakes; one segment needed 17 s of retries in the PC test). Only no-Wi-Fi / refused / a full disk end it.
             if (++tries > maxTries) throw e
             Thread.sleep(minOf(200L * tries, 2000L))
         }
@@ -203,9 +219,11 @@ class ProgressiveSource(
             waiting = false
             meta.total
         }
-        val from = range?.get(0) ?: 0L
-        val to = (range?.get(1)?.takeIf { it >= 0 } ?: (total - 1)).coerceAtMost(total - 1)
-        if (from > to) { Http.head(out, 416, "Range Not Satisfiable", mime, 0, "bytes */$total"); return }
+        // "bytes=a-b", "bytes=a-" and "bytes=-n" (the last n bytes); past the end = 416
+        val span = if (range != null) Http.span(range, total) else longArrayOf(0, total - 1)
+        if (span == null) { Http.head(out, 416, "Range Not Satisfiable", mime, 0, "bytes */$total"); return }
+        val from = span[0]
+        val to = span[1]
         Http.head(out, if (range != null) 206 else 200, if (range != null) "Partial Content" else "OK", mime, to - from + 1,
             if (range != null) "bytes $from-$to/$total" else null)
         val reader = RandomAccessFile(file, "r")
@@ -257,6 +275,7 @@ class HlsSource(
         synchronized(lock) {
             if (transient && !waiting) { lock.wait(500); return true }
             val n = meta.total
+            if (n <= 0) return false // no segments (an empty media playlist): nothing to fetch, and no "% n" below
             val gv = meta.done.firstGap(target, n)
             val ga = if (aSegs != null) meta.aDone.firstGap(target, n) else null
             if (gv == null && ga == null) return false
@@ -281,7 +300,10 @@ class HlsSource(
             if (code !in 200..299) throw IOException("HTTP $code")
             val tmp = File(dir, "tmp_" + (if (audio) "a" else "v") + idx)
             var len = 0L
-            con.inputStream.use { inp -> tmp.outputStream().use { o -> len = inp.copyTo(o, 64 shl 10) } }
+            con.inputStream.use { inp ->
+                val fo = try { tmp.outputStream() } catch (e: IOException) { if (removed()) { con?.disconnect(); return false }; throw StorageFull(e) }
+                WriteGuard(fo).use { o -> len = inp.copyTo(o, 64 shl 10) }
+            }
             done(con)
             if (closed) { tmp.delete(); return false }
             val f = file(audio, idx)
@@ -296,7 +318,7 @@ class HlsSource(
         } catch (e: IOException) {
             con?.disconnect()
             if (closed || e is Cancelled) return false
-            if (e is NoWifi || e is Expired) throw e
+            if (e is NoWifi || e is Expired || e is StorageFull) throw e
             if (++tries > maxTries) throw e
             Thread.sleep(minOf(200L * tries, 2000L))
         }
@@ -345,10 +367,29 @@ object Http {
         out.write(sb.toString().toByteArray(Charsets.ISO_8859_1))
     }
 
-    /** "bytes=a-b" / "bytes=a-" -> [a, b or -1]; null when absent or not a simple range. */
+    private val RANGE = Regex("^bytes\\s*=\\s*(\\d*)\\s*-\\s*(\\d*)\\s*(?:,.*)?$", RegexOption.IGNORE_CASE)
+
+    /**
+     * "bytes=a-b" / "bytes=a-" -> [a, b or -1]; "bytes=-n" (the last n bytes) -> [-1, n]. Only the first range of a
+     * list is used. Null when absent or invalid (b < a, "bytes=-", numbers too big): the whole file is served then,
+     * as RFC 7233 asks for a header that can't be used.
+     */
     fun range(h: String?): LongArray? {
-        val m = Regex("bytes=(\\d+)-(\\d*)").find(h ?: return null) ?: return null
-        return longArrayOf(m.groupValues[1].toLong(), m.groupValues[2].toLongOrNull() ?: -1)
+        val m = RANGE.find(h?.trim() ?: return null) ?: return null
+        val a = m.groupValues[1]; val b = m.groupValues[2]
+        if (a.isEmpty()) return b.toLongOrNull()?.let { longArrayOf(-1, it) }
+        val from = a.toLongOrNull() ?: return null
+        if (b.isEmpty()) return longArrayOf(from, -1)
+        val to = b.toLongOrNull() ?: return null
+        return if (to < from) null else longArrayOf(from, to)
+    }
+
+    /** A parsed [range] against a file of [total] bytes: [from, to] inclusive, or null when it can't be satisfied (416). */
+    fun span(r: LongArray, total: Long): LongArray? {
+        if (total <= 0) return null
+        if (r[0] < 0) { val n = r[1]; return if (n <= 0) null else longArrayOf(maxOf(0L, total - n), total - 1) }
+        if (r[0] >= total) return null
+        return longArrayOf(r[0], if (r[1] < 0) total - 1 else minOf(r[1], total - 1))
     }
 
     fun readHead(inp: InputStream): List<String> {
@@ -607,6 +648,7 @@ object Sources {
     fun video(ctx: Context, calls: Calls, info0: VideoInfo, title: String, channel: String, height: Int): CachedSource {
         if (info0.members && info0.hls == null) return membersVideo(ctx, info0, title, channel)
         var lang = "" // audio language of a dubbed video: always the original here
+        var aBase: String? = null // the audio playlist's own address (relative segment uris resolve against it)
         fun load(inf0: VideoInfo): Triple<Hls.Variant, Pair<String, String?>, String> {
             var inf = inf0
             if (inf.hls == null) inf = InnerTube.info(inf0.id, Net.network(ctx, Store.wifiOnly), order = Clients.HLS_ORDER)
@@ -616,13 +658,14 @@ object Sources {
             val v = Hls.pick(Hls.choices(master), height) ?: throw YtError(tr("No H.264 video stream", "H.264 video akışı yok"), false)
             val vText = String(WebApi.get(ctx, calls, calls.gen, v.uri, ua), Charsets.UTF_8)
             val a = v.audio?.let { master.audioFor(it, null) }
-            a?.let { lang = it.second }
+            a?.let { lang = it.second; aBase = it.first }
             val aText = a?.let { String(WebApi.get(ctx, calls, calls.gen, it.first, ua), Charsets.UTF_8) }
             return Triple(v, vText to aText, ua)
         }
         val (v, texts, ua) = load(info0)
         val vSegs = Hls.parseMedia(texts.first, v.uri)
-        val aSegs = texts.second?.let { Hls.parseMedia(it, v.uri) }
+        if (vSegs.isEmpty()) throw YtError(tr("YouTube sent an empty video playlist", "YouTube boş bir video listesi gönderdi"), false)
+        val aSegs = texts.second?.let { Hls.parseMedia(it, aBase ?: v.uri) }
         val key = CacheMeta.keyOf(info0.id, v.height, lang)
         val meta = Store.cache.get(CacheKind.VIDEO, key)?.takeIf { !it.published && it.total == vSegs.size.toLong() }
             ?: CacheMeta(CacheKind.VIDEO, info0.id, v.height, title, channel, info0.durationSec, total = vSegs.size.toLong(),
@@ -635,7 +678,7 @@ object Sources {
         val refresh = {
             val i2 = InnerTube.info(info0.id, Net.network(ctx, Store.wifiOnly), order = Clients.HLS_ORDER)
             val (v2, t2, _) = load(i2)
-            Hls.parseMedia(t2.first, v2.uri) to t2.second?.let { Hls.parseMedia(it, v2.uri) }
+            Hls.parseMedia(t2.first, v2.uri) to t2.second?.let { Hls.parseMedia(it, aBase ?: v2.uri) }
         }
         return HlsSource(ctx, meta, vSegs, aSegs, ua, refresh)
     }

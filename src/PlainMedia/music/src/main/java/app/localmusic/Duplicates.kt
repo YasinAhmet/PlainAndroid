@@ -46,18 +46,13 @@ object Duplicates {
         return Plan(removals.sortedWith(compareBy({ Text.sortKey(it.keep.tags.title) }, { it.file.path.lowercase() })), protected)
     }
 
-    /** MediaStore ids of every saved file in Plain Youtube's index ("videoId:A|V<TAB>content://…/<id>", "-key" = forgotten). */
-    fun trackedIds(downloadedTxt: String): Set<Long> {
-        val uris = HashMap<String, String>()
-        for (line in downloadedTxt.lineSequence()) {
-            val t = line.trim()
-            if (t.isEmpty()) continue
-            if (t.startsWith("-")) { uris.remove(t.substring(1)); continue }
-            val u = t.substringAfter('\t', "")
-            if (u.isNotEmpty()) uris[t.substringBefore('\t')] = u
-        }
-        return uris.values.mapNotNullTo(HashSet()) { it.substringAfterLast('/').toLongOrNull() }
-    }
+    /**
+     * MediaStore ids of every saved file in Plain Youtube's index ("videoId:A|V<TAB>content://…/<id>", "-key" = forgotten),
+     * read by [LinkedPlaylists.savedUris] (the Youtube tab's rules: an id may start with '-'; it used to be read as a
+     * "forget", so that copy lost its protection and could be trashed as a duplicate).
+     */
+    fun trackedIds(downloadedTxt: String): Set<Long> =
+        LinkedPlaylists.savedUris(downloadedTxt).values.mapNotNullTo(HashSet()) { it.substringAfterLast('/').toLongOrNull() }
 
     /**
      * The kept copy is "Song (2).m4a" and the removed one was "Song.m4a" in the same folder: the kept one takes the

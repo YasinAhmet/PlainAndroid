@@ -11,10 +11,13 @@ import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
 import app.plain.lang.PlainLang
 import app.plain.lang.tr
 import java.text.SimpleDateFormat
 import java.util.Date
+import kotlin.math.abs
 
 /**
  * The Clock tab's state and everything that happens while the app is closed. Nothing ticks in the background:
@@ -46,7 +49,9 @@ object Engine {
     // ------------------------------------------------------------------ state
 
     fun config(c: Context): PomoConfig = prefs(c).let {
-        PomoConfig(it.getInt("work", 25), it.getInt("short", 5), it.getInt("long", 15), it.getInt("every", 4), it.getBoolean("auto", true))
+        // (bounded: a damaged value must not give a 0-minute phase that ends the moment it starts, over and over)
+        PomoConfig(it.getInt("work", 25).coerceIn(1, 600), it.getInt("short", 5).coerceIn(1, 600), it.getInt("long", 15).coerceIn(1, 600),
+            it.getInt("every", 4).coerceIn(1, 20), it.getBoolean("auto", true))
     }
 
     fun setConfig(c: Context, cfg: PomoConfig) {
@@ -74,8 +79,38 @@ object Engine {
     }
 
     private fun changed(c: Context) {
+        markAnchor(c)
         refreshNotifications(c)
         listener?.invoke()
+    }
+
+    // ------------------------------------------------------------------ the wall clock changed
+
+    private fun bootCount(c: Context) = try { Settings.Global.getInt(c.contentResolver, Settings.Global.BOOT_COUNT, -1) } catch (_: Exception) { -1 }
+
+    private fun markAnchor(c: Context) {
+        prefs(c).edit().putString("anchor", Anchor(now(), SystemClock.elapsedRealtime(), bootCount(c)).encode()).apply()
+    }
+
+    /**
+     * The time or time zone was changed (by hand, a network time fix, travel). Running timers are stored as wall-clock
+     * end times, so a clock set an hour forward would end them at once: they are moved by the jump and keep their real
+     * time left. Nothing happens when nothing runs.
+     */
+    fun onClockChanged(c: Context) {
+        val pc = pomoCd(c); val tc = timerCd(c); val w = watch(c)
+        if (!pc.running && !tc.running && !w.running) return
+        val jump = Anchor.decode(prefs(c).getString("anchor", null))?.jump(now(), SystemClock.elapsedRealtime(), bootCount(c))
+        if (jump != null && abs(jump) >= 2000) {
+            val e = prefs(c).edit()
+            if (pc.running) e.putString("pomo_cd", pc.shift(jump).encode())
+            if (tc.running) e.putString("timer_cd", tc.shift(jump).encode())
+            if (w.running) e.putString("watch", w.shift(jump).encode())
+            e.apply()
+            if (pc.running) schedule(c, POMO, pc.shift(jump).endAt)
+            if (tc.running) schedule(c, TIMER, tc.shift(jump).endAt)
+        }
+        changed(c)   // (also redraws "Until 14:30" in the new time zone)
     }
 
     // ------------------------------------------------------------------ pomodoro
@@ -123,10 +158,11 @@ object Engine {
 
     // ------------------------------------------------------------------ timer
 
-    fun timerStart(c: Context, ms: Long) {
+    /** [remember]: offer this length again next time (not for "+1 min" after the timer rang). */
+    fun timerStart(c: Context, ms: Long, remember: Boolean = true) {
         silence(c)
         val cd = Countdown.start(ms, now())
-        prefs(c).edit().putLong("timer_last", ms).apply()
+        if (remember) prefs(c).edit().putLong("timer_last", ms).apply()
         save(c, TIMER, cd)
         schedule(c, TIMER, cd.endAt)
         changed(c)
@@ -151,7 +187,7 @@ object Engine {
 
     fun timerAdd(c: Context, ms: Long) {
         val cd = timerCd(c)
-        if (cd.idle) { timerStart(c, ms); return }
+        if (cd.idle) { timerStart(c, ms, remember = false); return }
         val r = cd.add(ms, now())
         save(c, TIMER, r)
         if (r.running) schedule(c, TIMER, r.endAt)
@@ -165,11 +201,11 @@ object Engine {
         changed(c)
     }
 
-    /** Stops the "time's up" sound. */
+    /** Stops the "time's up" sound (the notification goes even when the flag was already cleared, e.g. after an update). */
     fun silence(c: Context) {
+        cancel(c, N_TIMER_DONE)
         if (!ringing(c)) return
         prefs(c).edit().putBoolean("ringing", false).apply()
-        cancel(c, N_TIMER_DONE)
         listener?.invoke()
     }
 
@@ -186,15 +222,20 @@ object Engine {
 
     // ------------------------------------------------------------------ alarms
 
-    /** The alarm for [which] went off (or the phone restarted and its end time has passed). */
-    fun onEnd(c: Context, which: String) {
+    /**
+     * The alarm for [which] went off (or the phone restarted and its end time has passed). [late]: it ended a while ago
+     * (the phone was off): no alarm sound now and no next phase started by itself, just a quiet note of what happened.
+     */
+    fun onEnd(c: Context, which: String, late: Boolean = false) {
         val cd = if (which == POMO) pomoCd(c) else timerCd(c)
         if (!cd.running) return
         val t = now()
         if (cd.endAt > t + 1500) { schedule(c, which, cd.endAt); return }   // early (shouldn't happen): wait on
         if (which == TIMER) {
-            prefs(c).edit().remove("timer_cd").putBoolean("ringing", true).apply()
-            notifyTimerDone(c, cd.total)
+            prefs(c).edit().remove("timer_cd").putBoolean("ringing", !late).apply()
+            if (late) notifyLate(c, N_TIMER_DONE, tr("Timer ended at ${hm.format(Date(cd.endAt))}", "Sayaç bitti (${hm.format(Date(cd.endAt))})"),
+                tr("Timer · ${Fmt.length(cd.total)} · the phone was off", "Sayaç · ${Fmt.length(cd.total)} · telefon kapalıydı"))
+            else notifyTimerDone(c, cd.total)
         } else {
             val cfg = config(c)
             val p = pomo(c)
@@ -205,24 +246,36 @@ object Engine {
             }
             val n = p.next(cfg)
             prefs(c).edit().putString("pomo", n.encode()).apply()
-            val next = if (cfg.auto) Countdown.start(cfg.ms(n.phase), t) else Countdown.ready(cfg.ms(n.phase))
+            val next = if (cfg.auto && !late) Countdown.start(cfg.ms(n.phase), t) else Countdown.ready(cfg.ms(n.phase))
             save(c, POMO, next)
             if (next.running) schedule(c, POMO, next.endAt)
-            notifyPhase(c, p.phase, n, cfg)
+            if (late) notifyLate(c, N_POMO_DONE, tr("${p.phase.label} ended at ${hm.format(Date(cd.endAt))}", "${p.phase.label} bitti (${hm.format(Date(cd.endAt))})"),
+                tr("Next: ${n.phase.label}. Tap Start when ready.", "Sıradaki: ${n.phase.label}. Hazır olunca Başlat'a dokunun."))
+            else notifyPhase(c, p.phase, n, cfg)
         }
         changed(c)
     }
 
-    /** After a restart or an update: alarms and notifications are gone, so set them again (ends that passed fire now). */
+    /**
+     * After a restart or an update: alarms and notifications are gone, so set them again. An end that passed fires now:
+     * with the alarm when it was just now, quietly when it was a while ago ([LATE_MS]). A "time's up" still ringing
+     * from before is stopped first (before, the flag was cleared after a timer had just rung, so its Stop did nothing).
+     */
     fun restore(c: Context) {
+        if (ringing(c)) prefs(c).edit().putBoolean("ringing", false).apply()
+        cancel(c, N_TIMER_DONE)
         for (w in listOf(POMO, TIMER)) {
             val cd = if (w == POMO) pomoCd(c) else timerCd(c)
             if (!cd.running) continue
-            if (cd.endAt <= now()) onEnd(c, w) else schedule(c, w, cd.endAt)
+            val t = now()
+            if (cd.endAt <= t) onEnd(c, w, late = t - cd.endAt > LATE_MS) else schedule(c, w, cd.endAt)
         }
-        if (ringing(c)) prefs(c).edit().putBoolean("ringing", false).apply()
+        markAnchor(c)
         refreshNotifications(c)
     }
+
+    /** An end found this long after it passed (the phone was off) no longer rings. */
+    const val LATE_MS = 3 * 60_000L
 
     private fun alarmPi(c: Context, which: String) = PendingIntent.getBroadcast(c, if (which == POMO) 100 else 101,
         Intent(c, ClockReceiver::class.java).setAction(ClockReceiver.END).putExtra(ClockReceiver.WHICH, which),
@@ -248,8 +301,12 @@ object Engine {
     private fun nm(c: Context) = c.getSystemService(NotificationManager::class.java)
     private fun cancel(c: Context, id: Int) { nm(c)?.cancel(id) }
 
-    /** False when Android won't show our notifications (then timers can't ring). */
-    fun canNotify(c: Context) = nm(c)?.areNotificationsEnabled() != false
+    /** False when Android won't show our notifications, or [channel] was switched off (then timers can't ring). */
+    fun canNotify(c: Context, channel: String? = null): Boolean {
+        val nm = nm(c) ?: return true
+        if (!nm.areNotificationsEnabled()) return false
+        return channel == null || nm.getNotificationChannel(channel)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
 
     fun channels(c: Context) {
         val nm = nm(c) ?: return
@@ -362,6 +419,14 @@ object Engine {
             .build()
         n.flags = n.flags or Notification.FLAG_INSISTENT   // the alarm sound repeats until Stop
         nm(c)?.notify(N_TIMER_DONE, n)
+    }
+
+    /** What ended while the phone was off: on the silent channel, no sound and no vibration. */
+    private fun notifyLate(c: Context, id: Int, title: String, text: String) {
+        PlainLang.init(c)
+        channels(c)
+        val b = base(c, CH_RUN).setContentTitle(title).setContentText(text).setAutoCancel(true).setTimeoutAfter(60 * 60_000L)
+        nm(c)?.notify(id, b.build())
     }
 
     private fun notifyPhase(c: Context, ended: Phase, next: Pomo, cfg: PomoConfig) {

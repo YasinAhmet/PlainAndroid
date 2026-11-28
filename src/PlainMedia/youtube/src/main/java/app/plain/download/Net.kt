@@ -15,6 +15,16 @@ import app.plain.lang.tr
 class NoWifi : IOException(tr("Not on Wi-Fi (Wi-Fi only is on)", "Wi-Fi bağlı değil (Yalnızca Wi-Fi açık)"))
 class Expired : IOException(tr("Stream link expired or refused (HTTP 403)", "Akış bağlantısının süresi doldu ya da reddedildi (HTTP 403)"))
 class Cancelled : IOException("Cancelled")
+/** Writing to the phone's storage failed (in practice: it is full). Not a network error, so never retried. */
+class StorageFull(cause: Throwable? = null) : IOException(tr("Not enough free storage", "Yeterli boş alan yok"), cause)
+
+/** An output stream whose write failures are [StorageFull] (so network retry loops don't spin on a full disk). */
+class WriteGuard(private val o: java.io.OutputStream) : java.io.OutputStream() {
+    override fun write(b: Int) = try { o.write(b) } catch (e: IOException) { throw StorageFull(e) }
+    override fun write(b: ByteArray, off: Int, len: Int) = try { o.write(b, off, len) } catch (e: IOException) { throw StorageFull(e) }
+    override fun flush() = try { o.flush() } catch (e: IOException) { throw StorageFull(e) }
+    override fun close() = o.close()
+}
 
 object Net {
     /**
@@ -195,7 +205,9 @@ class Fetcher(
         if (total > 0 && pos > total) { dest.delete(); pos = 0 }
         var tries = 0
         val buf = ByteArray(64 shl 10)
-        FileOutputStream(dest, true).use { out ->
+        val file = try { FileOutputStream(dest, true) } catch (e: IOException) { throw StorageFull(e) }
+        file.use { fo ->
+            val out = WriteGuard(fo) // a full disk fails at once instead of 60 network retries
             while (total < 0 || pos < total) {
                 if (cancelled()) throw Cancelled()
                 val net = Net.network(ctx, wifiOnly)
@@ -208,7 +220,13 @@ class Fetcher(
                     con.setRequestProperty("Accept-Encoding", "identity")
                     val code = con.responseCode
                     when {
-                        code == 206 || code == 200 && pos == 0L -> {
+                        code == 206 || code == 200 -> {
+                            if (code == 200 && pos > 0) {
+                                // the server ignored the Range header and sends the whole file: the part starts over
+                                // (asking again would only get the same answer, 60 times)
+                                try { fo.channel.truncate(0) } catch (e: IOException) { throw StorageFull(e) }
+                                pos = 0
+                            }
                             val t = Text.totalFromContentRange(con.getHeaderField("Content-Range"))
                             if (t > 0) total = t else if (code == 200) total = con.contentLengthLong
                             con.inputStream.use { inp ->
@@ -229,7 +247,7 @@ class Fetcher(
                         else -> throw IOException("HTTP $code")
                     }
                 } catch (e: IOException) {
-                    if (e is Cancelled || e is Expired || e is NoWifi) throw e
+                    if (e is Cancelled || e is Expired || e is NoWifi || e is StorageFull) { con?.disconnect(); throw e }
                     con?.disconnect()
                     if (++tries > MAX_TRIES) throw IOException(tr("Download failed: ${e.message}", "İndirme başarısız: ${e.message}"), e)
                     Thread.sleep(minOf(200L * tries, 2000L))

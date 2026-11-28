@@ -25,9 +25,12 @@ object Hold {
         act.menu(item.title.ifEmpty { item.id }, items)
     }
 
-    /** Android share sheet with the video's YouTube link (title as subject). Nothing is uploaded by the app. */
-    fun shareLink(ctx: android.content.Context, videoId: String, title: String) {
-        val url = "https://youtu.be/$videoId"
+    /** "https://youtu.be/<id>", or "…?t=<seconds>" to open at [atSec] (YouTube's own start-time parameter). */
+    fun link(videoId: String, atSec: Long = 0): String = "https://youtu.be/$videoId" + if (atSec > 0) "?t=$atSec" else ""
+
+    /** Android share sheet with the video's YouTube link (title as subject), at [atSec] when > 0. Nothing is uploaded by the app. */
+    fun shareLink(ctx: android.content.Context, videoId: String, title: String, atSec: Long = 0) {
+        val url = link(videoId, atSec)
         val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(android.content.Intent.EXTRA_TEXT, if (title.isBlank()) url else "$title\n$url")

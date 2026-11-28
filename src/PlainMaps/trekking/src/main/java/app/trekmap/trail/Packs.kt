@@ -135,6 +135,9 @@ object Packs {
         val db = SQLiteDatabase.openDatabase(
             file(id).path, null,
             SQLiteDatabase.CREATE_IF_NECESSARY or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING,
+            // Android's default handler DELETES a database it finds a damaged page in: one bad sector would silently
+            // take the whole offline map (maybe the only one for this hike). Keep it: unreadable tiles show as missing.
+            android.database.DatabaseErrorHandler { Dev.event("maps", "map $id reported corruption — kept; unreadable tiles show as missing") },
         )
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS tiles(l INTEGER NOT NULL, z INTEGER NOT NULL, x INTEGER NOT NULL, " +
@@ -185,6 +188,12 @@ object Packs {
         db(p.id).execSQL("INSERT OR REPLACE INTO meta(k,v) VALUES('info',?)", arrayOf<Any>(p.toJson()))
     }
 
+    /** [saveMeta] that can't throw (storage full, pack being deleted): the in-memory state still holds. */
+    fun trySaveMeta(p: Pack): Boolean = try { saveMeta(p); true } catch (e: Exception) {
+        Dev.event("download", "could not save map info for ${p.name}: $e")
+        false
+    }
+
     /** The trail a corridor pack follows (null for whole-area packs). */
     fun corridor(p: Pack): List<Seg>? {
         if (p.corridorM <= 0) return null
@@ -198,7 +207,7 @@ object Packs {
 
     fun rename(p: Pack, name: String) {
         p.name = name
-        saveMeta(p)
+        trySaveMeta(p)
     }
 
     fun sizeBytes(p: Pack): Long = file(p.id).length() + File(file(p.id).path + "-wal").length()

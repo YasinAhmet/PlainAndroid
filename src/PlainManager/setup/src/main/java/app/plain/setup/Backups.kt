@@ -15,6 +15,7 @@ object Backups {
 
     /** Copies the installed APK of [pkg] unless it's missing or already [newCode]. Never throws. */
     fun save(ctx: Context, pkg: String, newCode: Long) {
+        var tmp: File? = null
         try {
             val pm = ctx.packageManager
             val pi = try { pm.getPackageInfo(pkg, 0) } catch (_: PackageManager.NameNotFoundException) { return }
@@ -28,12 +29,13 @@ object Backups {
             val name = fileName(code, pi.versionName)
             val dst = File(d, name)
             if (dst.isFile && dst.length() == src.length()) return
-            val tmp = File(d, "$name.part")
-            src.inputStream().use { i -> tmp.outputStream().use { o -> i.copyTo(o, 64 * 1024) } }
-            d.listFiles()?.forEach { if (it != tmp) it.delete() }
-            tmp.renameTo(dst)
+            val part = File(d, "$name.part").also { tmp = it }
+            src.inputStream().use { i -> part.outputStream().use { o -> i.copyTo(o, 64 * 1024) } }
+            d.listFiles()?.forEach { if (it != part) it.delete() }
+            part.renameTo(dst)
         } catch (_: Exception) {
-            // A failed backup must never block the update.
+            // A failed backup must never block the update; a half copy (disk full) must not stay behind.
+            try { tmp?.delete() } catch (_: Exception) {}
         }
     }
 

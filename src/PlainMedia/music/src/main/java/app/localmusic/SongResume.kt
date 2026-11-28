@@ -56,8 +56,20 @@ object SongResume {
     fun get(s: Song): Long {
         if (!::prefs.isInitialized || s.id < 0) return 0
         val best = keys(s.id).mapNotNull { decode(prefs.getString(it, null)) }.maxByOrNull { it.third } ?: return 0
-        return if (worthKeeping(best.first, s.durationMs)) best.first else 0
+        return pick(best, s.durationMs)
     }
+
+    /**
+     * The place to continue from, given a stored (pos, dur, at) and the song's length now. MediaStore leaves DURATION 0
+     * for some files: then the length stored with the place (the player's) decides whether it was played to the end.
+     */
+    fun pick(stored: Triple<Long, Long, Long>, durMs: Long): Long {
+        val len = durMs.takeIf { it > 0 } ?: stored.second
+        return if (worthKeeping(stored.first, len)) stored.first else 0
+    }
+
+    /** Where loading a song starts: [at] unless it is not inside the song (unknown length: trusted). */
+    fun startAt(at: Long, lenMs: Long): Long = if (at <= 0 || (lenMs > 0 && at >= lenMs)) 0 else at
 
     fun put(id: Long, posMs: Long, durMs: Long) {
         if (!::prefs.isInitialized || id < 0) return

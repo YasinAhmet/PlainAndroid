@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -75,6 +76,9 @@ class RecorderService : Service() {
         // a startForegroundService must be answered with startForeground, even when recording then fails
         if (!goForeground()) { fail(tr("Couldn't start recording.", "Kayıt başlatılamadı.")); return }
         if (recorder != null) return
+        // stop (and keep the file) before the storage runs out: a recording cut off by a full disk can't be saved
+        val limit = Format.recordLimit(Recordings.freeBytes())
+        if (limit <= 0L) return fail(tr("The phone's storage is full.", "Telefonun depolama alanı dolu."))
         val u = Recordings.create(this, System.currentTimeMillis())
             ?: return fail(tr("Couldn't create the file.", "Dosya oluşturulamadı."))
         var r: MediaRecorder? = null
@@ -89,6 +93,11 @@ class RecorderService : Service() {
             r.setAudioSamplingRate(44_100)
             r.setAudioEncodingBitRate(96_000)
             r.setOutputFile(fd.fileDescriptor)
+            if (limit < Long.MAX_VALUE) r.setMaxFileSize(limit)
+            r.setOnInfoListener { _, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED)
+                    main.post { stop(tr("Storage almost full: recording stopped and saved.", "Depolama neredeyse dolu: kayıt durduruldu ve kaydedildi.")) }
+            }
             r.setOnErrorListener { _, _, _ -> main.post { stop() } }
             r.prepare()
             r.start()
@@ -104,26 +113,60 @@ class RecorderService : Service() {
         uri = u
         accumulated = 0
         since = SystemClock.elapsedRealtime()
+        callPaused = false
         setState(RecState.RECORDING)
         notifyNow()
+        watchCalls(true)
     }
 
-    private fun pause() {
-        val r = recorder ?: return
-        if (state != RecState.RECORDING) return
-        try { r.pause() } catch (_: Exception) { return }
+    /** Pauses; [byCall] = the phone went into a call (resumes by itself after it). False when nothing changed. */
+    private fun pause(byCall: Boolean = false, message: String? = null): Boolean {
+        val r = recorder ?: return false
+        if (state != RecState.RECORDING) return false
+        try { r.pause() } catch (_: Exception) { return false }
         accumulated += SystemClock.elapsedRealtime() - since
-        setState(RecState.PAUSED)
+        callPaused = byCall
+        setState(RecState.PAUSED, message)
         notifyNow()
+        return true
     }
 
-    private fun resume() {
+    private fun resume(message: String? = null) {
         val r = recorder ?: return
         if (state != RecState.PAUSED) return
         try { r.resume() } catch (_: Exception) { return }
+        callPaused = false
         since = SystemClock.elapsedRealtime()
-        setState(RecState.RECORDING)
+        setState(RecState.RECORDING, message)
         notifyNow()
+    }
+
+    // ------------------------------------------------------------------ calls (Android 12+)
+    // A phone or internet call takes the microphone, so the recording would go on as silence. It pauses when the
+    // phone rings or a call starts and goes on by itself once the call is over (a pause the user made stays).
+    // The listener exists only while recording; no phone permission is needed.
+
+    /** Paused by a call (not by the user). */
+    private var callPaused = false
+    /** AudioManager.OnModeChangedListener (API 31), kept untyped so older Android never loads the type. */
+    private var modeListener: Any? = null
+
+    private fun watchCalls(on: Boolean) {
+        if (Build.VERSION.SDK_INT < 31) return
+        val am = getSystemService(AudioManager::class.java) ?: return
+        (modeListener as? AudioManager.OnModeChangedListener)?.let { try { am.removeOnModeChangedListener(it) } catch (_: Exception) {} }
+        modeListener = null
+        if (!on) return
+        val l = AudioManager.OnModeChangedListener { mode -> onAudioMode(mode) }
+        try { am.addOnModeChangedListener(mainExecutor, l); modeListener = l } catch (_: Exception) {}
+    }
+
+    private fun onAudioMode(mode: Int) {
+        if (recorder == null) return
+        when (Format.callAction(mode != AudioManager.MODE_NORMAL, state == RecState.RECORDING, state == RecState.PAUSED, callPaused)) {
+            Format.CALL_PAUSE -> pause(byCall = true, message = tr("Paused for the call.", "Arama için duraklatıldı."))
+            Format.CALL_RESUME -> resume(tr("Call over: recording again.", "Arama bitti: kayıt sürüyor."))
+        }
     }
 
     private var okStop = false
@@ -132,6 +175,8 @@ class RecorderService : Service() {
     private fun finishRecorder(): Uri? {
         val r = recorder ?: return null
         recorder = null
+        watchCalls(false)
+        callPaused = false
         okStop = try { r.stop(); true } catch (_: Exception) { false }  // throws when nothing was recorded
         try { r.release() } catch (_: Exception) {}
         try { file?.close() } catch (_: Exception) {}
@@ -141,7 +186,8 @@ class RecorderService : Service() {
         return u
     }
 
-    private fun stop() {
+    /** Stops and saves; [note] replaces "Saved." (e.g. why it stopped by itself). */
+    private fun stop(note: String? = null) {
         if (recorder == null) { if (state != RecState.SAVING) quit(); return }
         val length = elapsed()
         accumulated = length   // the clock holds still while saving
@@ -154,7 +200,7 @@ class RecorderService : Service() {
             if (!saved && u != null) Recordings.discard(app, u)
             main.post {
                 val msg = when {
-                    saved -> tr("Saved.", "Kaydedildi.")
+                    saved -> note ?: tr("Saved.", "Kaydedildi.")
                     length < 1500 -> tr("Too short, nothing saved.", "Çok kısa, kaydedilmedi.")
                     else -> tr("Recording failed, nothing saved.", "Kayıt başarısız, kaydedilmedi.")
                 }
@@ -204,7 +250,11 @@ class RecorderService : Service() {
         val b = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.voc_ic_mic)
             .setColor(ACCENT)
-            .setContentTitle(if (paused) tr("Paused", "Duraklatıldı") else tr("Recording…", "Kayıt yapılıyor…"))
+            .setContentTitle(when {
+                paused && callPaused -> tr("Paused for the call", "Arama için duraklatıldı")
+                paused -> tr("Paused", "Duraklatıldı")
+                else -> tr("Recording…", "Kayıt yapılıyor…")
+            })
             .setContentText(if (paused) Format.clock(elapsed()) else tr("Plain Camera · Record Voice", "Plain Camera · Ses Kaydı"))
             .setContentIntent(openPi)
             .setOngoing(true)

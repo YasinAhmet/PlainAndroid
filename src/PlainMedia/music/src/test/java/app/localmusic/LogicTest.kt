@@ -935,16 +935,36 @@ class LinkedPlaylistsTest {
     private fun s(id: Long) = Song(id, "t$id", "A", "", "", -1, "", 0, 1, 0, 180_000, "Music/PlainDownload/A/", "t$id.m4a", 1, 0)
 
     @Test fun savedIndexPrefersAudioAndHonoursForgets() {
-        val m = LinkedPlaylists.savedIds("""
-            aaa:V	content://media/external_primary/video/media/10
-            aaa:A	content://media/external_primary/audio/media/11
-            bbb:A
-            bbb:A	content://media/external_primary/audio/media/20
-            ccc:A	content://media/external_primary/audio/media/30
-            -ccc:A
-            ddd:V	content://media/external_primary/video/media/40
-        """.trimIndent())
-        assertEquals(mapOf("aaa" to 11L, "bbb" to 20L, "ddd" to 40L), m)
+        // real ids are 11 characters, and the Youtube tab ends every line with a newline
+        val m = LinkedPlaylists.savedIds(
+            "aaaaaaaaaaa:V\tcontent://media/external_primary/video/media/10\n" +
+            "aaaaaaaaaaa:A\tcontent://media/external_primary/audio/media/11\n" +
+            "bbbbbbbbbbb:A\n" +
+            "bbbbbbbbbbb:A\tcontent://media/external_primary/audio/media/20\n" +
+            "ccccccccccc:A\tcontent://media/external_primary/audio/media/30\n" +
+            "-ccccccccccc:A\n" +
+            "ddddddddddd:V\tcontent://media/external_primary/video/media/40\n")
+        assertEquals(mapOf("aaaaaaaaaaa" to 11L, "bbbbbbbbbbb" to 20L, "ddddddddddd" to 40L), m)
+    }
+
+    @Test fun idsStartingWithADashAreEntriesNotForgets() {
+        // about 1 in 64 YouTube ids starts with '-': such a line used to be read as "forget", so the song was missing
+        // from its linked playlist and the resume mapping, and "Remove duplicates" no longer protected that copy
+        val t = "-x8GhAbCdEf:A\tcontent://media/external/audio/media/77\n" +
+            "abcdefghijk:A\tcontent://media/external/audio/media/78\n" +
+            "-abcdefghijk:A\n" +                                          // forget abcdefghijk:A
+            "-x8GhAbCdEf:V\n" +                                           // a mark of the '-' id (no file), not a forget
+            "hello world\n" + "plain:A\tfile:///sdcard/x.mp3\n" +         // not a key / not a saved file
+            "zzzzzzzzzzz:A\tcontent://media/external/audio/media/8"      // cut short (no newline): ignored
+        assertEquals(mapOf("-x8GhAbCdEf" to 77L), LinkedPlaylists.savedIds(t))
+        assertEquals(setOf(77L), Duplicates.trackedIds(t))
+        // a forget of a '-' id: '-' + "-x8GhAbCdEf:A"
+        assertTrue(LinkedPlaylists.savedIds("-x8GhAbCdEf:A\tcontent://media/external/audio/media/77\n--x8GhAbCdEf:A\n").isEmpty())
+        // the copy the Youtube tab indexes stays protected from "Remove duplicates"
+        fun f(id: Long, path: String) = FileInfo(id, path.substringBeforeLast('/') + "/", path.substringAfterLast('/'), 5, 100_000, "audio/mp4", 128_000,
+            Naming.resolve(RawTags(title = "Song", artist = "A"), path.substringAfterLast('/'), ""), null, "h")
+        val plan = Duplicates.plan(listOf(f(76, "Music/a/Song.m4a"), f(77, "Music/PlainDownload/A/Song.m4a")), Duplicates.trackedIds(t))
+        assertEquals(listOf(76L), plan.removals.map { it.file.id })
     }
 
     @Test fun playlistFillsInSourceOrderAndKeepsUserEdits() {
@@ -979,5 +999,367 @@ class LinkedPlaylistsTest {
         val out = LinkedPlaylists.dropLink(json, "yt:a")!!
         assertEquals(listOf("yt:b"), LinkedPlaylists.decodeLinks(out).map { it.key })
         assertNull(LinkedPlaylists.dropLink(json, "yt:zzz"))
+    }
+}
+
+// --- edge cases and stress (2026-11-28 pass) -------------------------------------------------------------------
+
+class QueueEdgeTest {
+    /** The old retain: remove one by one from the back. The one-pass version must give exactly the same queue. */
+    private fun slowRetain(q: PlayQueue, keep: (Long) -> Boolean) { for (p in q.order.indices.reversed()) if (!keep(q.items[q.order[p]])) q.removeAt(p) }
+    private fun slowClear(q: PlayQueue) { for (p in q.size - 1 downTo q.pos + 1) q.removeAt(p) }
+    private fun copy(q: PlayQueue) = PlayQueue().apply { restore(q.save()) }
+    private fun consistent(q: PlayQueue) {
+        assertEquals(q.items.indices.toList(), q.order.sorted())
+        if (q.isEmpty()) assertEquals(-1, q.pos) else assertTrue(q.pos in q.order.indices)
+    }
+
+    @Test fun onePassRetainAndClearMatchRemovingOneByOne() {
+        val rnd = Random(7)
+        repeat(600) { round ->
+            val n = rnd.nextInt(12)
+            val q = PlayQueue(Random(round.toLong()))
+            val ids = List(n) { 1L + rnd.nextInt(6) } // the same song can be queued twice
+            q.set(ids, if (n == 0) 0 else rnd.nextInt(n), rnd.nextBoolean())
+            q.repeat = Repeat.values()[rnd.nextInt(3)]
+            if (n > 0) q.jump(rnd.nextInt(n))
+            val drop = (1L..6L).filter { rnd.nextBoolean() }.toSet()
+            val a = copy(q); val b = copy(q)
+            a.retain { it !in drop }; slowRetain(b) { it !in drop }
+            assertEquals(b.playOrder(), a.playOrder()); assertEquals(b.pos, a.pos); assertEquals(b.items, a.items)
+            consistent(a)
+            val c = copy(q); val d = copy(q)
+            c.clearAfterCurrent(); slowClear(d)
+            assertEquals(d.playOrder(), c.playOrder()); assertEquals(d.pos, c.pos); assertEquals(d.current(), c.current())
+            consistent(c)
+        }
+    }
+
+    @Test fun twentyThousandSongQueueEditsAreFast() {
+        val ids = (1L..20_000L).toList()
+        val q = PlayQueue(Random(1))
+        q.set(ids, 0, true)
+        val cur = q.current()
+        val t0 = System.nanoTime()
+        q.retain { it % 2L == 0L || it == cur } // half the library vanished (an SD card, Plain Youtube's cache)
+        assertEquals(cur, q.current()); assertEquals(10_000 + (if (cur!! % 2L == 0L) 0 else 1), q.size)
+        q.jump(5000)
+        q.clearAfterCurrent()
+        assertEquals(5001, q.size)
+        q.playNext((100_000L until 120_000L).toList()) // "Play next" on all songs
+        assertEquals(25_001, q.size)
+        assertEquals(100_000L, q.idAt(q.pos + 1))
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        println("20k queue edits: $ms ms")
+        assertTrue("took $ms ms", ms < 2000)
+        consistent(q)
+    }
+
+    @Test fun playNextKeepsTheOrderAndAnEmptyQueueStartsAtTheFirst() {
+        val q = PlayQueue(); q.set(listOf(1L, 2L, 3L), 1, false)
+        q.playNext(listOf(10L, 11L, 12L))
+        assertEquals(listOf(1L, 2L, 10L, 11L, 12L, 3L), q.playOrder()); assertEquals(2L, q.current())
+        val s = PlayQueue(Random(2)); s.set(listOf(1L, 2L, 3L), 0, true)
+        s.playNext(listOf(10L, 11L))
+        assertEquals(listOf(10L, 11L), s.playOrder().subList(s.pos + 1, s.pos + 3))
+        val e = PlayQueue(); e.playNext(listOf(5L, 6L, 7L))
+        assertEquals(5L, e.current()) // was 7 (the songs went in one by one, the last one first)
+        e.playNext(emptyList()); assertEquals(3, e.size)
+        consistent(q); consistent(s); consistent(e)
+    }
+
+    @Test fun tinyAndEmptyQueues() {
+        val one = PlayQueue(Random(4)); one.setShuffled(listOf(9L))
+        assertEquals(9L, one.current()); assertNull(one.peekNext(auto = true))
+        one.setShuffle(false); one.setShuffle(true); assertEquals(9L, one.current())
+        one.repeat = Repeat.ALL; assertEquals(0, one.peekNext(auto = false)); assertEquals(0, one.peekPrev())
+        one.removeAt(0); assertTrue(one.isEmpty()); assertNull(one.current()); assertNull(one.peekNext(false)); assertNull(one.peekPrev())
+        one.clearAfterCurrent(); one.retain { false }; one.move(0, 1); one.removeAt(3); one.jump(2); one.setShuffle(false)
+        assertTrue(one.isEmpty())
+        val e = PlayQueue(); e.setShuffled(emptyList()); assertTrue(e.isEmpty()); assertEquals(-1, e.pos)
+        // the last song removed while current, repeat off: the queue itself points at the one before (Player then goes
+        // to the first song, paused, like Next at the end); repeat all: back to the first
+        val q = PlayQueue(); q.set(listOf(1L, 2L, 3L), 2, false); q.removeAt(2); assertEquals(2L, q.current())
+        q.set(listOf(1L, 2L, 3L), 2, false); q.repeat = Repeat.ALL; q.removeAt(2); assertEquals(1L, q.current())
+        // garbage from older versions or a cut-off write
+        val g = PlayQueue(); g.restore(mapOf("items" to "1,x,,3", "order" to "5,0", "pos" to "-4", "shuffle" to "true", "repeat" to "SOMETIMES"))
+        assertEquals(listOf(1L, 3L), g.playOrder()); assertEquals(1L, g.current()); assertFalse(g.shuffle); assertEquals(Repeat.OFF, g.repeat)
+        g.restore(mapOf("items" to null, "order" to null, "pos" to null)); assertTrue(g.isEmpty())
+    }
+}
+
+class ResumeEdgeTest {
+    @Test fun unknownLengthsAndOddPlaces() {
+        assertEquals(60_000L, SongResume.pick(Triple(60_000L, 0L, 1L), 0))      // nothing knows the length: kept
+        assertEquals(0L, SongResume.pick(Triple(175_000L, 180_000L, 1L), 0))    // the stored length says it was nearly done
+        assertEquals(60_000L, SongResume.pick(Triple(60_000L, 180_000L, 1L), 0))
+        assertEquals(0L, SongResume.pick(Triple(3_000L, 0L, 1L), 200_000))      // barely started
+        assertEquals(0L, SongResume.pick(Triple(190_000L, 0L, 1L), 200_000))    // MediaStore's length wins when it has one
+        assertEquals(0L, SongResume.pick(Triple(300_000L, 0L, 1L), 200_000))    // past the end (file replaced)
+        assertEquals(0L, SongResume.startAt(250_000, 200_000))                  // outside the song: from the start
+        assertEquals(50_000L, SongResume.startAt(50_000, 0))                    // unknown length: trusted
+        assertEquals(0L, SongResume.startAt(-5, 0))
+        assertEquals(0L, SongResume.startAt(200_000, 200_000))
+        assertEquals(Triple(5L, 0L, 9L), SongResume.decode("5,9"))              // 3.3's "pos,at"
+        assertEquals(Triple(5L, 0L, 0L), SongResume.decode("5,,"))
+        assertNull(SongResume.decode("x,1,2")); assertNull(SongResume.decode("")); assertNull(SongResume.decode(null))
+        assertFalse(SongResume.worthKeeping(Long.MIN_VALUE, 0)); assertTrue(SongResume.worthKeeping(Long.MAX_VALUE, 0))
+    }
+}
+
+class SortEdgeTest {
+    @Test fun articlesPunctuationAndEmptyTags() {
+        assertEquals("beatles", Text.sortKey("The  Beatles"))
+        assertEquals("beatles", Text.sortKey("  the Beatles"))
+        assertEquals("band", Text.sortKey("The - Band"))
+        assertEquals("theatre", Text.sortKey("Theatre"))
+        assertEquals("the", Text.sortKey("The"))
+        assertEquals("1975", Text.sortKey("The 1975"))
+        assertEquals("", Text.sortKey("")); assertEquals("", Text.sortKey("★★"))
+        assertEquals("song", Text.sortKey("🎵 Song"))
+        // songs without artist / album / year / date sort without trouble, unknowns last
+        fun s(id: Long, artist: String, album: String, year: Int) = Song(id, "t$id", artist, album, "", -1, "", 0, 1, year, 1000, "Download/", "t$id.mp3", 1, 0)
+        val l = listOf(s(1, "", "", 0), s(2, "Zed", "Z", 2001), s(3, "Ann", "", 1999))
+        for (o in Sorting.options(Sorting.Kind.SONGS)) assertEquals(3, Sorting.songs(l, o.id).size)
+        assertEquals(listOf(2L, 3L, 1L), Sorting.songs(l, "year").map { it.id })
+        assertEquals(listOf(3L, 1L, 2L), Sorting.songs(l, "artist").map { it.id }) // "Unknown Artist" between A and Z
+    }
+
+    @Test fun turkishLettersSortWithTheirBaseLetters() {
+        val titles = listOf("Zeytin", "Çiçek", "Cem", "Ömür", "Oya", "Şeker", "Su", "Ünal", "Uçak", "İnci", "Irmak", "ılık", "Ağrı", "Ag")
+        // accent-insensitive (Ç with C, Ş with S, İ / I / ı with i); raw character order put "Çiçek" after "Zeytin"
+        assertEquals(listOf("Ag", "Ağrı", "Cem", "Çiçek", "ılık", "İnci", "Irmak", "Ömür", "Oya", "Şeker", "Su", "Uçak", "Ünal", "Zeytin"),
+            titles.sortedBy { Text.sortKey(it) })
+        assertEquals(Text.sortKey("ISTANBUL"), Text.sortKey("İstanbul"))
+        assertEquals(Text.sortKey("ışık"), Text.sortKey("IŞIK"))
+    }
+
+    @Test fun twentyThousandSongsSortQuicklyAndTheSame() {
+        val rnd = Random(3)
+        val songs = (1L..20_000L).map { i ->
+            Song(i, "Şarkı ${rnd.nextInt(5000)}", "The Artist ${rnd.nextInt(800)}", if (i % 7 == 0L) "" else "Albüm ${rnd.nextInt(2000)}", "", -1, "",
+                rnd.nextInt(15), 1, if (i % 5 == 0L) 0 else 1990 + rnd.nextInt(30), 120_000L + rnd.nextInt(200_000), "Music/A${i % 300}/", "s$i.mp3", 1, rnd.nextInt(1_000_000).toLong())
+        }
+        val t0 = System.nanoTime()
+        val lib = LibraryIndex(songs)
+        val tIndex = (System.nanoTime() - t0) / 1_000_000
+        val t1 = System.nanoTime()
+        for (o in Sorting.options(Sorting.Kind.SONGS)) assertEquals(20_000, lib.songsBy(o.id).size)
+        for (o in Sorting.options(Sorting.Kind.ALBUMS)) assertEquals(lib.albums.size, Sorting.groups(lib.albums, o.id).size)
+        for (o in Sorting.options(Sorting.Kind.ARTISTS)) assertEquals(lib.artists.size, Sorting.groups(lib.artists, o.id).size)
+        val tSort = (System.nanoTime() - t1) / 1_000_000
+        println("20k songs: index $tIndex ms, all sorts $tSort ms")
+        assertTrue("sorting took $tSort ms", tSort < 4000)
+        // the cached keys change nothing but the speed
+        val t2 = System.nanoTime()
+        val direct = lib.songs.sortedWith(compareBy<Song>({ Text.sortKey(it.mainArtist) }, { Text.sortKey(it.albumName) }, { it.disc },
+            { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }, { it.id }))
+        println("20k songs by artist, folding in the comparator (before): ${(System.nanoTime() - t2) / 1_000_000} ms")
+        assertEquals(direct.map { it.id }, lib.songsBy("artist").map { it.id })
+        assertEquals(lib.artists.sortedWith(compareBy({ Text.sortKey(it.title) }, { it.key })).map { it.key }, Sorting.groups(lib.artists, "az").map { it.key })
+        // search and paging-free lists hold up too
+        assertTrue(lib.search("şarkı 12").isNotEmpty())
+        assertEquals(20_000, lib.folderTree.sumOf { it.count })
+    }
+
+    @Test fun emptyLibrary() {
+        val lib = LibraryIndex(emptyList())
+        assertTrue(lib.songs.isEmpty() && lib.artists.isEmpty() && lib.albums.isEmpty() && lib.folderTree.isEmpty() && lib.newPieces.isEmpty())
+        assertNull(lib.packedArtists(1).packed); assertNull(lib.packedAlbums("az").packed); assertNull(lib.packedGenres.packed)
+        assertTrue(lib.search("x").isEmpty()); assertTrue(lib.songsBy("artist").isEmpty())
+        // a file at the storage root (no folder at all)
+        val root = Song(1, "x", "A", "", "", -1, "", 0, 1, 0, 1000, "", "x.mp3", 1, 0)
+        assertEquals(listOf(FolderTree.PHONE), FolderTree.build(listOf(root)).map { it.title })
+    }
+}
+
+class LocaleKeyTest {
+    @Test fun pathAndFolderKeysDoNotDependOnThePhoneLanguage() {
+        val before = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"))
+            val song = Song(70, "x", "A", "", "", -1, "", 0, 1, 0, 1000, "Music/IMAGINE/", "BIG I.mp3", 1, 0)
+            val lib = LibraryIndex(listOf(song))
+            val byPath = lib.byPath // made while the phone was in Turkish
+            java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+            val p = Playlist(1, "P", mutableListOf(Playlist.Entry(7, "Music/IMAGINE/BIG I.mp3"))) // MediaStore renumbered 7 -> 70
+            assertEquals(listOf(70L), p.resolve(lib.byId, byPath).map { it.id })
+            val h = PlayHistory(); h.record(7, "Music/IMAGINE/BIG I.mp3", 1)
+            assertEquals(listOf(70L), h.recent(lib.byId, byPath).map { it.id })
+            // Folders: an upper-case "MUSIC" is still the Music root (first) in Turkish
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"))
+            val roots = FolderTree.build(listOf(Song(1, "a", "A", "", "", -1, "", 0, 1, 0, 1000, "Download/", "a.mp3", 1, 0),
+                Song(2, "b", "B", "", "", -1, "", 0, 1, 0, 1000, "MUSIC/X/", "b.mp3", 1, 0)))
+            assertTrue(roots.first().title, roots.first().title.startsWith("MUSIC"))
+        } finally {
+            java.util.Locale.setDefault(before)
+        }
+    }
+}
+
+class DuplicateEdgeTest {
+    private var nextId = 1L
+    private fun f(path: String, dur: Long, raw: RawTags = RawTags(), hash: String? = null, size: Long = 4_000_000): FileInfo {
+        val name = path.substringAfterLast('/')
+        val rel = path.substring(0, path.length - name.length)
+        return FileInfo(nextId++, rel, name, size, dur, "audio/mpeg", 192_000, Naming.resolve(raw, name, rel), null, hash)
+    }
+
+    @Test fun numberedUntaggedRipsAreNotOneSong() {
+        // "CD1/01.mp3" and "CD2/01.mp3", no tags, about as long: two different songs (only the number is shared)
+        val a = f("Download/CD1/01.mp3", 200_000); val b = f("Download/CD2/01.mp3", 201_000)
+        assertTrue(Dedupe.find(listOf(a, b)).isEmpty())
+        assertTrue(Plan.build(listOf(a, b)).removals.isEmpty())
+        // identical bytes are still duplicates, whatever the name
+        val c = f("Download/CD1/02.mp3", 150_000, hash = "h", size = 7); val d = f("Download/02.mp3", 150_000, hash = "h", size = 7)
+        assertEquals(1, Dedupe.find(listOf(c, d)).size)
+        // a tagged title that is a number is a real title
+        val e = f("Music/X/1999.mp3", 200_000, RawTags(title = "1999", artist = "Prince")); val g = f("Download/1999.mp3", 200_500, RawTags(title = "1999", artist = "Prince"))
+        assertEquals(1, Dedupe.find(listOf(e, g)).size)
+    }
+
+    @Test fun untaggedSameTitleUnderDifferentArtistFolders() {
+        val a = f("Music/Tarkan/Intro.mp3", 90_000); val b = f("Music/Sezen Aksu/Intro.mp3", 90_500)
+        assertTrue(Dedupe.find(listOf(a, b)).isEmpty())
+        assertTrue(Duplicates.plan(listOf(a, b), emptySet()).removals.isEmpty())
+        // a copy whose folder names no artist still matches
+        val c = f("Download/Intro.mp3", 90_200)
+        assertEquals(1, Dedupe.find(listOf(a, c)).size)
+        // so does the same channel's download in Plain Youtube's tree
+        val d = f("Music/PlainDownload/Tarkan - Topic/Intro.m4a", 90_100)
+        assertEquals(1, Dedupe.find(listOf(a, d)).size)
+        // tagged files are judged by their tags, as before
+        val t1 = f("x/Song.mp3", 100_000, RawTags(title = "Song", artist = "A")); val t2 = f("y/Song.mp3", 100_500, RawTags(title = "Song", artist = "A"))
+        assertEquals(1, Dedupe.find(listOf(t1, t2)).size)
+    }
+
+    @Test fun numberedVariantWithoutRegexMatchesTheOldRegex() {
+        fun old(name: String, of: String): Boolean {
+            if (name.equals(of, ignoreCase = true)) return true
+            val ext = Naming.extension(of)
+            val base = if (ext.isEmpty()) of else of.substring(0, of.length - ext.length - 1)
+            return Regex(Regex.escape(base) + """ \(\d+\)""" + (if (ext.isEmpty()) "" else Regex.escape(".$ext")), RegexOption.IGNORE_CASE).matches(name)
+        }
+        val ofs = listOf("Song.mp3", "song.MP3", "Şarkı.m4a", "a", "a.", ".mp3", "x (2).flac", "Intro (Live).mp3", "İ.mp3", "")
+        val names = ofs + ofs.flatMap { o ->
+            val e = Naming.extension(o); val b = if (e.isEmpty()) o else o.substring(0, o.length - e.length - 1)
+            val t = if (e.isEmpty()) "" else ".$e"
+            listOf("$b (2)$t", "$b (12)$t", "${b.uppercase()} (3)${t.uppercase()}", "$b ()$t", "$b (x)$t", "$b(2)$t", "$b  (2)$t", "$b (2)", "$b (2)$t.bak", " (2)$t", "$b (",
+                "$b (٣)$t", "$b (2) (3)$t")
+        }
+        for (o in ofs) for (n in names) assertEquals("$n vs $o", old(n, o), Naming.isNumberedVariant(n, o))
+    }
+
+    @Test fun twentyThousandFilesPlanInReasonableTime() {
+        val rnd = Random(5)
+        val files = (1..20_000).map { i ->
+            f("Music/Artist ${i % 400}/Album ${i % 1500}/${i % 20} - Song $i.mp3", 120_000L + rnd.nextInt(200_000),
+                RawTags(title = "Song ${rnd.nextInt(15_000)}", artist = "Artist ${i % 400}", album = "Album ${i % 1500}"), size = 3_000_000L + rnd.nextInt(5000))
+        }
+        val t0 = System.nanoTime()
+        val plan = Plan.build(files)
+        val tPlan = (System.nanoTime() - t0) / 1_000_000
+        val t1 = System.nanoTime()
+        val dup = Duplicates.plan(files, emptySet())
+        val tDup = (System.nanoTime() - t1) / 1_000_000
+        val t2 = System.nanoTime()
+        Plan.build(files, dontMove = setOf(files[0].id)) // a second tap (warm)
+        val tPlan2 = (System.nanoTime() - t2) / 1_000_000
+        val t3 = System.nanoTime()
+        Dedupe.find(files)
+        val tFind = (System.nanoTime() - t3) / 1_000_000
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        println("20k files: organiser plan $tPlan ms (again $tPlan2 ms, of it Dedupe.find $tFind ms), duplicates $tDup ms (${plan.moves.size} moves, ${dup.removals.size} duplicates)")
+        // an organiser re-run: everything already in place
+        val placed = plan.moves.map { m -> m.file.copy(relPath = m.toDir, name = m.toName) }
+        val t4 = System.nanoTime()
+        val again = Plan.build(placed)
+        println("20k files already organised: plan ${(System.nanoTime() - t4) / 1_000_000} ms (${again.inPlace.size} in place, ${again.moves.size} moves)")
+        assertEquals(placed.size, again.inPlace.size + again.moves.size)
+        assertTrue("took $ms ms", ms < 8000)
+    }
+}
+
+class LinkedPlaylistsEdgeTest {
+    private fun s(id: Long) = Song(id, "t$id", "A", "", "", -1, "", 0, 1, 0, 180_000, "Music/PlainDownload/A/", "t$id.m4a", 1, 0)
+
+    @Test fun brokenLinksFilesAreIgnored() {
+        for (bad in listOf("", "null", "[]", "{", "{\"links\":5}", "{\"links\":[null,3,\"x\",{\"key\":\"\"},{\"name\":\"no key\"}]}", "\u0000\u0001", "{\"v\":1,\"links\":[{\"key\":\"yt:a\",\"ids\":[\"v1\",\"v2\""))
+            assertTrue(bad, LinkedPlaylists.decodeLinks(bad).isEmpty())
+        val l = LinkedPlaylists.decodeLinks("{\"links\":[{\"key\":\"yt:a\",\"ids\":\"nope\"},{\"key\":\"yt:b\",\"name\":\"  \",\"ids\":[\"v1\",\"\",7]}]}")
+        assertEquals(listOf("yt:a", "yt:b"), l.map { it.key })
+        assertTrue(l[0].ids.isEmpty())
+        assertEquals(listOf("v1", "7"), l[1].ids); assertEquals("Playlist", l[1].name)
+        assertNull(LinkedPlaylists.dropLink("{", "yt:a")); assertNull(LinkedPlaylists.dropLink("", "yt:a"))
+    }
+
+    @Test fun linksToMissingOrDeletedSongs() {
+        val links = listOf(LinkedPlaylists.Link("yt:x", "X", listOf("a", "a", "b")))
+        val lists = ArrayList<Playlist>()
+        assertFalse(LinkedPlaylists.sync(lists, links) { null }) // nothing downloaded (or all deleted): no empty playlist
+        assertTrue(lists.isEmpty())
+        val got = mutableMapOf("a" to s(5))
+        assertTrue(LinkedPlaylists.sync(lists, links) { got[it] })
+        assertEquals(listOf(5L), lists.single().entries.map { it.songId }) // a video listed twice is added once
+        got.clear()
+        assertFalse(LinkedPlaylists.sync(lists, links) { got[it] }) // the file was deleted: the playlist stays as it was
+        assertTrue(lists.single().resolve(emptyMap(), emptyMap()).isEmpty()) // and its entry is skipped, not a crash
+        got["a"] = s(6) // downloaded again (new MediaStore id): not added twice
+        assertFalse(LinkedPlaylists.sync(lists, links) { got[it] })
+    }
+
+    @Test fun downloadIndexWithGarbage() {
+        val m = LinkedPlaylists.savedIds("\r\n\t\n-\nabc:A\tcontent://media/external/audio/media/notanumber\r\nxyz:A\tcontent://media/external/audio/media/12\r\nqqq:V\t\nold:A\n")
+        assertEquals(12L, m["xyz"]); assertNull(m["abc"]); assertNull(m["qqq"]); assertNull(m["old"])
+        assertTrue(Duplicates.trackedIds("garbage\n\n-\t\n").isEmpty())
+    }
+
+    @Test fun playlistsFileFromBrokenOrOlderVersions() {
+        assertTrue(PlaylistCodec.decode("").isEmpty()); assertTrue(PlaylistCodec.decode("{}").isEmpty()); assertTrue(PlaylistCodec.decode("[{\"name\":\"A\"").isEmpty())
+        val l = PlaylistCodec.decode("[null, 5, {\"name\":\"A\"}, {\"id\":9,\"songs\":\"no\",\"got\":3}, {\"id\":10,\"songs\":[null,{\"id\":7,\"path\":\"Music/a.mp3\"},{}]}]")
+        assertEquals(listOf("A", "Playlist", "Playlist"), l.map { it.name })
+        assertEquals(listOf(7L, -1L), l[2].entries.map { it.songId })
+        assertTrue(l[1].entries.isEmpty()); assertNull(l[1].source)
+    }
+}
+
+class FavouritesTest {
+    private fun s(id: Long, path: String = "Music/s$id.mp3") =
+        Song(id, "t$id", "A", "", "", -1, "", 0, 1, 0, 1000, path.substringBeforeLast('/') + "/", path.substringAfterLast('/'), 1, 0)
+
+    @Test fun holdTitleTogglesOneFavouritesList() {
+        val lists = mutableListOf(Playlist(3, "Mine"))
+        assertFalse(Favourites.contains(lists, s(1)))
+        assertTrue(Favourites.toggle(lists, s(1), "Favourites"))
+        val fav = Favourites.of(lists)!!
+        assertEquals(4L, fav.id); assertEquals(Favourites.SOURCE, fav.source); assertEquals("Favourites", fav.name)
+        assertTrue(Favourites.toggle(lists, s(2), "ignored once it exists"))
+        assertEquals(listOf(1L, 2L), fav.entries.map { it.songId })
+        assertEquals(2, lists.size) // one Favourites list, not one per song
+        // MediaStore renumbered the file: still found by its path, and taken out
+        assertTrue(Favourites.contains(lists, s(99, "Music/s1.mp3")))
+        assertFalse(Favourites.toggle(lists, s(99, "MUSIC/S1.mp3"), "x"))
+        assertEquals(listOf(2L), fav.entries.map { it.songId })
+        // kept in playlists.json like any playlist; a links sync never touches it
+        val back = PlaylistCodec.decode(PlaylistCodec.encode(lists))
+        assertEquals(listOf(2L), Favourites.of(back)!!.entries.map { it.songId })
+        assertFalse(LinkedPlaylists.sync(back, listOf(LinkedPlaylists.Link(Favourites.SOURCE + ":x", "Z", listOf("v")))) { null })
+        // deleted (the user removed the playlist): the next hold makes a new one
+        back.remove(Favourites.of(back)!!); assertNull(Favourites.of(back))
+        assertTrue(Favourites.toggle(back, s(5), "Favoriler")); assertEquals("Favoriler", Favourites.of(back)!!.name)
+    }
+}
+
+class SleepFadeTest {
+    @Test fun fadesOverTheLastHalfMinuteOnly() {
+        assertEquals(1f, SleepFade.volume(60_000), 0f)
+        assertEquals(1f, SleepFade.volume(SleepFade.MS), 0f)
+        assertEquals(0.25f, SleepFade.volume(15_000), 1e-6f)
+        assertEquals(0f, SleepFade.volume(0), 0f); assertEquals(0f, SleepFade.volume(-5), 0f)
+        var last = 1f
+        for (left in SleepFade.MS downTo 0L step 1000L) {
+            val v = SleepFade.volume(left)
+            assertTrue(v <= last && v >= 0f && v <= 1f); last = v
+        }
     }
 }

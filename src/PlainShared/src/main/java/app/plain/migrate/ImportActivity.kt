@@ -34,7 +34,6 @@ class ImportActivity : Activity() {
         private const val OUTLINE = 0xFF3A3A3A.toInt()
         private const val TEXT = 0xFFE4E4E4.toInt()
         private const val DIM = 0xFFA6A6A6.toInt()
-        private const val ACCENT = 0xFFE8A447.toInt()
         private const val RED = 0xFFD46A6A.toInt()
         private const val GREEN = 0xFF6CBF6C.toInt()
     }
@@ -82,14 +81,17 @@ class ImportActivity : Activity() {
         setPadding(0, dp(6), 0, dp(6))
     }
 
+    /** The app's colour (outlines and text only, never a fill: the OLED style). */
+    private val accent get() = Hub.accent
+
     private fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 15f; gravity = Gravity.CENTER
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(if (primary) BG else TEXT)
+        setTextColor(if (primary) accent else TEXT)
         setPadding(dp(16), dp(12), dp(16), dp(12))
         background = GradientDrawable().apply {
             cornerRadius = dp(24).toFloat()
-            if (primary) setColor(ACCENT) else { setColor(BG); setStroke(dp(1), OUTLINE) }
+            setColor(BG); setStroke(dp(1), if (primary) accent else OUTLINE)
         }
         setOnClickListener { onClick() }
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) }
@@ -117,7 +119,7 @@ class ImportActivity : Activity() {
             body.addView(text(tr("First update ${spec.name} (now ${Migrate.versionName(this, spec.pkg) ?: "?"}): only the newest version can hand its data over. " +
                 "Tap Update, install it, then come back here.",
                 "Önce ${spec.name} uygulamasını güncelleyin (şu an ${Migrate.versionName(this, spec.pkg) ?: "?"}): verilerini yalnızca en yeni sürüm aktarabilir. " +
-                "Güncelle'ye dokunun, yükleyin, sonra buraya dönün."), 15f, ACCENT))
+                "Güncelle'ye dokunun, yükleyin, sonra buraya dönün."), 15f, accent))
             body.addView(button(tr("Update ${spec.name}", "${spec.name}'i güncelle"), true) {
                 try { startActivity(Intent(PlainUpdate.ACTION).setPackage(PlainUpdate.SETUP_PKG).putExtra(PlainUpdate.EXTRA_PACKAGE, spec.pkg)) }
                 catch (_: Exception) { PlainUpdate.check(this) }

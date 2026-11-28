@@ -147,6 +147,7 @@ class MainActivity : Activity() {
             val perms = mutableListOf(Library.PERMISSION)
             // Plain Youtube's videos (optional: denied = audio only). On 30-32 the storage permission covers them.
             if (Build.VERSION.SDK_INT >= 33) perms += listOf(Library.VIDEO_PERMISSION, Manifest.permission.POST_NOTIFICATIONS)
+            Store.prefs.edit().putBoolean("askedPerm", true).apply()
             requestPermissions(perms.toTypedArray(), REQ_PERMS)
         }
         if (Library.index.byId.isNotEmpty()) render()
@@ -322,7 +323,9 @@ class MainActivity : Activity() {
         loading = true
         val app = applicationContext
         Thread {
-            Library.load(app)
+            val idx = Library.load(app)
+            // The views the first screens read are made here, not on the main thread at the first render (20k songs)
+            runCatching { idx.byPath; idx.newPieces; idx.folderTree; idx.plainYoutube }
             runCatching { LinkedPlaylists.prepare?.invoke(app) }
             runOnUiThread {
                 loading = false
@@ -449,6 +452,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = outline(dpf(10), C.OUTLINE_BTN)
             setOnClickListener { openNowPlaying() }
+            setOnLongClickListener { showPlayingInList(); true } // hold: where is this song? (also ⋮ → Show the playing song)
             onSwipe = { d -> if (d > 0) Player.next() else Player.prev() }
             visibility = View.GONE
         }
@@ -622,9 +626,7 @@ class MainActivity : Activity() {
         val lib = Library.index
         val rows: List<Row> = when {
             !Library.hasPermission(this) -> listOf(EmptyRow(tr("LocalMusic needs access to the music files on this phone.\nNothing ever leaves the phone: the app has no internet permission.",
-                "LocalMusic'in bu telefondaki müzik dosyalarına erişmesi gerekiyor.\nHiçbir şey telefondan çıkmaz: uygulamanın internet izni yok."), tr("Allow access", "Erişime izin ver") to {
-                requestPermissions(if (Build.VERSION.SDK_INT >= 33) arrayOf(Library.PERMISSION, Library.VIDEO_PERMISSION) else arrayOf(Library.PERMISSION), REQ_PERMS)
-            }))
+                "LocalMusic'in bu telefondaki müzik dosyalarına erişmesi gerekiyor.\nHiçbir şey telefondan çıkmaz: uygulamanın internet izni yok."), tr("Allow access", "Erişime izin ver") to { askMusicPermission() }))
             showingSearch() -> searchRows(lib)
             drill.isNotEmpty() -> drill.last().rows()
             else -> tabRows(lib)
@@ -633,6 +635,20 @@ class MainActivity : Activity() {
         adapter.rows = rows
         adapter.notifyDataSetChanged()
         if (resetScroll) list.setSelection(0)
+    }
+
+    /**
+     * "Allow access". Once Android stops showing its dialog (denied twice, or "Don't allow" for good) the button did
+     * nothing at all: then it opens this app's page in Settings, where the permission can still be given.
+     */
+    private fun askMusicPermission() {
+        if (Store.prefs.getBoolean("askedPerm", false) && !shouldShowRequestPermissionRationale(Library.PERMISSION)) {
+            toast(tr("Allow access to music under Permissions", "İzinler bölümünden müziğe erişime izin verin"))
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", packageName, null))) }
+            return
+        }
+        Store.prefs.edit().putBoolean("askedPerm", true).apply()
+        requestPermissions(if (Build.VERSION.SDK_INT >= 33) arrayOf(Library.PERMISSION, Library.VIDEO_PERMISSION) else arrayOf(Library.PERMISSION), REQ_PERMS)
     }
 
     private fun tabRows(lib: LibraryIndex): List<Row> {
@@ -1062,6 +1078,35 @@ class MainActivity : Activity() {
         toast(if (Player.toggleStopAfterSong()) tr("Stops after this song", "Bu şarkıdan sonra durur") else tr("Keeps playing", "Çalmaya devam eder"))
     }
 
+    /** Hold the title in now playing, or the song menu's row: the song goes into Favourites (a playlist) or out of it. */
+    fun toggleFavourite(s: Song) {
+        if (s.externalUri != null || s.id < 0) { toast(tr("Only songs in the library can be favourites", "Yalnızca kitaplıktaki şarkılar favori olabilir")); return }
+        val on = Favourites.toggle(Store.playlists, s, tr("Favourites", "Favoriler"))
+        Store.savePlaylists()
+        toast(if (on) tr("Added to Favourites", "Favorilere eklendi") else tr("Removed from Favourites", "Favorilerden çıkarıldı"))
+        nowPlaying?.update()
+        render()
+    }
+
+    /**
+     * Hold the mini player, or ⋮ → Show the playing song: scroll the list on screen to the playing song. Not in this
+     * list: its album page (or artist page for a single) opens, scrolled to it.
+     */
+    fun showPlayingInList() {
+        val cur = Player.current ?: return
+        if (scrollToSong(cur)) return
+        if (cur.externalUri != null || cur.id !in Library.index.byId) { toast(tr("The playing file isn't in the library", "Çalan dosya kitaplıkta değil")); return }
+        goToAlbum(cur)
+        list.post { if (!scrollToSong(cur)) toast(tr("The playing song isn't in this list", "Çalan şarkı bu listede yok")) }
+    }
+
+    private fun scrollToSong(s: Song): Boolean {
+        val i = adapter.rows.indexOfFirst { it is SongRow && it.mode == SongRow.Mode.NORMAL && it.song.id == s.id }
+        if (i < 0) return false
+        list.setSelectionFromTop(i, list.height / 3)
+        return true
+    }
+
     private fun openPlaylist(p: Playlist) {
         pushDrill(p.name, "playlist:" + p.id) {
             val lib = Library.index
@@ -1188,6 +1233,11 @@ class MainActivity : Activity() {
             artist?.let { a -> sheet.item(Ic.ARTIST, a.title, sub = tr("Artist · ${Text.count(a.count, "song")}", "Sanatçı · ${Text.count(a.count, "song")}"), more = true) { closeOverlays(); closeNowPlaying(); openArtist(a) } }
         }
         sheet.section(tr("More", "Diğer"))
+        if (s.externalUri == null && s.id >= 0) {
+            val fav = Favourites.contains(Store.playlists, s)
+            sheet.item(Ic.STAR, if (fav) tr("Remove from Favourites", "Favorilerden çıkar") else tr("Add to Favourites", "Favorilere ekle"),
+                sub = tr("Or hold the title in Now playing", "Ya da Şimdi çalınan ekranında şarkı adını basılı tutun")) { toggleFavourite(s) }
+        }
         if (selectable && selection == null && nowPlaying == null && overlays.isEmpty())
             sheet.item(Ic.SELECT, tr("Select", "Seç"), sub = tr("Pick several songs to play, add or erase together", "Birlikte çalmak, eklemek ya da silmek için birkaç şarkı seçin")) { startSelection(s) }
         sheet.item(Ic.INFO, tr("Details", "Ayrıntılar"), sub = listOf(Text.time(s.durationMs), Text.bytes(s.size), s.path.substringAfterLast('.', "").uppercase()).filter { it.isNotEmpty() }.joinToString(" · ")) { songDetails(s) }
@@ -1262,6 +1312,7 @@ class MainActivity : Activity() {
             p.source?.startsWith("spotify:") == true -> tr("From Spotify, filled as songs download", "Spotify'dan, şarkılar indikçe dolar")
             p.source?.startsWith("yt:") == true -> tr("From a YouTube playlist, filled as songs download", "YouTube listesinden, şarkılar indikçe dolar")
             p.source?.startsWith("list:") == true -> tr("From a Youtube-tab list, filled as songs download", "Youtube sekmesindeki listeden, şarkılar indikçe dolar")
+            p.source == Favourites.SOURCE -> tr("Your favourites: hold a song's title in Now playing to add or remove it", "Favorileriniz: eklemek ya da çıkarmak için Şimdi çalınan ekranında şarkı adını basılı tutun")
             else -> null
         }
         Sheet(this, C.ACCENT).header(p.name, listOfNotNull(Text.count(songs.size, "song") + " · " + Text.longTime(songs.sumOf { it.durationMs }), source).joinToString("\n")) { iv ->
@@ -1294,7 +1345,9 @@ class MainActivity : Activity() {
         val sheet = Sheet(this, C.ACCENT).header(tr("Music", "Müzik"),
             tr("${Text.count(lib.songs.size, "song")} on this phone · no internet", "Bu telefonda ${Text.count(lib.songs.size, "song")} · internet yok"))
         sheet.section(tr("Playback", "Çalma"))
-            .item(Ic.SLEEP, tr("Sleep timer", "Uyku zamanlayıcısı"), value = sleepValue(), more = true,
+        if (Player.current != null) sheet.item(Ic.SEARCH, tr("Show the playing song", "Çalan şarkıyı göster"),
+            sub = tr("In the list on screen, else on its album page · also: hold the mini player", "Ekrandaki listede, yoksa albüm sayfasında · ya da mini çaları basılı tutun")) { showPlayingInList() }
+        sheet.item(Ic.SLEEP, tr("Sleep timer", "Uyku zamanlayıcısı"), value = sleepValue(), more = true,
                 reset = Sheet.Reset(tr("Off", "Kapalı")) { Player.setSleepMinutes(0) }) { sleepMenu() }
             .item(Ic.SPEED, tr("Playback speed", "Oynatma hızı"), value = Speeds.label(Player.speed), more = true,
                 reset = Sheet.Reset(Speeds.label(1f)) { Player.setSpeed(1f) }) { speedMenu() }
@@ -1351,6 +1404,7 @@ class MainActivity : Activity() {
         sheet.choice(tr("Off", "Kapalı"), !on) { Player.setSleepMinutes(0); toast(tr("Sleep timer off", "Uyku zamanlayıcısı kapalı")) }
         for (m in listOf(15, 30, 45, 60, 90)) sheet.choice(tr("$m minutes", "$m dakika"), false) { Player.setSleepMinutes(m); toast(tr("Pausing in $m min", "$m dk sonra duraklar")) }
         sheet.choice(tr("End of this song", "Bu şarkının sonunda"), Player.sleepEndOfSong) { Player.setSleepEndOfSong(); toast(tr("Pausing after this song", "Bu şarkıdan sonra duraklar")) }
+        sheet.note(tr("With minutes, the music fades out over the last 30 seconds.", "Dakikayla kurulunca müzik son 30 saniyede yavaşça kısılır."))
         sheet.show()
     }
 
@@ -1522,6 +1576,8 @@ class MainActivity : Activity() {
                     val y = (e.rawY - loc[1]).toInt()
                     val target = lv.pointToPosition(lv.width / 2, y.coerceIn(1, lv.height - 1))
                     val list = rows()
+                    // the rows can be rebuilt under the finger (library reload, song change): never index past them
+                    if (at !in list.indices || list[at] !is SongRow) { at = -1; start = -1; return true }
                     if (target >= 0 && target != at && list.getOrNull(target) is SongRow) {
                         val r = list.removeAt(at); list.add(target, r)
                         at = target
@@ -1587,7 +1643,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(dp(24), dp(48), dp(24), dp(24))
                 addView(text(r.text, 15f, C.DIM, lines = 0).apply { gravity = Gravity.CENTER })
-                r.action?.let { (label, fn) -> addView(pill(label, C.ACCENT, 0xFF000000.toInt()) { fn() }, lpL(WRAP, WRAP).apply { topMargin = dp(16) }) }
+                r.action?.let { (label, fn) -> addView(pill(label, C.BG, C.ACCENT, C.ACCENT) { fn() }, lpL(WRAP, WRAP).apply { topMargin = dp(16) }) } // OLED: outline, no lit fill
             }
         }
     }
@@ -1829,7 +1885,7 @@ class MainActivity : Activity() {
     /** Indices of playlist entries whose songs exist (the rows shown). */
     private fun presentEntries(p: Playlist): List<Int> {
         val lib = Library.index
-        p.resolve(lib.byId, lib.songs.associateBy { it.path.lowercase() })
+        p.resolve(lib.byId, lib.byPath) // (the cached map: a fresh 20k-entry map per ✕ tap was slow)
         return p.entries.indices.filter { p.entries[it].songId in lib.byId }
     }
 

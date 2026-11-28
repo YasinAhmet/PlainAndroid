@@ -75,7 +75,7 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
                 "Önce gözden geçirmeniz için tam bir plan görürsünüz. Siz onaylayana kadar hiçbir şey değişmez — Android de size soracak."),
             15f, C.TEXT, lines = 0,
         ))
-        col.addView(act.pill(tr("Scan my phone", "Telefonumu tara"), C.ACCENT, 0xFF000000.toInt()) { startScan() }, lpL(WRAP, WRAP).apply { topMargin = act.dp(20) })
+        col.addView(act.pill(tr("Scan my phone", "Telefonumu tara"), C.BG, C.ACCENT, C.ACCENT) { startScan() }, lpL(WRAP, WRAP).apply { topMargin = act.dp(20) })
         col.addView(status, lpL(MATCH, WRAP).apply { topMargin = act.dp(16) })
         setBody(ScrollView(act).apply { addView(col) })
     }
@@ -140,10 +140,31 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
         }
     }
 
+    private val planner = Latest(this)
+
+    /**
+     * Make the plan again (after the scan and after every tap on a line). Off the main thread: with 20k files a plan
+     * takes seconds on a phone, which froze the screen on each tap. Taps faster than that only build the newest one.
+     */
     private fun rebuild() {
         val s = scan ?: return
+        val kd = HashSet(keepDup); val dm = HashSet(dontMove); val inc = HashSet(include)
+        if (::applyBtn.isInitialized) applyBtn.text = tr("Updating the plan…", "Plan güncelleniyor…")
+        else status.text = tr("Making the plan…", "Plan hazırlanıyor…")
+        planner.run({ planRows(s, kd, dm, inc) }) { r ->
+            if (r == null) { if (plan == null) status.text = tr("Scan failed.", "Tarama başarısız."); return@run }
+            val (p, rows) = r
+            plan = p
+            adapter.rows = rows
+            adapter.notifyDataSetChanged()
+            if (body.getChildAt(0) !is LinearLayout || (body.getChildAt(0) as LinearLayout).tag != "plan") showPlanLayout()
+            applyBtn.text = if (p.moves.isEmpty() && p.removals.isEmpty()) tr("Nothing to do", "Yapılacak bir şey yok") else tr("Apply plan…", "Planı uygula…")
+        }
+    }
+
+    /** The plan and its rows for these choices (pure; runs on the planner's thread). */
+    private fun planRows(s: Organizer.Scan, keepDup: Set<Long>, dontMove: Set<Long>, include: Set<Long>): Pair<Plan, List<PRow>> {
         val p = Plan.build(s.files, keepDup, dontMove, include)
-        plan = p
         val rows = ArrayList<PRow>()
         // what the library will look like
         val target = p.moves.map { it.file } + p.inPlace + p.keptByUser
@@ -192,10 +213,7 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
                 tr("Left where they are. Tick one to organise it as music anyway.", "Yerlerinde kalırlar. Yine de müzik olarak düzenlemek için birini işaretleyin."))
             rows += skipRows
         }
-        adapter.rows = rows
-        adapter.notifyDataSetChanged()
-        if (body.getChildAt(0) !is LinearLayout || (body.getChildAt(0) as LinearLayout).tag != "plan") showPlanLayout()
-        applyBtn.text = if (p.moves.isEmpty() && p.removals.isEmpty()) tr("Nothing to do", "Yapılacak bir şey yok") else tr("Apply plan…", "Planı uygula…")
+        return p to rows
     }
 
     private lateinit var applyBtn: TextView
@@ -212,7 +230,7 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
         wrap.addView(lv, lpL(MATCH, 0, 1f))
         val bar = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(16), act.dp(10), act.dp(16), act.dp(10)); setBackgroundColor(C.BG) }
         bar.addView(status.also { (it.parent as? ViewGroup)?.removeView(it); it.text = "" }, lpL(0, WRAP, 1f))
-        applyBtn = act.pill(tr("Apply plan…", "Planı uygula…"), C.ACCENT, 0xFF000000.toInt()) { confirmApply() }
+        applyBtn = act.pill(tr("Apply plan…", "Planı uygula…"), C.BG, C.ACCENT, C.ACCENT) { confirmApply() }
         bar.addView(applyBtn)
         wrap.addView(bar, lpL(MATCH, WRAP))
         setBody(wrap)
@@ -232,6 +250,7 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
 
     private fun confirmApply() {
         val p = plan ?: return
+        if (planner.pending) { act.toast(tr("Updating the plan…", "Plan güncelleniyor…")); return } // never apply a plan the last tap changed
         if (busy || (p.moves.isEmpty() && p.removals.isEmpty())) return
         val freed = Text.bytes(p.bytesFreed)
         val twice = p.moves.isNotEmpty() && p.removals.isNotEmpty()
@@ -318,6 +337,28 @@ class OrganizerView(private val act: MainActivity) : LinearLayout(act) {
  * days until Android deletes them for good. Restore, Delete now, Empty trash. Restore/delete ask Android's consent
  * unless "Media management" is granted.
  */
+/**
+ * Runs work off the main thread for a screen, the newest request winning: requests are done one at a time and any that
+ * a newer one replaced before it started is skipped. The result reaches [View.post] only if it is still the newest.
+ * The worker thread ends when idle (nothing stays behind when the screen closes).
+ */
+class Latest(private val view: android.view.View) {
+    private val exec = java.util.concurrent.ThreadPoolExecutor(0, 1, 2, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.LinkedBlockingQueue())
+    @Volatile private var newest = 0
+    private var shown = 0
+    /** A newer result is on its way (the one shown is out of date). */
+    val pending get() = shown != newest
+
+    fun <T> run(work: () -> T, done: (T?) -> Unit) {
+        val g = ++newest
+        exec.execute {
+            if (g != newest) return@execute
+            val r = try { work() } catch (_: Exception) { null }
+            view.post { if (g == newest) { shown = g; done(r) } }
+        }
+    }
+}
+
 @SuppressLint("ViewConstructor")
 class TrashView(private val act: MainActivity) : LinearLayout(act) {
     private class Item(val t: TrashItem, var checked: Boolean = false)
@@ -369,7 +410,7 @@ class TrashView(private val act: MainActivity) : LinearLayout(act) {
         addView(list, lpL(MATCH, 0, 1f))
         val bar = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(12), act.dp(10), act.dp(12), act.dp(10)) }
         bar.addView(act.pill(tr("All", "Tümü"), C.BG) { val all = items.all { it.checked }; items.forEach { it.checked = !all }; adapter.notifyDataSetChanged(); updateInfo() })
-        bar.addView(act.pill(tr("Restore", "Geri yükle"), C.ACCENT, 0xFF000000.toInt()) { restore() }, lpL(WRAP, WRAP).apply { leftMargin = act.dp(8) })
+        bar.addView(act.pill(tr("Restore", "Geri yükle"), C.BG, C.ACCENT, C.ACCENT) { restore() }, lpL(WRAP, WRAP).apply { leftMargin = act.dp(8) })
         bar.addView(act.pill(tr("Delete now", "Şimdi sil"), C.BG, C.RED, C.RED) { delete(items.filter { it.checked }, tr("the selected files", "seçili dosyalar")) }, lpL(WRAP, WRAP).apply { leftMargin = act.dp(8) })
         bar.addView(act.pill(tr("Empty trash", "Çöp kutusunu boşalt"), C.BG, C.RED, C.RED) { delete(items, tr("everything in the trash", "çöp kutusundaki her şey")) }, lpL(WRAP, WRAP).apply { leftMargin = act.dp(8) })
         addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(bar) }, lpL(MATCH, WRAP))

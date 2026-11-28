@@ -18,6 +18,8 @@ class InstallReceiver : BroadcastReceiver() {
         @Suppress("DEPRECATION")
         val confirm: Intent? = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
             else i.getParcelableExtra(Intent.EXTRA_INTENT)
-        Installer.onResult(c.applicationContext, pkg, status, msg, confirm)
+        // our own extra, else the one PackageInstaller adds itself
+        val sid = i.getIntExtra(Installer.EXTRA_SESSION, i.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1))
+        Installer.onResult(c.applicationContext, pkg, sid, status, msg, confirm)
     }
 }

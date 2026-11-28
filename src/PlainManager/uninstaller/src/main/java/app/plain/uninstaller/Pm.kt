@@ -28,11 +28,13 @@ object Commands {
     }
 
     /**
-     * User apps are fully uninstalled. System apps can only be removed for user 0: the APK stays on the
-     * read-only system image (so it can be restored) and -k keeps its data.
+     * User apps are uninstalled for this user (user 0), like Android's own uninstall dialog does: when no other user
+     * has the app, that removes it completely; a copy in a work profile or an "app twin" (another user) and its data
+     * stay. A plain `pm uninstall` would wipe those too. System apps can only be removed for user 0: the APK stays on
+     * the read-only system image (so it can be restored) and -k keeps its data.
      */
     fun uninstall(pkg: String, system: Boolean): String =
-        if (system) "pm uninstall -k --user 0 ${checked(pkg)}" else "pm uninstall ${checked(pkg)}"
+        if (system) "pm uninstall -k --user 0 ${checked(pkg)}" else "pm uninstall --user 0 ${checked(pkg)}"
 
     fun restore(pkg: String): String = "cmd package install-existing ${checked(pkg)}"
 

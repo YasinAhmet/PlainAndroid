@@ -13,7 +13,13 @@ import java.util.zip.ZipFile
  */
 class Transit {
     class Stop(val gtfsId: String, val code: String, val name: String, val lat: Double, val lon: Double)
-    class Route(val gtfsId: String, val short: String, val long: String, val code: String)
+    class Route(val gtfsId: String, val short: String, val long: String, val code: String) {
+        /**
+         * The line number shown and grouped by. GTFS lets a route have only a long name; those used to all become one
+         * line "?", now each keeps (the start of) its own name.
+         */
+        val ref: String get() = short.trim().ifEmpty { long.trim().take(12).trim().ifEmpty { gtfsId.trim().ifEmpty { "?" } } }
+    }
 
     /** One stop sequence of one route (a "variant" in the app). */
     class Pattern(val route: Int, val stops: IntArray) {
@@ -57,6 +63,42 @@ class Transit {
 
         private fun reader(f: File): BufferedReader = f.inputStream().bufferedReader(Charsets.UTF_8)
 
+        private val DATE = Regex("^(19|20)\\d{6}$")
+        private val NOT_STOPS = setOf("1", "2", "3")
+
+        /** A GTFS end_date ("20261005") before [today] (same form). Other forms never count as expired. */
+        fun expired(end: String?, today: String): Boolean {
+            val e = end?.trim() ?: return false
+            return DATE.matches(e) && DATE.matches(today) && e < today
+        }
+
+        /**
+         * The services to leave out. Only the weekday pattern of a calendar is used (feeds keep running after their
+         * dates end), so an old timetable left in a feed next to the current one would show every departure twice.
+         * A service that has ended is dropped when the same route has a current service on all of its days; a route
+         * whose timetable has simply run out keeps it.
+         * [routeServices]: route → its trips' service ids.
+         */
+        fun staleServices(days: Map<String, Int>, ends: Map<String, String>, routeServices: Map<Int, Set<String>>, today: String): Set<String> {
+            val out = HashSet<String>()
+            for ((_, sids) in routeServices) {
+                var current = 0
+                for (s in sids) if (!expired(ends[s], today)) current = current or (days[s] ?: 0)
+                if (current == 0) continue
+                for (s in sids) {
+                    val m = days[s] ?: 0
+                    if (expired(ends[s], today) && m and current.inv() == 0) out.add(s)
+                }
+            }
+            // a service shared with a route that still needs it stays
+            for ((_, sids) in routeServices) {
+                var current = 0
+                for (s in sids) if (!expired(ends[s], today)) current = current or (days[s] ?: 0)
+                for (s in sids) if (s in out && (days[s] ?: 0) and current.inv() != 0) out.remove(s)
+            }
+            return out
+        }
+
         /**
          * Reads a feed from files: stops, routes, trips, calendar (CSV/TXT) and stop_times
          * (CSV/TXT or a ZIP holding it). [log] gets progress lines.
@@ -67,29 +109,39 @@ class Transit {
             box: BBox = BBox(LON_LO, LAT_LO, LON_HI, LAT_HI),
             /** Only bus routes (route_type 3, 11, 7xx): rail and ferry lines come from OpenStreetMap. */
             busOnly: Boolean = false,
+            /** The day of the sync as yyyyMMdd (calendars that have ended), today when null. */
+            today: String? = null,
         ): Transit {
             val t = Transit()
-            // calendar: service id → day mask
+            // calendar: service id → day mask (and its last day)
             val service = HashMap<String, Int>()
+            val ends = HashMap<String, String>()
+            val canon = HashMap<String, String>()
             reader(calendarF).use { r ->
                 val c = Text.Csv(r)
-                val sid = c.col("service_id")
+                val sid = c.col("service_id"); val end = c.col("end_date")
                 while (true) {
                     val row = c.next() ?: break
-                    service[c.get(row, sid)] = days { name -> c.get(row, c.col(name)) }
+                    val id = c.get(row, sid)
+                    service[id] = days { name -> c.get(row, c.col(name)) }
+                    ends[id] = c.get(row, end)
+                    canon[id] = id
                 }
             }
             // stops
             val stopIdx = HashMap<String, Int>()
+            /** Stations, entrances and path nodes (location_type 1–3): left out at the end unless a trip calls there. */
+            val stations = HashSet<Int>()
             reader(stopsF).use { r ->
                 val c = Text.Csv(r, freeText = "stop_desc")
                 val id = c.col("stop_id"); val code = c.col("stop_code"); val name = c.col("stop_name")
-                val la = c.col("stop_lat"); val lo = c.col("stop_lon")
+                val la = c.col("stop_lat"); val lo = c.col("stop_lon"); val lt = c.col("location_type")
                 while (true) {
                     val row = c.next() ?: break
                     val lat = Text.coord(c.get(row, la), box.s, box.n)
                     val lon = Text.coord(c.get(row, lo), box.w, box.e)
                     if (lat == null || lon == null) { t.badStops++; continue }
+                    if (lt >= 0 && c.get(row, lt).trim() in NOT_STOPS) stations.add(t.stops.size)
                     stopIdx[c.get(row, id)] = t.stops.size
                     t.stops.add(Stop(c.get(row, id), c.get(row, code), Text.title(c.get(row, name)), lat, lon))
                 }
@@ -113,8 +165,9 @@ class Transit {
             }
             log(tr("${t.routes.size} routes", "${t.routes.size} hat"))
             // trips
-            class TripInfo(val route: Int, val days: Int, val headsign: String, val dir: Int, val shape: String)
+            class TripInfo(val route: Int, val days: Int, val headsign: String, val dir: Int, val shape: String, val service: String)
             val trips = HashMap<String, TripInfo>(200_000)
+            val routeServices = HashMap<Int, MutableSet<String>>()
             reader(tripsF).use { r ->
                 val c = Text.Csv(r, freeText = "trip_headsign")
                 val id = c.col("trip_id"); val rid = c.col("route_id"); val sid = c.col("service_id")
@@ -122,10 +175,19 @@ class Transit {
                 while (true) {
                     val row = c.next() ?: break
                     val ri = routeIdx[c.get(row, rid)] ?: continue
-                    val days = service[c.get(row, sid)] ?: continue
+                    val s = canon[c.get(row, sid)] ?: continue
+                    val days = service[s] ?: continue
+                    routeServices.getOrPut(ri) { HashSet(4) }.add(s)
                     trips[c.get(row, id)] = TripInfo(ri, days, if (hs >= 0) Text.title(c.get(row, hs)) else "", c.get(row, dir).toIntOrNull() ?: 0,
-                        if (shp >= 0) c.get(row, shp).intern() else "")
+                        if (shp >= 0) c.get(row, shp).intern() else "", s)
                 }
+            }
+            val day = today ?: java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+            val stale = staleServices(service, ends, routeServices, day)
+            if (stale.isNotEmpty()) {
+                val before = trips.size
+                trips.values.removeAll { it.service in stale }
+                log(tr("${before - trips.size} trips of ended timetables left out", "sona ermiş çizelgelerin ${before - trips.size} seferi atlandı"))
             }
             log(tr("${trips.size} trips", "${trips.size} sefer"))
 
@@ -147,7 +209,15 @@ class Transit {
                 var sorted = true
                 for (i in 1 until seqs.size) if (seqs[i] < seqs[i - 1]) { sorted = false; break }
                 val order = if (sorted) IntArray(seqs.size) { it } else (0 until seqs.size).sortedBy { seqs[it] }.toIntArray()
-                val st = IntArray(order.size) { sts[order[it]] }
+                // stops the feed has no position for (-1) are left out of the sequence, but their times still count:
+                // when only the first and last stop have times, a first stop without coordinates must not make the
+                // trip start at its arrival time
+                var known = 0
+                for (k in order) if (sts[k] >= 0) known++
+                if (known < 2) { t.tripsSkipped++; seqs.clear(); sts.clear(); times.clear(); return }
+                val st = IntArray(known)
+                var w = 0
+                for (k in order) if (sts[k] >= 0) st[w++] = sts[k]
                 var first = -1; var last = -1
                 for (k in order) {
                     val tm = times[k]
@@ -176,19 +246,23 @@ class Transit {
                 val cols = Text.split(h, d).map { it.trim().lowercase() }
                 val cT = cols.indexOf("trip_id"); val cS = cols.indexOf("stop_id"); val cQ = cols.indexOf("stop_sequence")
                 val cA = cols.indexOf("arrival_time"); val cD = cols.indexOf("departure_time")
+                if (cT < 0 || cS < 0) throw java.io.IOException(tr("stop_times has no trip_id or stop_id column", "stop_times dosyasında trip_id ya da stop_id sütunu yok"))
                 var n = 0L
                 while (true) {
                     val line = r.readLine() ?: break
-                    if (line.isEmpty()) continue
+                    if (line.isBlank()) continue
                     val f = Text.split(line, d)
-                    if (f.size <= maxOf(cT, cS, cQ)) continue
+                    if (f.size <= maxOf(cT, cS)) continue
                     val tid = f[cT].trim()
                     if (tid != curTrip) {
                         finish()
                         curTrip = tid
                     }
-                    val si = stopIdx[f[cS].trim()] ?: continue
-                    seqs.add(f[cQ].trim().toIntOrNull() ?: seqs.size)
+                    // a stop without a usable position (-1) keeps its place in the order and its time
+                    val si = stopIdx[f[cS].trim()] ?: -1
+                    // without stop_sequence (or with a blank one) the file's order is the riding order
+                    val q = if (cQ >= 0) f.getOrNull(cQ)?.trim()?.toIntOrNull() else null
+                    seqs.add(q ?: if (seqs.size == 0) Int.MIN_VALUE / 2 else seqs[seqs.size - 1] + 1)
                     sts.add(si)
                     val tm = Text.time(f.getOrNull(cD) ?: "") ?: Text.time(f.getOrNull(cA) ?: "") ?: -1
                     times.add(tm)
@@ -209,6 +283,20 @@ class Transit {
             } else stopTimesF.inputStream().use { readStopTimes(it) }
             log(tr("${t.tripsRead} trips in ${t.patterns.size} stop sequences", "${t.patterns.size} durak dizisinde ${t.tripsRead} sefer"))
 
+            // stations and entrances no trip calls at are no stops (dead pins on the map and in search); a feed that runs
+            // its trips through them (against the spec) keeps them
+            if (stations.isNotEmpty()) {
+                val used = BooleanArray(t.stops.size)
+                for (p in t.patterns) for (s in p.stops) used[s] = true
+                val drop = stations.filter { !used[it] }.toHashSet()
+                if (drop.isNotEmpty()) {
+                    val map = IntArray(t.stops.size)
+                    val kept = ArrayList<Stop>(t.stops.size - drop.size)
+                    t.stops.forEachIndexed { i, s -> if (i in drop) map[i] = -1 else { map[i] = kept.size; kept.add(s) } }
+                    t.stops.clear(); t.stops.addAll(kept)
+                    for (p in t.patterns) for (k in p.stops.indices) p.stops[k] = map[p.stops[k]]
+                }
+            }
             // distance along each pattern, for estimating times at the stops in between
             for (p in t.patterns) {
                 val d = IntArray(p.stops.size)
@@ -227,7 +315,11 @@ class Transit {
          * Reads a GTFS shapes.txt (rows grouped by shape, in sequence order or not), keeping only the [wanted]
          * shape ids, simplified to about [tolDeg] degrees.
          */
-        fun readGtfsShapes(input: InputStream, wanted: Set<String>, tolDeg: Double, into: HashMap<String, List<DoubleArray>>, cancelled: () -> Boolean = { false }) {
+        fun readGtfsShapes(
+            input: InputStream, wanted: Set<String>, tolDeg: Double, into: HashMap<String, List<DoubleArray>>, cancelled: () -> Boolean = { false },
+            /** Points outside this box (a stray 0,0 would draw a line across the world) are left out; null = keep all. */
+            box: BBox? = null,
+        ) {
             val r = input.bufferedReader(Charsets.UTF_8)
             val h = (r.readLine() ?: return).removePrefix("﻿")
             val d = if (h.count { it == ';' } > h.count { it == ',' }) ';' else ','
@@ -235,26 +327,33 @@ class Transit {
             val cI = cols.indexOf("shape_id"); val cA = cols.indexOf("shape_pt_lat"); val cO = cols.indexOf("shape_pt_lon")
             val cQ = cols.indexOf("shape_pt_sequence")
             if (cI < 0 || cA < 0 || cO < 0) return
-            val pts = HashMap<String, ArrayList<DoubleArray>>()
+            // per shape: (sequence, lon, lat) triples in one primitive list (millions of points, no small arrays)
+            val pts = HashMap<String, DoubleList>()
             var n = 0L
             while (true) {
                 val line = r.readLine() ?: break
-                if (line.isEmpty()) continue
+                if (line.isBlank()) continue
                 val f = Text.split(line, d)
                 if (f.size <= maxOf(cI, cA, cO)) continue
                 val id = f[cI].trim()
                 if (id !in wanted) continue
                 val la = f[cA].trim().toDoubleOrNull() ?: continue
                 val lo = f[cO].trim().toDoubleOrNull() ?: continue
-                val q = if (cQ >= 0) f.getOrNull(cQ)?.trim()?.toDoubleOrNull() ?: 0.0 else n.toDouble()
-                pts.getOrPut(id) { ArrayList() }.add(doubleArrayOf(q, lo, la))
+                if (!la.isFinite() || !lo.isFinite() || la !in -90.0..90.0 || lo !in -180.0..180.0) continue
+                if (box != null && (la !in box.s..box.n || lo !in box.w..box.e)) continue
+                val q = if (cQ >= 0) f.getOrNull(cQ)?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: 0.0 else n.toDouble()
+                val l = pts.getOrPut(id) { DoubleList(256) }
+                l.add(q); l.add(lo, la)
                 if (++n % 200_000 == 0L && cancelled()) throw InterruptedException()
             }
             for ((id, l) in pts) {
-                if (l.size < 2) continue
-                l.sortBy { it[0] }
-                val g = DoubleArray(l.size * 2)
-                l.forEachIndexed { i, p -> g[2 * i] = p[1]; g[2 * i + 1] = p[2] }
+                val k = l.size / 3
+                if (k < 2) continue
+                var sorted = true
+                for (i in 1 until k) if (l[3 * i] < l[3 * (i - 1)]) { sorted = false; break }
+                val order = if (sorted) IntArray(k) { it } else (0 until k).sortedBy { l[3 * it] }.toIntArray()
+                val g = DoubleArray(k * 2)
+                for (i in 0 until k) { val p = order[i]; g[2 * i] = l[3 * p + 1]; g[2 * i + 1] = l[3 * p + 2] }
                 into[id] = listOf(Clip.simplify(g, tolDeg))
             }
         }

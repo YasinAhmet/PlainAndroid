@@ -66,7 +66,7 @@ class DuplicatesView(private val act: MainActivity) : LinearLayout(act) {
                 "kutusuna gider (yaklaşık 30 gün ⋮ → Çöp kutusu'ndan geri yüklenebilir). Çalma listeleri tutulan kopyaya geçer. Hiçbir şey taşınmaz."),
             15f, C.TEXT, lines = 0,
         ))
-        col.addView(act.pill(tr("Find duplicates", "Kopyaları bul"), C.ACCENT, 0xFF000000.toInt()) { startScan() }, lpL(WRAP, WRAP).apply { topMargin = act.dp(20) })
+        col.addView(act.pill(tr("Find duplicates", "Kopyaları bul"), C.BG, C.ACCENT, C.ACCENT) { startScan() }, lpL(WRAP, WRAP).apply { topMargin = act.dp(20) })
         col.addView(status, lpL(MATCH, WRAP).apply { topMargin = act.dp(16) })
         setBody(ScrollView(act).apply { addView(col) })
     }
@@ -128,10 +128,17 @@ class DuplicatesView(private val act: MainActivity) : LinearLayout(act) {
         }
     }
 
+    private val planner = Latest(this)
+
+    /** The list again (after the scan and after every tap): off the main thread, the newest tap wins (see [Latest]). */
     private fun rebuild() {
         val s = scan ?: return
-        val all = Duplicates.plan(s.files, tracked) // every candidate, ticked or not
-        val p = Duplicates.plan(s.files, tracked, keep)
+        val t = tracked; val k = HashSet(keep)
+        planner.run({ Duplicates.plan(s.files, t) to Duplicates.plan(s.files, t, k) }) { r -> if (r != null) show(s, r.first, r.second) }
+    }
+
+    /** [all]: every candidate, ticked or not; [p]: what goes to the trash now. */
+    private fun show(s: Organizer.Scan, all: Duplicates.Plan, p: Duplicates.Plan) {
         plan = p
         val freed = Text.bytes(p.bytesFreed)
         val rows = ArrayList<Row>()
@@ -170,7 +177,7 @@ class DuplicatesView(private val act: MainActivity) : LinearLayout(act) {
         wrap.addView(lv, lpL(MATCH, 0, 1f))
         val bar = LinearLayout(act).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(act.dp(16), act.dp(10), act.dp(16), act.dp(10)); setBackgroundColor(C.BG) }
         bar.addView(status.also { (it.parent as? ViewGroup)?.removeView(it); it.text = "" }, lpL(0, WRAP, 1f))
-        trashBtn = act.pill("", C.ACCENT, 0xFF000000.toInt()) { confirm() }
+        trashBtn = act.pill("", C.BG, C.ACCENT, C.ACCENT) { confirm() }
         bar.addView(trashBtn)
         wrap.addView(bar, lpL(MATCH, WRAP))
         setBody(wrap)
@@ -186,6 +193,7 @@ class DuplicatesView(private val act: MainActivity) : LinearLayout(act) {
 
     private fun confirm() {
         val p = plan ?: return
+        if (planner.pending) return // a newer list (the last tap) is still being made
         if (busy || p.removals.isEmpty()) return
         AlertDialog.Builder(act).setTitle(tr("Move ${p.removals.size} duplicates to the trash?", "${p.removals.size} kopya çöp kutusuna gönderilsin mi?"))
             .setMessage(tr("${Text.bytes(p.bytesFreed)} freed. They stay restorable for about 30 days (⋮ → Trash). Android will ask for your permission now.",

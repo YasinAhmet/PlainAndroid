@@ -138,12 +138,15 @@ class MapView(ctx: Context) : View(ctx) {
     }
 
     fun centerOn(lat: Double, lon: Double, z: Double? = null) {
-        cx = Geo.mx(lon); cy = Geo.my(lat)
-        if (z != null) zoom = z.coerceIn(MIN_Z, MAX_Z)
+        if (!lat.isFinite() || !lon.isFinite()) return
+        cx = Geo.mx(lon.coerceIn(-180.0, 180.0)); cy = Geo.my(lat)
+        if (z != null && z.isFinite()) zoom = z.coerceIn(MIN_Z, MAX_Z)
         invalidate()
     }
 
     fun fit(b: BBox) {
+        // a damaged box (NaN / infinite) would put NaN into the view and crash every frame after it
+        if (!(b.w.isFinite() && b.s.isFinite() && b.e.isFinite() && b.n.isFinite())) return
         if (width == 0 || height == 0) { pendingFit = b; return }
         val pad = density * 32
         val w = (width - 2 * pad).coerceAtLeast(width / 2f)
@@ -172,6 +175,7 @@ class MapView(ctx: Context) : View(ctx) {
     fun zoomBy(dz: Double) = zoomAround(width / 2f, height / 2f, dz)
 
     private fun zoomAround(fx0: Float, fy0: Float, dz: Double) {
+        if (!dz.isFinite()) return
         val fx = if (follow) width / 2f else fx0
         val fy = if (follow) height / 2f else fy0
         val mx = xToM(fx, fy); val my = yToM(fx, fy)
@@ -329,7 +333,15 @@ class MapView(ctx: Context) : View(ctx) {
         if (dt > maxDrawNs) maxDrawNs = dt
     }
 
+    /** Last line of defence: a NaN / out-of-range view would throw in roundToInt() on every frame (a crash loop). */
+    private fun sanitize() {
+        if (!zoom.isFinite()) zoom = MIN_Z else if (zoom !in MIN_Z..MAX_Z) zoom = zoom.coerceIn(MIN_Z, MAX_Z)
+        if (!cx.isFinite()) cx = 0.5 else if (cx !in 0.0..1.0) cx = cx.coerceIn(0.0, 1.0)
+        if (!cy.isFinite()) cy = 0.5 else if (cy !in 0.0..1.0) cy = cy.coerceIn(0.0, 1.0)
+    }
+
     private fun drawMap(c: Canvas) {
+        sanitize()
         c.drawColor(bg)
         val w = width.toDouble()
         val h = height.toDouble()
@@ -639,9 +651,10 @@ class MapView(ctx: Context) : View(ctx) {
     private fun drawScale(c: Canvas, world: Double) {
         val mpp = Geo.metersPerUnit(Geo.lat(cy)) / world
         val target = density * 90 * mpp
-        if (target <= 0 || target.isNaN()) return
+        if (!(target > 0) || !target.isFinite()) return
         val p10 = 10.0.pow(floor(log10(target)))
-        val nice = listOf(5.0, 2.0, 1.0).map { it * p10 }.first { it <= target }
+        // firstOrNull: log10 can round up just below a power of ten (999.99999… → 3.0)
+        val nice = listOf(5.0, 2.0, 1.0).map { it * p10 }.firstOrNull { it <= target } ?: (p10 / 2)
         val len = (nice / mpp).toFloat()
         val x0 = density * 12
         // sits above the attribution line so the two never overlap

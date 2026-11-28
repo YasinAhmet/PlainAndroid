@@ -79,7 +79,12 @@ open class SyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL) { cancel.set(true); return START_NOT_STICKY }
+        if (intent?.action == ACTION_CANCEL) {
+            cancel.set(true)
+            // "Stop" on a notification left from a sync that already ended: don't leave a bare service running
+            if (!SyncState.running) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH, tr("Sync", "Eşitleme"), NotificationManager.IMPORTANCE_LOW))
         val n = note(tr("Starting…", "Başlıyor…"), 0f)
@@ -111,7 +116,8 @@ open class SyncService : Service() {
                     val key = s.replace(Regex("\\(\\d+ MB\\)"), "")
                     if (key != lastLogged) { lastLogged = key; log("${(f * 100).toInt()}%  $s") }
                     val now = System.currentTimeMillis()
-                    if (now - lastNote > 1500) { lastNote = now; nm.notify(City.notifId, note(s, f)) }
+                    // not once stopping: a late progress line must not post a fresh ongoing notification after the end
+                    if (now - lastNote > 1500 && !cancel.get()) { lastNote = now; nm.notify(City.notifId, note(s, f)) }
                 }
                 if (situational) Situational(applicationContext, cancel, report).run()
                 else Sync(applicationContext, cancel, report).run()
@@ -134,10 +140,26 @@ open class SyncService : Service() {
                 try { if (wake.isHeld) wake.release() } catch (_: Exception) {}
                 try { if (wifiLock.isHeld) wifiLock.release() } catch (_: Exception) {}
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                // after onTimeout the service is no longer in the foreground, so stopForeground alone wouldn't clear it
+                try { nm.cancel(City.notifId) } catch (_: Exception) {}
                 stopSelf()
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Android 15+ gives a data-sync service about 6 hours a day, then calls this and expects it to stop within seconds
+     * (else the app is killed). The sync stops as with "Stop"; finished steps are kept for the next sync.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        cancel.set(true)
+        SyncState.error = tr("Android's daily time limit for syncs was reached. Progress is kept; sync again later to continue.",
+            "Android'in eşitlemeler için günlük süre sınırı doldu. İlerleme saklandı; devam etmek için daha sonra yeniden eşitleyin.")
+        SyncState.changed()
+        log("stopped: Android's foreground-service time limit")
+        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+        stopSelf()
     }
 
     private fun note(text: String, f: Float): Notification {

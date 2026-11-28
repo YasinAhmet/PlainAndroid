@@ -90,6 +90,12 @@ data class PlayQueue(val items: List<QEntry> = emptyList(), val index: Int = 0) 
         return PlayQueue(l, idx)
     }
 
+    /** The entries after the playing one in random order; the playing entry and everything before it stay put. */
+    fun shuffleRest(random: kotlin.random.Random = kotlin.random.Random.Default): PlayQueue {
+        val cut = (index + 1).coerceIn(0, items.size)
+        return PlayQueue(items.take(cut) + items.drop(cut).shuffled(random), index)
+    }
+
     fun remove(i: Int): PlayQueue {
         if (i !in items.indices) return this
         val l = items.toMutableList().also { it.removeAt(i) }

@@ -51,6 +51,7 @@ class TrailScreen(private val act: MainActivity) {
     private val trackOverlay = MapView.Overlay(Trail.segs, C.TRACK, 4.5f)
     private var on = false
     private var visible = true
+    private var lastPowerTap = 0L
 
     // compass mode / statistics (Settings)
     private val compass = Compass(act, { displayRotation() }) { h -> onHeading(h) }
@@ -100,7 +101,13 @@ class TrailScreen(private val act: MainActivity) {
         // --- right: zoom, layer, locate
         val side = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, act.dp(10), 0) }
         fun sideBtn(label: String, onClick: () -> Unit) = act.button(label, C.PANEL) { onClick() }.apply { textSize = 20f }
-        side.addView(sideBtn("⚙") { act.showSettings { applySettings() } }.apply { textSize = 18f },
+        side.addView(sideBtn("⚙") {
+            act.showSettings(extra = { s ->
+                s.item(app.plain.ui.Ic.PLACE, tr("Your position", "Konumunuz"),
+                    sub = tr("Coordinates, plus code, the way back to the start, sunset · also: hold ◎",
+                        "Koordinatlar, artı kodu, başlangıca dönüş, gün batımı · ayrıca: ◎ basılı tutun"), more = true) { showPosition() }
+            }) { applySettings() }
+        }.apply { textSize = 18f },
             lpL(act.dp(46), act.dp(46)).apply { bottomMargin = act.dp(8) })
         side.addView(sideBtn("+") { map.zoomBy(1.0) }, lpL(act.dp(46), act.dp(46)).apply { bottomMargin = act.dp(8) })
         side.addView(sideBtn("−") { map.zoomBy(-1.0) }, lpL(act.dp(46), act.dp(46)).apply { bottomMargin = act.dp(8) })
@@ -120,7 +127,10 @@ class TrailScreen(private val act: MainActivity) {
             setOnLongClickListener { act.showLandLegend(); true }
         }
         side.addView(landBtn, lpL(act.dp(46), act.dp(46)).apply { bottomMargin = act.dp(8) })
-        side.addView(sideBtn("◎") { locate() }, lpL(act.dp(46), act.dp(46)))
+        // locate: tap = follow your position, hold = your coordinates / plus code / the way back to the start / sunset
+        side.addView(sideBtn("◎") { locate() }.apply {
+            setOnLongClickListener { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); showPosition(); true }
+        }, lpL(act.dp(46), act.dp(46)))
         view.addView(side, lpF(WRAP, WRAP, Gravity.END or Gravity.CENTER_VERTICAL))
 
         // --- bottom: the plan chooser (OFF), above the power button
@@ -137,7 +147,13 @@ class TrailScreen(private val act: MainActivity) {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             elevation = act.dpf(6)
             // recording: tap = pause / resume, hold = stop
-            setOnClickListener { if (!on) startTrail() else togglePause() }
+            setOnClickListener {
+                // a double tap on START (unsure the first one took) must not pause the new recording at once
+                val t = android.os.SystemClock.uptimeMillis()
+                if (t - lastPowerTap < 800) return@setOnClickListener
+                lastPowerTap = t
+                if (!on) startTrail() else togglePause()
+            }
             setOnLongClickListener { if (on) askStop(); on }
         }
         view.addView(power, lpF(act.dp(84), act.dp(84), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = act.dp(14) })
@@ -482,6 +498,98 @@ class TrailScreen(private val act: MainActivity) {
         if (Trail.lastLat.isNaN()) { act.toast(tr("Waiting for GPS…", "GPS bekleniyor…")); return }
         map.follow = true
         map.setMe(Trail.lastLat, Trail.lastLon, Trail.lastAcc)
+    }
+
+    // ------------------------------------------------------------------ hold ◎: your position (offline)
+    /** Where you are, in forms you can read out or send, the way back to the start, and the daylight left. */
+    private fun showPosition() {
+        var lat = Double.NaN; var lon = Double.NaN; var acc = Float.NaN; var at = 0L
+        val last = Trail.lastPoint()
+        if (on && !Trail.lastLat.isNaN()) { lat = Trail.lastLat; lon = Trail.lastLon; acc = Trail.lastAcc }
+        else if (on && last != null) { lat = last[0]; lon = last[1] }
+        else try {
+            // not recording: the phone's last GPS position (no GPS is switched on for this)
+            act.getSystemService(LocationManager::class.java).getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
+                lat = it.latitude; lon = it.longitude; acc = if (it.hasAccuracy()) it.accuracy else Float.NaN; at = it.time
+            }
+        } catch (_: Exception) {}
+        if (!Rec.validPos(lat, lon)) {
+            act.toast(tr("No position yet — press START (GPS runs only while recording).", "Henüz konum yok — BAŞLA'ya basın (GPS yalnızca kayıtta çalışır)."))
+            return
+        }
+        if (acc.isFinite() && acc >= 999f) acc = Float.NaN // "no accuracy" placeholder
+        val c = Where.coords(lat, lon)
+        val plus = Where.plusCode(lat, lon)
+        val sub = c + (if (acc.isFinite()) " · ±${acc.roundToInt()} m" else "") +
+            (if (at > 0) " · " + tr("last known, ${span(System.currentTimeMillis() - at)} ago", "son bilinen, ${span(System.currentTimeMillis() - at)} önce") else "")
+        val s = app.plain.ui.Sheet(act, C.TRACK).header(tr("Your position", "Konumunuz"), sub)
+        s.item(app.plain.ui.Ic.COPY, tr("Copy coordinates", "Koordinatları kopyala"), sub = c) { copy(c) }
+        s.item(app.plain.ui.Ic.PLACE, tr("Copy plus code", "Artı kodunu kopyala"), value = plus,
+            sub = tr("Works offline; Google Maps and emergency services understand it", "Çevrimdışı çalışır; Google Haritalar ve acil servisler anlar")) { copy(plus) }
+        s.item(app.plain.ui.Ic.SHARE, tr("Send my position…", "Konumumu gönder…"), sub = tr("As text: SMS, chat…", "Metin olarak: SMS, sohbet…")) {
+            sharePosition(c, acc, plus, lat, lon)
+        }
+        val start = if (on) Trail.firstPoint() else null
+        if (start != null) {
+            val d = Geo.dist(lat, lon, start[0], start[1])
+            val b = Where.bearing(lat, lon, start[0], start[1])
+            s.section(tr("Back to the start", "Başlangıca dönüş"))
+            s.item(app.plain.ui.Ic.FLAG, tr("Show the start on the map", "Başlangıcı haritada göster"),
+                sub = tr("${Fmt.dist(d)} straight, towards ${b.roundToInt()}° ${Heading.cardinal(b)} · ${Fmt.dist(Trail.distM)} back along your track",
+                    "Kuş uçuşu ${Fmt.dist(d)}, ${b.roundToInt()}° ${Heading.cardinal(b)} yönünde · izinizden geri ${Fmt.dist(Trail.distM)}")) {
+                map.follow = false
+                map.centerOn(start[0], start[1])
+            }
+        }
+        Where.sun(lat, lon, System.currentTimeMillis())?.let { s.note(sunLine(it, lat, lon)) }
+        s.show()
+        Dev.event("position", "sheet opened (recording $on)")
+    }
+
+    private fun sunLine(sun: Where.Sun, lat: Double, lon: Double): String {
+        val now = System.currentTimeMillis()
+        val f = java.text.SimpleDateFormat("HH:mm", PlainLang.locale)
+        val rise = f.format(java.util.Date(sun.rise))
+        val set = f.format(java.util.Date(sun.set))
+        return when {
+            now < sun.rise -> tr("Sunrise $rise · sunset $set", "Gün doğumu $rise · gün batımı $set")
+            now < sun.set -> tr("Sunset $set — ${span(sun.set - now)} of daylight left", "Gün batımı $set — ${span(sun.set - now)} gün ışığı kaldı")
+            else -> {
+                // after dark: when it gets light again
+                val next = Where.sun(lat, lon, now + 12 * 3_600_000L)?.rise?.takeIf { it > now }
+                if (next != null) tr("Sunset was at $set · sunrise ${f.format(java.util.Date(next))}", "Gün batımı $set (geçti) · gün doğumu ${f.format(java.util.Date(next))}")
+                else tr("Sunset was at $set", "Gün batımı $set (geçti)")
+            }
+        }
+    }
+
+    private fun span(ms: Long): String {
+        val m = (ms / 60_000L).coerceAtLeast(0L)
+        val h = m / 60
+        return if (h > 0) tr("$h h ${m % 60} min", "$h sa ${m % 60} dk") else tr("$m min", "$m dk")
+    }
+
+    private fun copy(text: String) {
+        try {
+            act.getSystemService(android.content.ClipboardManager::class.java)
+                .setPrimaryClip(android.content.ClipData.newPlainText("position", text))
+            // Android 13+ confirms a copy itself
+            if (android.os.Build.VERSION.SDK_INT < 33) act.toast(tr("Copied: $text", "Kopyalandı: $text"))
+        } catch (_: Exception) {}
+    }
+
+    private fun sharePosition(c: String, acc: Float, plus: String, lat: Double, lon: Double) {
+        val la = String.format(Locale.US, "%.6f", lat)
+        val lo = String.format(Locale.US, "%.6f", lon)
+        val text = tr("My position: ", "Konumum: ") + c + (if (acc.isFinite()) " (±${acc.roundToInt()} m)" else "") +
+            " · " + tr("plus code", "artı kodu") + " " + plus +
+            "\nhttps://www.openstreetmap.org/?mlat=$la&mlon=$lo#map=16/$la/$lo"
+        try {
+            act.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text),
+                tr("Send my position", "Konumumu gönder")))
+        } catch (_: Exception) {
+            act.toast(tr("No app to send it with.", "Gönderecek uygulama yok."))
+        }
     }
 
     private fun updateStats() {

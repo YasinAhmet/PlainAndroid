@@ -41,7 +41,7 @@ class Tracker(context: Context) {
         val level = i?.let {
             val l = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val sc = it.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
-            if (l >= 0 && sc > 0) l * 100 / sc else -1
+            if (l >= 0 && sc > 0) (l * 100 / sc).coerceAtMost(100) else -1 // a phone reporting level > scale
         } ?: -1
         val status = when (i?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)) {
             BatteryManager.BATTERY_STATUS_CHARGING -> "charging"
@@ -126,7 +126,10 @@ class Tracker(context: Context) {
         prefs.edit().putBoolean("lastSnapCharging", s.charging).apply()
     }
 
-    private fun runCheckin(): Pair<String?, String?> = try {
+    private fun runCheckin(): Pair<String?, String?> = if (!canDump()) null to tr(
+        "The DUMP permission isn't granted yet (one-time adb grant, see below)",
+        "DUMP izni henüz verilmedi (tek seferlik adb izni, aşağıya bakın)",
+    ) else try {
         val p = ProcessBuilder("/system/bin/dumpsys", "batterystats", "--checkin")
             .redirectErrorStream(true).start()
         p.outputStream.close()
@@ -146,8 +149,20 @@ class Tracker(context: Context) {
         null to (e.javaClass.simpleName + ": " + e.message)
     }
 
+    /**
+     * Without the adb grant, dumpsys only prints "Permission Denial": no need to start a process for that every
+     * 15 minutes in the background.
+     */
+    private fun canDump(): Boolean =
+        ctx.checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED
+
     private fun logScreenEvents(now: Long) {
-        val from = prefs.getLong("screenQueryTo", now - TimeUnit.HOURS.toMillis(24))
+        val saved = prefs.getLong("screenQueryTo", now - TimeUnit.HOURS.toMillis(24))
+        // The clock was set back: the last query's end is in the future. Carry on from now (an empty range would be
+        // asked again and again, and anything thrown here used to stop the per-app snapshot too).
+        if (saved >= now) { prefs.edit().putLong("screenQueryTo", now).apply(); return }
+        // After a long pause (tracking off for weeks) don't pull weeks of events in one go.
+        val from = maxOf(saved, now - TimeUnit.DAYS.toMillis(7))
         val usm = ctx.getSystemService(UsageStatsManager::class.java) ?: return
         val lines = ArrayList<String>()
         try {
@@ -160,7 +175,7 @@ class Tracker(context: Context) {
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> lines += Csv.screen(e.timeStamp, false)
                 }
             }
-        } catch (_: SecurityException) { return }
+        } catch (_: Exception) { return } // SecurityException without the usage grant; screen events are optional
         if (lines.isNotEmpty()) append(screenLog, Csv.SCREEN_HEADER, lines)
         prefs.edit().putLong("screenQueryTo", now).apply()
     }

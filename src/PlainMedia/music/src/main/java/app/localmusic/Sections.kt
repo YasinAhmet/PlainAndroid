@@ -1,6 +1,7 @@
 package app.localmusic
 
 import app.plain.lang.tr
+import java.util.Locale
 
 /**
  * Pure grouping for the library screens (unit-tested in LogicTest.kt): packing small groups, the collapsed folder
@@ -25,7 +26,7 @@ object Packing {
     /** The groups that stay as they are, plus the one group the small ones were packed into (null = nothing packed). */
     class Packed(val groups: List<Group>, val packed: Group?)
 
-    private val BY_ARTIST = compareBy<Song>({ Text.sortKey(it.mainArtist) }, { it.sortTitle }, { it.id })
+    private val BY_ARTIST = compareBy<Song>({ it.sortArtist }, { it.sortTitle }, { it.id })
     private val UNKNOWN_KEY = Text.groupKey(Naming.UNKNOWN_ARTIST)
 
     /** Artists with at most [max] songs, and Unknown Artist, go into one "Singles & one-offs" entry (songs by artist). */
@@ -86,7 +87,7 @@ object FolderTree {
         PHONE -> tr(PHONE, "Telefon belleği")
         else -> name
     }
-    private val ROOT_ORDER = listOf("music", "download", PLAIN.lowercase(), PLAIN_CACHED.lowercase())
+    private val ROOT_ORDER = listOf("music", "download", PLAIN.lowercase(Locale.ROOT), PLAIN_CACHED.lowercase(Locale.ROOT))
 
     /** Root label and the folder names below it. Plain Youtube's music and video trees share one root per channel. */
     fun split(relPath: String): Pair<String, List<String>> {
@@ -107,16 +108,16 @@ object FolderTree {
         val roots = LinkedHashMap<String, B>()
         for (s in songs) {
             val (root, rest) = split(s.relPath)
-            var b = roots.getOrPut(root.lowercase()) { B(root) }
-            for (p in rest) b = b.kids.getOrPut(p.lowercase()) { B(p) }
+            var b = roots.getOrPut(root.lowercase(Locale.ROOT)) { B(root) }
+            for (p in rest) b = b.kids.getOrPut(p.lowercase(Locale.ROOT)) { B(p) }
             b.songs += s
         }
-        return roots.values.map { finish(it, rootTitle(it.name), it.name.lowercase()) }
+        return roots.values.map { finish(it, rootTitle(it.name), it.name.lowercase(Locale.ROOT)) }
             .sortedWith(compareBy({ ROOT_ORDER.indexOf(it.key.substringBefore('/')).let { i -> if (i < 0) ROOT_ORDER.size else i } }, { Text.sortKey(it.title) }))
     }
 
     private fun finish(b: B, title: String, key: String): FolderNode {
-        val kids = b.kids.values.map { finish(it, it.name, key + "/" + it.name.lowercase()) }
+        val kids = b.kids.values.map { finish(it, it.name, key + "/" + it.name.lowercase(Locale.ROOT)) }
         val single = kids.filter { it.children.isEmpty() && it.songs.size == 1 }
         val children = ArrayList(if (single.size >= 2) kids - single.toSet() else kids)
         children.sortBy { Text.sortKey(it.title) }
@@ -205,7 +206,7 @@ class PlayHistory(private val max: Int = 2000) {
 
     private fun resolve(e: Entry, byId: Map<Long, Song>, byPath: Map<String, Song>): Song? {
         val s = byId[e.id]
-        return if (s != null && s.path.equals(e.path, ignoreCase = true)) s else byPath[e.path.lowercase()] ?: s
+        return if (s != null && s.path.equals(e.path, ignoreCase = true)) s else byPath[LibraryIndex.pathKey(e.path)] ?: s
     }
 
     fun encode(): String = entries.joinToString("\n") { "${it.id}\t${it.last}\t${it.count}\t${it.path}" }

@@ -55,13 +55,14 @@ object Sorting {
     private fun oldest(v: Long) = if (v <= 0) Long.MAX_VALUE else v
 
     private val TITLE = compareBy<Song>({ it.sortTitle }, { it.id })
-    private val BY_ALBUM = compareBy<Song>({ Text.sortKey(it.albumName) }, { it.disc }, { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }, { it.id })
+    // sortArtist / sortAlbum are computed once per song: folding them in the comparator took seconds for 20k songs
+    private val BY_ALBUM = compareBy<Song>({ it.sortAlbum }, { it.disc }, { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }, { it.id })
 
     fun songs(list: List<Song>, id: String): List<Song> = when (id) {
         "za" -> list.sortedWith(TITLE.reversed())
         "new" -> list.sortedWith(compareBy<Song> { newest(it.dateAdded) }.then(TITLE))
         "old" -> list.sortedWith(compareBy<Song> { oldest(it.dateAdded) }.then(TITLE))
-        "artist" -> list.sortedWith(compareBy<Song> { Text.sortKey(it.mainArtist) }.then(BY_ALBUM))
+        "artist" -> list.sortedWith(compareBy<Song> { it.sortArtist }.then(BY_ALBUM))
         "album" -> list.sortedWith(BY_ALBUM)
         "year" -> list.sortedWith(compareBy<Song> { newest(it.year.toLong()) }.then(BY_ALBUM))
         "year_old" -> list.sortedWith(compareBy<Song> { oldest(it.year.toLong()) }.then(BY_ALBUM))
@@ -71,14 +72,14 @@ object Sorting {
         else -> list // "custom": as given (playlist order)
     }
 
-    private val G_TITLE = compareBy<Group>({ Text.sortKey(it.title) }, { it.key })
+    private val G_TITLE = compareBy<Group>({ it.sortTitle }, { it.key })
 
     /** Artists, albums and genres. */
     fun groups(list: List<Group>, id: String): List<Group> = when (id) {
         "za" -> list.sortedWith(G_TITLE.reversed())
         "new" -> list.sortedWith(compareBy<Group> { newest(it.added) }.then(G_TITLE))
         "old" -> list.sortedWith(compareBy<Group> { oldest(it.firstAdded) }.then(G_TITLE))
-        "artist" -> list.sortedWith(compareBy<Group>({ Text.sortKey(it.artist) }, { newest(it.year.toLong()) }).then(G_TITLE))
+        "artist" -> list.sortedWith(compareBy<Group>({ it.sortArtist }, { newest(it.year.toLong()) }).then(G_TITLE))
         "year" -> list.sortedWith(compareBy<Group> { newest(it.year.toLong()) }.then(G_TITLE))
         "year_old" -> list.sortedWith(compareBy<Group> { oldest(it.firstYear.toLong()) }.then(G_TITLE))
         "most" -> list.sortedWith(compareBy<Group> { -it.count }.then(G_TITLE))

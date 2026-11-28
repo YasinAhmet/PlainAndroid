@@ -939,8 +939,13 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         rotateBtn = pill(rotateText()) { toggleRotation() }
         chips.addView(rotateBtn)
         chips.addView(pill("") { visitChannel() }.say { tr("Channel", "Kanal") })
-        chips.addView(pill("") { if (videoId.isNotEmpty()) Hold.shareLink(this, videoId, title) else toast(tr("Local file: no link to share", "Yerel dosya: paylaşılacak bağlantı yok")) }.say { tr("Share", "Paylaş") })
+        // Share: tap = the link; hold = a sheet that also offers the link at the current time (?t=…)
+        chips.addView(pill("") { if (videoId.isNotEmpty()) Hold.shareLink(this, videoId, title) else toast(tr("Local file: no link to share", "Yerel dosya: paylaşılacak bağlantı yok")) }
+            .say { tr("Share", "Paylaş") }
+            .apply { setOnLongClickListener { v -> v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); shareSheet(); true } })
+        // Queue: tap = the queue; hold = shuffle what comes after the playing entry (also a row in the queue)
         queueBtn = pill(tr("Queue", "Sıra")) { queueSheet() }
+            .apply { setOnLongClickListener { v -> v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); shuffleRest(); true } }
         chips.addView(queueBtn)
         controls.addView(chips, lpL(MATCH, WRAP))
         root.addView(controls, lpL(MATCH, WRAP))
@@ -1212,6 +1217,7 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun hlsSource(g: Int, net: android.net.Network?, inf: VideoInfo): CachedSource {
         val (h, ua) = loadHls(g, inf, height)
+        if (h.v.isEmpty()) throw YtError(tr("YouTube sent an empty video playlist (try Listen)", "YouTube boş bir video listesi gönderdi (Dinle'yi deneyin)"), false)
         height = h.variant.height
         main.post { qualityBtn.text = tr("Quality ${height}p", "Kalite ${height}p") }
         val key = CacheMeta.keyOf(videoId, height, h.lang)
@@ -1308,6 +1314,8 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         val err = source?.error
         when {
             err is NoWifi -> status(errText(err), true)
+            // the phone's storage is full: another stream (Listen) would fail the same way
+            err is StorageFull -> status(tr("Storage is full: the stream can't be cached. Free some space and play again.", "Depolama dolu: akış önbelleğe alınamıyor. Biraz yer açıp yeniden oynatın."), true)
             localUri != null || pubFile != null -> status(tr("This file can't be played ($what/$extra)", "Bu dosya oynatılamıyor ($what/$extra)"), true)
             mode == PlayMode.WATCH && !watchFailed -> {
                 watchFailed = true
@@ -1398,7 +1406,15 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
 
     private fun togglePlay() { if (mp?.isPlaying == true) pause() else resume() }
 
-    private fun seekTo(ms: Int) { val p = mp ?: return; if (prepared) { p.seekTo(ms.coerceIn(0, p.duration)); updateTime(); rememberPos() } else resumeMs = ms }
+    private fun seekTo(ms: Int) {
+        val p = mp ?: return
+        if (!prepared) { resumeMs = ms; return }
+        // duration is -1 (or junk) for a stream without a known length and after a playback error: coerceIn(0, -1)
+        // would throw, from a double-tap, the seek bar, a notification or PiP button
+        val d = try { p.duration } catch (_: Exception) { -1 }
+        try { p.seekTo(if (d > 0) ms.coerceIn(0, d) else ms.coerceAtLeast(0)) } catch (_: IllegalStateException) { return }
+        updateTime(); rememberPos()
+    }
 
     private fun seekBy(d: Int) { val p = mp ?: return; if (prepared) seekTo(p.currentPosition + d) }
 
@@ -1597,6 +1613,28 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
         if (started || bg.hidden) start()
     }
 
+    /** Hold on Share: the link, or the link at the current time (YouTube's "?t=" seconds). */
+    private fun shareSheet() {
+        val a = ui as? android.app.Activity ?: return
+        if (videoId.isEmpty()) { toast(tr("Local file: no link to share", "Yerel dosya: paylaşılacak bağlantı yok")); return }
+        val at = (try { if (prepared) mp?.currentPosition ?: resumeMs else resumeMs } catch (_: Exception) { resumeMs }) / 1000L
+        val id = videoId; val t = title
+        val rows = ArrayList<Pair<String, () -> Unit>>()
+        rows += tr("Share link", "Bağlantıyı paylaş") to { Hold.shareLink(this, id, t) }
+        if (at > 0) rows += tr("Share at ${Text.duration(at)}", "${Text.duration(at)} noktasından paylaş") to { Hold.shareLink(this, id, t, at) }
+        Sheet.list(a, tr("Share", "Paylaş"), rows, C.ACCENT)
+    }
+
+    /** The entries after the playing one, in random order (hold on Queue, or the queue's first row). */
+    private fun shuffleRest() {
+        val q = Store.queue()
+        val left = q.items.size - q.index - 1
+        if (left < 2) { toast(tr("Nothing to shuffle after this one", "Bundan sonra karıştırılacak bir şey yok")); return }
+        Store.setQueue(q.shuffleRest())
+        showEntryControls()
+        toast(tr("Shuffled the next $left", "Sıradaki $left öğe karıştırıldı"))
+    }
+
     private fun queueSheet() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(8), dp(8)) }
         val scroll = android.widget.ScrollView(this).apply { addView(col) }
@@ -1605,6 +1643,10 @@ class PlayerPanel private constructor(private val app: Context) : ContextWrapper
             col.removeAllViews()
             val q = Store.queue()
             if (q.items.isEmpty()) col.addView(text(tr("Empty. Add videos with press & hold → Add to play queue.", "Boş. Basılı tutup → Çalma sırasına ekle ile video ekleyin."), 13f, C.LABEL, lines = 3))
+            if (q.items.size - q.index - 1 >= 2) col.addView(text("⤮ " + tr("Shuffle what's next", "Sıradakileri karıştır"), 14f, C.ACCENT).apply {
+                setPadding(0, dp(6), 0, dp(10))
+                setOnClickListener { shuffleRest(); render() }
+            }, lpL(MATCH, WRAP))
             for ((i, e) in q.items.withIndex()) {
                 val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
                 val t = text((if (i == q.index) "▶ " else "") + e.title.ifEmpty { e.id } + (e.mode?.let { if (it == PlayMode.LISTEN) "  ♪" else "" } ?: ""),

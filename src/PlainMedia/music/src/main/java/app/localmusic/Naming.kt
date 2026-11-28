@@ -293,13 +293,16 @@ object Naming {
 
     fun artistFromFolder(relPath: String): String? = folderArtistOf(relPath)?.name
 
-    /** "Song (2).mp3" is a numbered variant of "Song.mp3". */
+    /** "Song (2).mp3" is a numbered variant of "Song.mp3". (No regex: it was compiled once per file of a 20k plan.) */
     fun isNumberedVariant(name: String, of: String): Boolean {
         if (name.equals(of, ignoreCase = true)) return true
         val ext = extension(of)
         val base = if (ext.isEmpty()) of else of.substring(0, of.length - ext.length - 1)
-        val rx = Regex(Regex.escape(base) + """ \(\d+\)""" + (if (ext.isEmpty()) "" else Regex.escape(".$ext")), RegexOption.IGNORE_CASE)
-        return rx.matches(name)
+        val tail = if (ext.isEmpty()) "" else ".$ext"
+        if (name.length < base.length + 4 + tail.length) return false // " (" + a digit + ")"
+        if (!name.startsWith("$base (", ignoreCase = true) || !name.endsWith(")$tail", ignoreCase = true)) return false
+        val digits = name.substring(base.length + 2, name.length - tail.length - 1)
+        return digits.isNotEmpty() && digits.all { it in '0'..'9' }
     }
 
     fun resolve(raw: RawTags, fileName: String, relPath: String = ""): Tags {

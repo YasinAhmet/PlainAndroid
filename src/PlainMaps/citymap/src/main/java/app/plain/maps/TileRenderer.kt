@@ -441,7 +441,10 @@ class Tiles(threads: Int, cacheBytes: Int, private val render: (Int, Int, Int) -
             val bmp = try { render(z, x, y) } catch (_: Throwable) { null }
             synchronized(lock) { inflight.remove(k) }
             if (stopped) return
-            if (bmp != null && g == gen) cache.put(k, bmp)
+            // nothing to show (no data yet, or the tile failed): no redraw, else the frame asks for the same tile again
+            // and the map redraws non-stop on a city that hasn't been synced
+            if (bmp == null) continue
+            if (g == gen) cache.put(k, bmp)
             onLoaded?.invoke()
         }
     }

@@ -80,6 +80,9 @@ class Store(val file: File) {
         return try {
             val d = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS)
             db = d
+            // every finished sync writes its version last: a file without it (empty, not a map) is no data, so the
+            // tab offers a sync instead of an empty map that only Settings can fix
+            if (meta("version") == null) { close(); return false }
             area = BBox.decode(meta("area"))
             hasLand = meta("land") == "1"
             landArea = BBox.decode(meta("land_area")) ?: area
@@ -243,14 +246,24 @@ class Store(val file: File) {
             "SELECT id,ref,name,mode,color FROM line WHERE norm LIKE ? ORDER BY (lower(ref)=?) DESC, (norm LIKE ?) DESC, length(ref), ref LIMIT 25",
             like, n, pre,
         ) { Hit(HitKind.LINE, it.getLong(0), it.getString(2) ?: "", Mode.name(it.getInt(3)), 0.0, 0.0, it.getInt(4), it.getString(1)) }
-        if (kinds and Kinds.STOPS != 0) out += q("SELECT id,code,name,lat,lon,mode FROM stop WHERE norm LIKE ? LIMIT 300", like) { stopOf(it) }
+        // nearest first in SQL, as for places: "camii" matches thousands of stops, and an arbitrary 300 of them used to
+        // miss the ones around the user
+        val (ord, ordArgs) = nearest(near)
+        if (kinds and Kinds.STOPS != 0) out += q("SELECT id,code,name,lat,lon,mode FROM stop WHERE norm LIKE ?$ord LIMIT 300", like, *ordArgs) { stopOf(it) }
             .sortedBy { dist(it.lat, it.lon) }.distinctBy { it.name + "|" + (it.lat * 200).toInt() + "|" + (it.lon * 200).toInt() }.take(25)
             .map { Hit(HitKind.STOP, it.id.toLong(), it.name, tr(Mode.name(it.mode) + " stop", if (it.mode == Mode.FERRY) "İskele" else Mode.name(it.mode) + " durağı") + (if (it.code.isNotEmpty() && it.mode == Mode.BUS) " · ${it.code}" else ""), it.lat, it.lon, Mode.defaultColor(it.mode), null) }
         if (kinds and Kinds.PLACES != 0) out += placeHits(placesMatching(listOf(n), false, near, cats, 400), near).take(30)
-        if (kinds and Kinds.STREETS != 0) out += q("SELECT name,lat,lon FROM street WHERE norm LIKE ? LIMIT 300", like) { Triple(it.getString(0) ?: "", it.getDouble(1), it.getDouble(2)) }
+        if (kinds and Kinds.STREETS != 0) out += q("SELECT name,lat,lon FROM street WHERE norm LIKE ?$ord LIMIT 300", like, *ordArgs) { Triple(it.getString(0) ?: "", it.getDouble(1), it.getDouble(2)) }
             .sortedBy { dist(it.second, it.third) }.distinctBy { it.first }.take(20)
             .map { Hit(HitKind.STREET, 0, it.first, tr("Street", "Sokak"), it.second, it.third, 0xFF9E9E9E.toInt(), null) }
         return out
+    }
+
+    /** " ORDER BY" squared distance to [near] (longitude scaled by its latitude) and its arguments; nothing without [near]. */
+    private fun nearest(near: Pair<Double, Double>?): Pair<String, Array<Any>> {
+        if (near == null || !near.first.isFinite() || !near.second.isFinite()) return "" to emptyArray()
+        val k = kotlin.math.cos(Math.toRadians(near.first)).let { it * it }
+        return " ORDER BY (lat-?)*(lat-?)+(lon-?)*(lon-?)*?" to arrayOf(near.first, near.first, near.second, near.second, k)
     }
 
     /**
@@ -364,8 +377,22 @@ object Times {
             i += 3
         }
         out.sort()
-        return out.take(count)
+        // the same departure twice (two calendars of one feed both covering today) is one bus
+        return dedupe(out).take(count)
     }
+
+    private fun dedupe(sorted: ArrayList<Int>): List<Int> {
+        var w = 0
+        for (k in sorted.indices) if (k == 0 || sorted[k] != sorted[w - 1]) sorted[w++] = sorted[k]
+        sorted.subList(w, sorted.size).clear()
+        return sorted
+    }
+
+    /**
+     * Which of the first [shown] departures in [next] is the day's last one, or -1. [next] must come from [next]
+     * asked for at least shown + 1: fewer means nothing runs after them (until tomorrow's service).
+     */
+    fun lastShown(next: List<Int>, shown: Int): Int = if (next.isNotEmpty() && next.size <= shown) next.size - 1 else -1
 
     /** All departures at stop [idx] on days matching [dayMask]. */
     fun all(trips: IntArray, dists: IntArray, idx: Int, dayMask: Int): List<Int> {
@@ -378,7 +405,7 @@ object Times {
             i += 3
         }
         out.sort()
-        return out
+        return dedupe(out)
     }
 
     fun clock(sec: Int): String {

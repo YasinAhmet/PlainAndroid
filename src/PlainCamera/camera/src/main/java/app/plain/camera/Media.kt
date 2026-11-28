@@ -94,6 +94,36 @@ object Media {
 
     fun thumb(ctx: Context, uri: Uri, px: Int): Bitmap? =
         try { ctx.contentResolver.loadThumbnail(uri, Size(px, px), null) } catch (_: Exception) { null }
+
+    /** Free bytes on the shared storage our captures go to; Long.MAX_VALUE when it can't be read (no limit then). */
+    @Suppress("DEPRECATION")
+    fun freeBytes(): Long = try {
+        android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path).availableBytes
+    } catch (_: Exception) { Long.MAX_VALUE }
+
+    /**
+     * Removes our own photos / videos that stayed pending (hidden) longer than [olderThanSec]: a video whose
+     * recording was cut off by the app being killed. Such a file has no index and can't be played; the media store
+     * would only drop it after a week, and a long video can take gigabytes until then. Best effort, saver thread.
+     */
+    fun dropStalePending(ctx: Context, olderThanSec: Long) {
+        try {
+            var coll = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val cutoff = System.currentTimeMillis() / 1000 - olderThanSec
+            val args = Bundle().apply {
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION,
+                    "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (1,3) AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=? AND " +
+                        "${MediaStore.MediaColumns.IS_PENDING}=1 AND ${MediaStore.MediaColumns.DATE_ADDED}<?")
+                putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(ctx.packageName, cutoff.toString()))
+                if (android.os.Build.VERSION.SDK_INT >= 30) putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+            }
+            @Suppress("DEPRECATION")
+            if (android.os.Build.VERSION.SDK_INT < 30) coll = MediaStore.setIncludePending(coll)
+            val ids = ArrayList<Long>()
+            ctx.contentResolver.query(coll, arrayOf(MediaStore.MediaColumns._ID), args, null)?.use { c -> while (c.moveToNext()) ids += c.getLong(0) }
+            for (id in ids) delete(ctx, android.content.ContentUris.withAppendedId(coll, id))
+        } catch (_: Exception) {}
+    }
 }
 
 /** Makes sure a JPEG from the camera carries the right EXIF orientation and capture time. */

@@ -201,8 +201,9 @@ class PlanScreen(private val act: MainActivity) {
 
     private fun restoreView() {
         val p = prefs.getString("planView", null)?.split(',')?.mapNotNull { it.toDoubleOrNull() }
-        if (p != null && p.size == 3) {
-            map.cx = p[0]; map.cy = p[1]; map.zoom = p[2]
+        // a damaged saved view ("NaN"…) is ignored, not loaded into the map
+        if (p != null && p.size == 3 && p.all { it.isFinite() }) {
+            map.cx = p[0].coerceIn(0.0, 1.0); map.cy = p[1].coerceIn(0.0, 1.0); map.zoom = p[2].coerceIn(MapView.MIN_Z, MapView.MAX_Z)
             return
         }
         Packs.all().firstOrNull()?.let { map.fit(it.bbox); return }
@@ -430,13 +431,13 @@ class PlanScreen(private val act: MainActivity) {
         items += tr("Show on map", "Haritada göster") to { map.fit(p.bbox) }
         if (!running && p.land != 2) items += (if (p.land == 1) tr("Build private-land layer (Wi-Fi)", "Özel arazi katmanını oluştur (Wi-Fi)") else tr("Add private-land layer (Wi-Fi)", "Özel arazi katmanı ekle (Wi-Fi)")) to {
             p.land = 1
-            Packs.saveMeta(p)
+            Packs.trySaveMeta(p)
             Downloads.start(act, p.id)
             act.toast(if (wifiNet == null) tr("Queued — it's built when Wi-Fi is connected.", "Sırada — Wi-Fi bağlanınca oluşturulur.") else tr("Building the private-land layer…", "Özel arazi katmanı oluşturuluyor…"))
         }
         if (!running && p.land == 2) items += tr("Rebuild private-land layer (Wi-Fi)", "Özel arazi katmanını yeniden oluştur (Wi-Fi)") to {
             p.land = 1
-            Packs.saveMeta(p)
+            Packs.trySaveMeta(p)
             Downloads.start(act, p.id)
         }
         items += tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename map", "Haritayı yeniden adlandır"), p.name) { Packs.rename(p, it); showSection(0) } }
@@ -477,7 +478,7 @@ class PlanScreen(private val act: MainActivity) {
             tr("Download map along this trail", "Bu rota boyunca harita indir") to { downloadFor(e) },
             tr("Show on map", "Haritada göster") to { showRoute(e, C.PLAN) },
             tr("Share GPX", "GPX paylaş") to { act.share(e) },
-            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename plan", "Planı yeniden adlandır"), e.name) { Store.rename(e, it); showSection(1) } },
+            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename plan", "Planı yeniden adlandır"), e.name) { renameEntry(e, it); showSection(1) } },
             tr("Delete", "Sil") to { act.confirm(tr("Delete “${e.name}”?", "“${e.name}” silinsin mi?"), tr("This can't be undone.", "Bu işlem geri alınamaz."), tr("Delete", "Sil")) { Store.delete(e); clearPreview(); showSection(1) } },
         ))
     }
@@ -522,9 +523,14 @@ class PlanScreen(private val act: MainActivity) {
                 }
             },
             tr("Show on map", "Haritada göster") to { showRoute(e, C.PREVIEW) },
-            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename trail", "Rotayı yeniden adlandır"), e.name) { Store.rename(e, it); showSection(2) } },
+            tr("Rename", "Yeniden adlandır") to { act.askText(tr("Rename trail", "Rotayı yeniden adlandır"), e.name) { renameEntry(e, it); showSection(2) } },
             tr("Delete", "Sil") to { act.confirm(tr("Delete “${e.name}”?", "“${e.name}” silinsin mi?"), tr("The GPX file is deleted. This can't be undone.", "GPX dosyası silinir. Bu işlem geri alınamaz."), tr("Delete", "Sil")) { Store.delete(e); clearPreview(); showSection(2) } },
         ))
+    }
+
+    /** Rename that reports a storage error instead of crashing. */
+    private fun renameEntry(e: Entry, name: String) {
+        try { Store.rename(e, name) } catch (ex: Exception) { act.toast(tr("Could not rename: ${ex.message}", "Yeniden adlandırılamadı: ${ex.message}")) }
     }
 
     private fun shareDebug() {
@@ -733,7 +739,11 @@ class PlanScreen(private val act: MainActivity) {
         val r = drawRoute(null)
         if (r.points < 2) { act.toast(tr("Add at least two points.", "En az iki nokta ekleyin.")); return }
         act.askText(tr("Name this plan", "Plana ad verin"), "Plan ${Fmt.date(System.currentTimeMillis())}") { name ->
-            val e = Store.save(Kind.PLAN, drawRoute(name), name)
+            val e = try { Store.save(Kind.PLAN, drawRoute(name), name) } catch (ex: Exception) {
+                // storage full…: keep the drawing so it can be saved again after freeing space
+                act.toast(tr("Could not save: ${ex.message}", "Kaydedilemedi: ${ex.message}"))
+                return@askText
+            }
             Dev.event("plan", "drew “${e.name}” · ${legs.size} taps (${legs.count { it.snapped }} snapped) · ${Fmt.dist(e.distM)}")
             act.toast(tr("Saved plan “${e.name}” · ${Fmt.dist(e.distM)}", "Plan kaydedildi: “${e.name}” · ${Fmt.dist(e.distM)}"))
             endDraw()
@@ -945,10 +955,16 @@ class PlanScreen(private val act: MainActivity) {
                 prefs.edit().putBoolean("dlTopo", topo.isChecked).putBoolean("dlSat", sat.isChecked).putBoolean("dlLand", land.isChecked)
                     .putInt("dlZoom", z).putInt("dlBuffer", bufSpin.selectedItemPosition).apply()
                 val sc = if (Layer.SAT in ls) satChoices[satSpin.selectedItemPosition.coerceIn(0, satChoices.size - 1)] else null
-                val p = Packs.create(
-                    name.text.toString().trim().ifEmpty { defName }, boxFor(b), ls, z, if (b > 0) segs else null, b,
-                    sc?.url ?: "", sc?.ms ?: 0L, land.isChecked,
-                )
+                val p = try {
+                    Packs.create(
+                        name.text.toString().trim().ifEmpty { defName }, boxFor(b), ls, z, if (b > 0) segs else null, b,
+                        sc?.url ?: "", sc?.ms ?: 0L, land.isChecked,
+                    )
+                } catch (e: Exception) { // storage full / unwritable: say so instead of crashing
+                    Dev.event("download", "create failed: $e")
+                    act.toast(tr("Could not create the map: ${e.message}", "Harita oluşturulamadı: ${e.message}"))
+                    return@setPositiveButton
+                }
                 Dev.event(
                     "download",
                     "created “${p.name}” · $ls${if (land.isChecked) " + land" else ""} · z$z · ${bufferLabel(b)} · $n tiles · est ${mb.roundToInt()} MB · " +

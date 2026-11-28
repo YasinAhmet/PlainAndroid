@@ -2,6 +2,29 @@ package app.plain.download
 
 import app.plain.lang.tr
 
+/** Page-based lists (2.11): [size] rows per page. Pure, unit-tested. */
+object Paging {
+    /** Pages for [n] loaded rows; an empty list still has page 1. */
+    fun count(n: Int, size: Int): Int = maxOf(1, (maxOf(0, n) + size - 1) / size)
+
+    /** The page shown for a wanted [page] (rows deleted meanwhile, or a page asked before its rows arrived): clamped. */
+    fun shown(page: Int, n: Int, size: Int): Int = page.coerceIn(0, count(n, size) - 1)
+
+    /** Rows [from, to) of the shown page. */
+    fun window(page: Int, n: Int, size: Int): IntRange {
+        val from = shown(page, n, size) * size
+        return from until minOf(maxOf(0, n), from + size)
+    }
+
+    /** Is there a page after [page]: loaded rows, or more that YouTube has ([token], once the first answer is in). */
+    fun hasNext(page: Int, n: Int, size: Int, token: Boolean, loadedOnce: Boolean): Boolean =
+        (shown(page, n, size) + 1) * size < n || token && loadedOnce
+
+    /** Going to page [k] needs the next batch from YouTube first. */
+    fun needsMore(k: Int, n: Int, size: Int, token: Boolean, loadedOnce: Boolean): Boolean =
+        n < (k + 1) * size && token && loadedOnce
+}
+
 /** Selection on a list page (videos on most pages, channels on Following). Pure, unit-tested. */
 class Selection {
     val ids = LinkedHashSet<String>()

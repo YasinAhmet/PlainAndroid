@@ -11,11 +11,13 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -52,6 +54,7 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
     private val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
     private var rows = 0
     private var lastWasSection = false
+    private var built = false
 
     fun header(title: String, sub: String? = null, art: ((ImageView) -> Unit)? = null): Sheet {
         val row = LinearLayout(a).apply {
@@ -156,8 +159,16 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
         return this
     }
 
+    /**
+     * Shows the sheet. Safe to call on a closing screen (nothing happens), twice on one sheet (shown once), and from a
+     * double tap: a second sheet asked for while one this screen opened under half a second ago is still up is skipped.
+     */
     fun show(): Dialog {
         if (a.isFinishing || a.isDestroyed) return dialog
+        if (built) { if (!dialog.isShowing) safeShow(); return dialog }
+        val prev = lastShown[a]
+        if (prev != null && prev.first.get()?.isShowing == true && SystemClock.uptimeMillis() - prev.second < DOUBLE_TAP_MS) return dialog
+        built = true
         val root = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -169,9 +180,14 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
         }
         root.addView(View(a).apply { background = round(HANDLE, dpf(2)) },
             LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(10); bottomMargin = dp(12) })
-        val maxH = (a.resources.displayMetrics.heightPixels * 0.85f).toInt()
         val scroll = object : ScrollView(a) {
-            override fun onMeasure(w: Int, h: Int) = super.onMeasure(w, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
+            // at most 85% of the screen as it is now (it may have been turned since), and never more than the window
+            // leaves, so a long list always scrolls instead of being cut off at the bottom
+            override fun onMeasure(w: Int, h: Int) {
+                var max = (resources.displayMetrics.heightPixels * 0.85f).toInt()
+                if (View.MeasureSpec.getMode(h) != View.MeasureSpec.UNSPECIFIED) max = minOf(max, View.MeasureSpec.getSize(h))
+                super.onMeasure(w, View.MeasureSpec.makeMeasureSpec(max.coerceAtLeast(0), View.MeasureSpec.AT_MOST))
+            }
         }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         body.setPadding(0, 0, 0, dp(14))
         scroll.addView(body)
@@ -187,8 +203,16 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
             setWindowAnimations(android.R.style.Animation_InputMethod)
             navigationBarColor = BG
         }
-        dialog.show()
+        safeShow()
         return dialog
+    }
+
+    private fun safeShow() {
+        try {
+            dialog.show()
+            lastShown[a] = java.lang.ref.WeakReference(dialog) to SystemClock.uptimeMillis()
+        } catch (_: WindowManager.BadTokenException) {   // the screen went away meanwhile
+        } catch (_: IllegalStateException) {}
     }
 
     // --- pieces ------------------------------------------------------------------------------------
@@ -288,6 +312,10 @@ class Sheet(private val a: Activity, private val accent: Int = ACCENT) {
         const val ACCENT = 0xFFE8A447.toInt()
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        private const val DOUBLE_TAP_MS = 500L
+
+        /** The sheet each screen showed last, and when (weak: a closed screen is not kept). Main thread only. */
+        private val lastShown = java.util.WeakHashMap<Activity, Pair<java.lang.ref.WeakReference<Dialog>, Long>>()
 
         /** A plain list of actions (what a dropdown menu used to show), as a sheet. */
         fun list(a: Activity, title: String?, items: List<Pair<String, () -> Unit>>, accent: Int = ACCENT): Dialog {

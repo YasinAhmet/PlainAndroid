@@ -28,12 +28,17 @@ import java.util.concurrent.Executors
 
 /**
  * Pick Plain apps to install or update. The APKs inside Setup work offline; "Check for updates"
- * (also run on open) reads apps.json from the PlainAndroid repo and offers newer releases.
- * Other Plain apps open this screen with [PlainUpdate.ACTION] + their package to update themselves.
+ * reads apps.json from the PlainAndroid repo and offers newer releases. It goes online only when tapped, or when
+ * another Plain app opens this screen with [PlainUpdate.ACTION] + its package (its own "Check for updates").
+ * Hold a row for more (open, app info, keep this version, older versions).
  */
 class SetupActivity : Activity(), Installer.Listener {
 
-    private companion object { const val REQ_UNINSTALL = 41 }
+    private companion object {
+        const val REQ_UNINSTALL = 41
+        /** The last online list of this process: a recreated screen (language change…) shows it without going online. */
+        @Volatile var cachedOnline: List<Entry>? = null
+    }
 
     private object C {
         const val BG = 0xFF000000.toInt()
@@ -77,12 +82,18 @@ class SetupActivity : Activity(), Installer.Listener {
         PlainLang.init(this)
         super.onCreate(savedInstanceState)
         bundled = try { Catalog.parse(assets.open("apps.json").use { it.readBytes().toString(Charsets.UTF_8) }) } catch (_: Exception) { emptyList() }
+        online = cachedOnline
         buildUi()
         handle(intent)
         Installer.listener = this
         rebuild()
-        checkOnline()
+        // No fetch on open: only another app's "Check for updates" (or a tap on ours) goes online.
+        if (intent?.action == PlainUpdate.ACTION) checkOnline()
     }
+
+    private var started = false
+    override fun onStart() { super.onStart(); started = true }
+    override fun onStop() { started = false; super.onStop() }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -109,7 +120,13 @@ class SetupActivity : Activity(), Installer.Listener {
             if (canInstall()) { waitingPermission = null; begin(w) }
         }
         rebuild()
+        // A queue that ran while this screen was away (or before it was recreated): its progress, Skip, and a confirm
+        // dialog Android didn't let us show from the background.
+        Installer.attach(this)
     }
+
+    /** A dialog can't go on a screen that is closing (WindowManager.BadTokenException). */
+    private fun gone() = isFinishing || isDestroyed
 
     override fun onDestroy() {
         if (Installer.listener === this) Installer.listener = null
@@ -135,11 +152,15 @@ class SetupActivity : Activity(), Installer.Listener {
         onlineError = null
         rebuild()
         worker.execute {
-            val r = try { Result.success(Catalog.parse(Net.text(Catalog.ONLINE_URL))) } catch (e: Exception) { Result.failure(e) }
+            val r = try {
+                val list = Catalog.parse(Net.text(Catalog.ONLINE_URL))
+                if (list.isEmpty()) throw java.io.IOException(tr("The online app list is empty", "İnternetteki uygulama listesi boş"))
+                Result.success(list)
+            } catch (e: Exception) { Result.failure(e) }
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 checking = false
-                r.onSuccess { online = it }.onFailure { onlineError = it.message ?: it.javaClass.simpleName }
+                r.onSuccess { online = it; cachedOnline = it }.onFailure { onlineError = Net.describe(it) }
                 rebuild()
                 afterCheck()
             }
@@ -149,7 +170,7 @@ class SetupActivity : Activity(), Installer.Listener {
     /** When opened from another app's "Check for updates": install its update straight away. */
     private fun afterCheck() {
         val pkg = focusPkg ?: return
-        if (!autoInstallFocus) return
+        if (!autoInstallFocus || gone()) return
         autoInstallFocus = false
         val o = offers.firstOrNull { it.entry.pkg == pkg }
         when {
@@ -179,6 +200,7 @@ class SetupActivity : Activity(), Installer.Listener {
         val chosen = only ?: offers.filter { it.entry.pkg in selected && stateOf(it).let { s -> s == Catalog.State.NOT_INSTALLED || s == Catalog.State.UPDATE } }
         if (chosen.isEmpty()) { say(tr("Nothing to install: tick an app that isn't installed or has an update.",
             "Yüklenecek bir şey yok: yüklü olmayan ya da güncellemesi olan bir uygulama seçin.")); return }
+        if (gone()) return
         // The first install from a phone with Play Protect: say beforehand what its warning means.
         if (!prefs.getBoolean("protect_seen", false)) {
             prefs.edit().putBoolean("protect_seen", true).apply()
@@ -288,10 +310,14 @@ class SetupActivity : Activity(), Installer.Listener {
         begin(listOf(old))
     }
 
-    override fun onStatus(text: String) { setStatus(text, C.ACCENT); skip.visibility = if (Installer.confirming) View.VISIBLE else View.GONE }
+    // "Skip this app" shows for the whole install of an app: it also stops a slow download.
+    override fun onStatus(text: String) { setStatus(text, C.ACCENT); skip.visibility = if (Installer.current != null) View.VISIBLE else View.GONE }
 
-    override fun onConfirm(confirm: Intent) {
+    override fun onConfirm(confirm: Intent): Boolean {
+        // Not visible: Android 10+ would silently refuse to open it, so the Installer keeps it for onResume.
+        if (!started || gone()) return false
         try { startActivity(confirm) } catch (e: Exception) { say(tr("Can't show the install dialog: ${e.message}", "Yükleme penceresi gösterilemiyor: ${e.message}")) }
+        return true
     }
 
     override fun onItemDone(pkg: String, ok: Boolean, message: String, blocked: Boolean) {
@@ -453,8 +479,11 @@ class SetupActivity : Activity(), Installer.Listener {
                 onlineError != null -> setStatus(tr("Offline: showing the apps inside Setup ($onlineError).",
                     "İnternet yok: Setup'ın içindeki uygulamalar gösteriliyor ($onlineError)."), C.FAINT, info = true)
                 online != null -> setStatus(tr("Checked online: newest versions shown.", "İnternetten denetlendi: en yeni sürümler gösteriliyor."), C.FAINT, info = true)
+                else -> setStatus(tr("Showing the versions inside Plain Manager. Tap Check for updates for newer ones.",
+                    "Plain Manager'ın içindeki sürümler gösteriliyor. Daha yenileri için Güncellemeleri denetle'ye dokunun."), C.FAINT, info = true)
             }
         }
+        skip.visibility = if (Installer.current != null) View.VISIBLE else View.GONE
         list.addView(text(tr("Setup ${installedName(packageName) ?: ""} · apps from github.com/YasinAhmet/PlainAndroid. " +
             "To remove apps, use the Uninstaller tab.",
             "Setup ${installedName(packageName) ?: ""} · uygulamalar github.com/YasinAhmet/PlainAndroid adresinden. " +
@@ -484,8 +513,9 @@ class SetupActivity : Activity(), Installer.Listener {
         val title = text(e.name, 17f, C.TEXT, bold = true)
         val ver = when (st) {
             Catalog.State.NOT_INSTALLED -> tr("Not installed · ${e.versionName}", "Yüklü değil · ${e.versionName}")
-            Catalog.State.UPDATE -> if (e.pkg in held) tr("Kept at ${installedName(e.pkg) ?: "?"} (rolled back) · ${e.versionName} available",
-                    "${installedName(e.pkg) ?: "?"} sürümünde tutuluyor (geri dönüldü) · ${e.versionName} var")
+            // held: rolled back, or "Keep this version" in the row's hold menu
+            Catalog.State.UPDATE -> if (e.pkg in held) tr("Kept at ${installedName(e.pkg) ?: "?"} · ${e.versionName} available",
+                    "${installedName(e.pkg) ?: "?"} sürümünde tutuluyor · ${e.versionName} var")
                 else tr("Update: ${installedName(e.pkg) ?: "?"} → ${e.versionName}", "Güncelleme: ${installedName(e.pkg) ?: "?"} → ${e.versionName}")
             Catalog.State.UP_TO_DATE -> tr("Installed ${e.versionName} · up to date", "${e.versionName} yüklü · güncel")
             Catalog.State.NEWER_INSTALLED -> tr("Installed ${installedName(e.pkg) ?: ""} (newer)", "${installedName(e.pkg) ?: ""} yüklü (daha yeni)")
@@ -545,8 +575,37 @@ class SetupActivity : Activity(), Installer.Listener {
                 if (!selected.add(e.pkg)) selected.remove(e.pkg)
                 rebuild()
             }
+            setOnLongClickListener { rowMenu(o); true }
             alpha = if (st == Catalog.State.TOO_OLD_ANDROID) 0.5f else 1f
         }
+    }
+
+    /** Hold on a row: what the row offers plus open, app info and "Keep this version" (skipped by Update all). */
+    private fun rowMenu(o: Offer) {
+        if (gone()) return
+        val e = o.entry
+        val installed = installedName(e.pkg)
+        val s = Sheet(this, C.ACCENT).header(e.name,
+            if (installedCode(e.pkg) != null) tr("Installed ${installed ?: ""}", "Yüklü: ${installed ?: ""}") else tr("Not installed", "Yüklü değil"))
+        if (installedCode(e.pkg) != null) {
+            val launch = if (e.pkg == packageName) null else try { packageManager.getLaunchIntentForPackage(e.pkg) } catch (_: Exception) { null }
+            if (launch != null) s.item(Ic.OPEN, tr("Open", "Aç")) {
+                try { startActivity(launch) } catch (ex: Exception) { say(tr("Can't open it: ${ex.message}", "Açılamıyor: ${ex.message}")) }
+            }
+            s.item(Ic.INFO, tr("App info", "Uygulama bilgisi"), more = true) {
+                try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}"))) }
+                catch (ex: Exception) { say(tr("Can't open App info: ${ex.message}", "Uygulama bilgisi açılamıyor: ${ex.message}")) }
+            }
+            s.toggle(Ic.LOCK, tr("Keep this version", "Bu sürümde tut"), e.pkg in held,
+                sub = tr("Not ticked for updates and skipped by Update all, until you update it yourself",
+                    "Siz elle güncelleyene kadar güncelleme için seçilmez, Tümünü güncelle onu atlar")) { on ->
+                held = if (on) held + e.pkg else held - e.pkg
+                if (on) selected.remove(e.pkg) else if (stateOf(o) == Catalog.State.UPDATE) selected += e.pkg
+                rebuild()
+            }
+        }
+        if (!Installer.busy && rollbackChoices(o).isNotEmpty()) s.item(Ic.HISTORY, tr("Older versions…", "Eski sürümler…"), more = true) { showOlder(o) }
+        s.show()
     }
 
     // ------------------------------------------------------------------ Play Protect
@@ -558,6 +617,7 @@ class SetupActivity : Activity(), Installer.Listener {
      * button that carries on with it.
      */
     private fun playProtect(onContinue: (() -> Unit)? = null) {
+        if (gone()) return
         val msg = tr(
             "Plain apps don't come from the Play Store, so Google Play Protect may stop them with \"Unsafe app blocked\" " +
                 "or \"App blocked to protect your device\". They are safe: the source is public on GitHub, and Setup checks " +

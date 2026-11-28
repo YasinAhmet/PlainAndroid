@@ -64,15 +64,15 @@ object Checkin {
                 }
                 "dc" -> if (cat == "l" && f.size >= 9) {
                     dischargePct = f[4].toIntOrNull() ?: 0
-                    dischargeMah = f[8].toDoubleOrNull() ?: 0.0
+                    dischargeMah = num(f[8]) ?: 0.0
                 }
-                "pws" -> if (cat == "l") capacity = f[4].toDoubleOrNull() ?: 0.0
+                "pws" -> if (cat == "l") capacity = num(f[4]) ?: 0.0
                 "pwi" -> if (cat == "l" && f.size >= 6) {
                     sawPower = true
-                    val mah = f[5].toDoubleOrNull() ?: 0.0
+                    val mah = num(f[5]) ?: 0.0
                     if (f[4] == "uid") {
-                        val screen = f.getOrNull(7)?.toDoubleOrNull() ?: 0.0
-                        val smear = f.getOrNull(8)?.toDoubleOrNull() ?: mah
+                        val screen = num(f.getOrNull(7)) ?: 0.0
+                        val smear = num(f.getOrNull(8)) ?: mah
                         val old = apps[uid]
                         apps[uid] = if (old == null) UidPower(uid, mah, screen, smear)
                         else UidPower(uid, old.mah + mah, old.screenMah + screen, old.smearMah + smear)
@@ -86,6 +86,9 @@ object Checkin {
         if (!sawPower) return null
         return Snapshot(takenAt, statsStart, onBattery, dischargeMah, dischargePct, capacity, apps, hw, names)
     }
+
+    /** A number from the dump; "NaN" / "Infinity" (which toDoubleOrNull accepts) count as missing, so no sum turns NaN. */
+    private fun num(s: String?): Double? = s?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
     /**
      * What was burned between [base] and [cur]. When batterystats was reset in between (full
@@ -146,18 +149,21 @@ object Checkin {
                 when (f[0]) {
                     "meta" -> meta = f
                     "app" -> apps[f[1].toInt()] =
-                        UidPower(f[1].toInt(), f[2].toDouble(), f[3].toDouble(), f[4].toDouble())
-                    "hw" -> hw[f[1]] = f[2].toDouble()
+                        UidPower(f[1].toInt(), dbl(f[2]), dbl(f[3]), dbl(f[4]))
+                    "hw" -> hw[f[1]] = dbl(f[2])
                     "name" -> names[f[1].toInt()] = f[2].split(',').filter { it.isNotEmpty() }
                 }
             } catch (e: RuntimeException) { /* skip damaged line */ }
         }
         val m = meta ?: return null
         return try {
-            Snapshot(m[1].toLong(), m[2].toLong(), m[3].toLong(), m[4].toDouble(), m[5].toInt(),
-                m[6].toDouble(), apps, hw, names)
+            Snapshot(m[1].toLong(), m[2].toLong(), m[3].toLong(), dbl(m[4]), m[5].toInt(),
+                dbl(m[6]), apps, hw, names)
         } catch (e: RuntimeException) { null }
     }
+
+    /** A saved number; a NaN written by an older version reads as 0 (throws on junk, so the line is skipped). */
+    private fun dbl(s: String): Double = s.toDouble().let { if (it.isFinite()) it else 0.0 }
 }
 
 /** Human names for system / virtual uids that have no app label. */

@@ -149,15 +149,16 @@ object CacheLru {
 
     /**
      * Entries to delete, least recently used first, until the kind's total fits [cap] and the phone keeps
-     * [MIN_FREE] free ([free] = usable bytes now). [keep] (the one playing) is never chosen.
+     * [MIN_FREE] free ([free] = usable bytes now). [keep] (the one playing) and [busy] (entries other open sources
+     * are filling right now, e.g. parallel "Cache N" jobs) are never chosen.
      */
-    fun victims(entries: List<CacheMeta>, cap: Long, free: Long, keep: String?): List<CacheMeta> {
+    fun victims(entries: List<CacheMeta>, cap: Long, free: Long, keep: String?, busy: Set<String> = emptySet()): List<CacheMeta> {
         var total = entries.sumOf { it.size }
         var freeNow = free
         val out = ArrayList<CacheMeta>()
         for (e in entries.sortedBy { it.lastUsed }) {
             if (total <= cap && freeNow >= MIN_FREE) break
-            if (e.key == keep) continue
+            if (e.key == keep || e.key in busy) continue
             out += e
             total -= e.size
             freeNow += e.size
@@ -197,15 +198,36 @@ class CacheStore(val root: File) {
     /** Drop only the index entry (the public file was moved to a permanent folder, or deleted elsewhere). */
     fun forget(kind: CacheKind, key: String) { entryDir(kind, key).deleteRecursively() }
 
-    fun clear(kind: CacheKind) { list(kind).forEach { remove(kind, it.key) }; dir(kind).listFiles()?.forEach { it.deleteRecursively() } }
+    /** Everything of [kind] except the entries open right now (the one playing / being cached keeps its files). */
+    fun clear(kind: CacheKind) {
+        list(kind).forEach { if (!isBusy(kind, it.key)) remove(kind, it.key) }
+        dir(kind).listFiles()?.forEach { if (!isBusy(kind, it.name)) it.deleteRecursively() }
+    }
 
     fun size(kind: CacheKind) = list(kind).sumOf { it.size }
 
     /** Delete LRU entries of [kind] so it fits [cap] and keeps 3 GB free. Returns bytes freed. */
     fun trim(kind: CacheKind, cap: Long, keep: String?): Long {
-        val v = CacheLru.victims(list(kind), cap, root.usableSpace, keep)
+        val v = CacheLru.victims(list(kind), cap, root.usableSpace, keep, busyKeys(kind))
         v.forEach { remove(kind, it.key) }
         return v.sumOf { it.size }
+    }
+
+    // entries an open source (player or cache job) is reading / filling, counted (two sources may share one)
+    private val busy = HashMap<String, Int>()
+
+    fun inUse(kind: CacheKind, key: String, on: Boolean) {
+        synchronized(busy) {
+            val k = kind.dir + "/" + key
+            val n = (busy[k] ?: 0) + if (on) 1 else -1
+            if (n > 0) busy[k] = n else busy.remove(k)
+        }
+    }
+
+    fun isBusy(kind: CacheKind, key: String) = synchronized(busy) { (kind.dir + "/" + key) in busy }
+
+    fun busyKeys(kind: CacheKind): Set<String> = synchronized(busy) {
+        busy.keys.filter { it.startsWith(kind.dir + "/") }.mapTo(HashSet()) { it.substringAfter('/') }
     }
 }
 

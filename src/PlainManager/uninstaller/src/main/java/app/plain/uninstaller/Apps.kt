@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.provider.MediaStore
 import android.provider.Settings
 import android.provider.Telephony
 import android.telecom.TelecomManager
@@ -20,18 +21,27 @@ object Apps {
     fun isSystem(ai: ApplicationInfo): Boolean =
         ai.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
 
-    /** Reads the phone's current default launcher, keyboard, dialer, SMS app and WebView. */
+    /** Reads the phone's current default launcher, keyboard, dialer, SMS app and WebView, its home apps and cameras. */
     fun defaults(ctx: Context): Defaults {
         val pm = ctx.packageManager
-        val launcher = try {
-            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        // With no default chosen, Android resolves HOME to its chooser ("android"): then the default is unknown.
+        val resolved = try {
             pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
         } catch (_: Exception) { null }
+        val launcher = resolved?.takeIf { it != "android" }
+        val homes = try {
+            pm.queryIntentActivities(home, 0).mapNotNull { it.activityInfo?.packageName }.toSet()
+        } catch (_: Exception) { emptySet() }
+        val cameras = try {
+            pm.queryIntentActivities(Intent(MediaStore.ACTION_IMAGE_CAPTURE), 0)
+                .mapNotNull { r -> r.activityInfo?.applicationInfo?.takeIf { isSystem(it) }?.packageName }.toSet()
+        } catch (_: Exception) { emptySet() }
         val ime = try { Settings.Secure.getString(ctx.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) } catch (_: Exception) { null }
         val dialer = try { (ctx.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager)?.defaultDialerPackage } catch (_: Exception) { null }
         val sms = try { Telephony.Sms.getDefaultSmsPackage(ctx) } catch (_: Exception) { null }
         val webView = try { WebView.getCurrentWebViewPackage()?.packageName } catch (_: Throwable) { null }
-        return Defaults(ctx.packageName, launcher, ime, dialer, sms, webView)
+        return Defaults(ctx.packageName, launcher, ime, dialer, sms, webView, homes, cameras)
     }
 
     /** Installed apps minus the protected ones, sorted by label. Slow (labels): call off the main thread. */
@@ -39,7 +49,7 @@ object Apps {
         val pm = ctx.packageManager
         val list = try { pm.getInstalledApplications(0) } catch (_: Exception) { emptyList() }
         return list.mapNotNull { ai ->
-            val level = Safety.level(ai.packageName, d)
+            val level = Safety.level(ai.packageName, d, isSystem(ai))
             if (level == Level.HIDDEN) return@mapNotNull null
             val label = try { ai.loadLabel(pm).toString().trim() } catch (_: Exception) { "" }
             AppItem(ai.packageName, label.ifEmpty { ai.packageName }, isSystem(ai), level)

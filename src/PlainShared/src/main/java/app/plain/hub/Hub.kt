@@ -76,7 +76,8 @@ object Hub {
      * passes (a downloaded city), plus [current] itself. The rest wait under "Others" ([otherTabs]).
      */
     fun mainTabs(ctx: Context, current: String?): List<Tab> =
-        visibleTabs.filter { it.key == current || it.shown?.invoke(ctx) != false }
+        // (a test that throws counts as "shown": the drawers must always build)
+        visibleTabs.filter { it.key == current || (try { it.shown?.invoke(ctx) } catch (_: Exception) { null }) != false }
 
     fun otherTabs(ctx: Context, current: String?): List<Tab> {
         val main = mainTabs(ctx, current).toSet()
@@ -97,10 +98,11 @@ object Hub {
         } catch (_: Exception) {}
     }
 
-    /** The tab the launcher icon opens: the last one used, else the first. */
+    /** The tab the launcher icon opens: the last one used, else the first (a key no tab has any more counts as none). */
     fun lastTab(ctx: Context): Tab {
         val vis = visibleTabs
-        return vis.firstOrNull { it.key == read(ctx, "last") } ?: vis.first()
+        val last = read(ctx, "last")
+        return vis.firstOrNull { it.key == last } ?: vis.firstOrNull() ?: tabs.first()
     }
 
     fun setLast(ctx: Context, key: String) = write(ctx, "last", key)
@@ -490,7 +492,8 @@ internal class HubFrame(private val act: Activity, private val key: String, priv
         if (k == key) { titleTap?.invoke(); return }
         switching = true
         showOpen(k, animate = true)
-        postDelayed({ Hub.open(act, k) }, 150)
+        // (the screen may be closing by then: Back right after the tap)
+        postDelayed({ if (act.isFinishing || act.isDestroyed) { switching = false; showOpen(key, animate = false) } else Hub.open(act, k) }, 150)
     }
 
     private fun fitBar() {

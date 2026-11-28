@@ -35,7 +35,8 @@ class PmTest {
     }
 
     @Test fun commandsForUserAndSystemApps() {
-        assertEquals("pm uninstall com.facebook.katana", Commands.uninstall("com.facebook.katana", system = false))
+        // user apps: for user 0 only, like Android's own dialog (a work-profile / app-twin copy stays)
+        assertEquals("pm uninstall --user 0 com.facebook.katana", Commands.uninstall("com.facebook.katana", system = false))
         assertEquals("pm uninstall -k --user 0 com.transsion.phonemaster", Commands.uninstall("com.transsion.phonemaster", system = true))
         assertEquals("cmd package install-existing com.transsion.phonemaster", Commands.restore("com.transsion.phonemaster"))
         assertEquals("adb shell cmd package install-existing com.x", Commands.adb(Commands.restore("com.x")))
@@ -45,7 +46,7 @@ class PmTest {
         val user = Target("com.user", "User", system = false, risky = false)
         val sys = Target("com.sys", "Sys", system = true, risky = true)
         val cmds = Plan.shizukuCommands(listOf(user, sys))
-        assertEquals(listOf("pm uninstall com.user", "pm uninstall -k --user 0 com.sys"), cmds.map { it.second })
+        assertEquals(listOf("pm uninstall --user 0 com.user", "pm uninstall -k --user 0 com.sys"), cmds.map { it.second })
         assertEquals(listOf(sys), Plan.needShizuku(listOf(user, sys)))
         assertEquals(listOf(user), Plan.dialogQueue(listOf(user, sys)))
         assertEquals(listOf(sys), Plan.risky(listOf(user, sys)))

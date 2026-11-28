@@ -11,8 +11,12 @@ OLED look. No INTERNET permission and nothing runs in the background.
   "Uninstall N selected" button. A confirm dialog lists everything selected first.
 - **Safety**: core packages (Android, System UI, Settings, phone/telecom, package installer, permission
   controller, `com.android.providers.*`, Bluetooth, Wi-Fi, network stack, ...), the current launcher, the current
-  keyboard, Shizuku and this app are never listed (`Safety.kt`). Google Play services, Play Store, Google Services
-  Framework, WebView and the default dialer/SMS apps carry an orange "Risky" tag and need a second confirmation.
+  keyboard, Shizuku and this app are never listed (`Safety.kt`); neither are system config/resource packages
+  (`android.*`, `*.auto_generated_rro_*`, `com.(google.)android.*.resources`), nor any home app while no default home
+  is set. Google Play services, Play Store, Google Services Framework, WebView, the share sheet, the default
+  dialer/SMS apps, other home apps (the stock one often runs Recents and gestures), the preinstalled camera (the only
+  one other apps' "take a photo" can use) and system overlays carry an orange "Risky" tag and need a second
+  confirmation. "Select all visible" leaves risky apps out. Hold a row for Open / App info / Copy package name.
 - **Restore tab**: system apps removed for user 0 (`pm list packages -u` minus `pm list packages`, plus the app's
   own log in `files/removed_system_apps.csv`). Restores with `cmd package install-existing <pkg>`. Without
   Shizuku it shows the matching `adb shell ...` commands to run from a PC.
@@ -25,7 +29,7 @@ OLED look. No INTERNET permission and nothing runs in the background.
    (`ACTION_UNINSTALL_PACKAGE` + `REQUEST_DELETE_PACKAGES`). System apps can't be removed this way; the app says so
    and points to Setup.
 2. **With Shizuku** (all apps, silent, in bulk, with a progress dialog and a per-app result):
-   - user apps: `pm uninstall <pkg>`
+   - user apps: `pm uninstall --user 0 <pkg>` (like Android's dialog: a copy in a work profile or app twin stays)
    - system apps: `pm uninstall -k --user 0 <pkg>` (the APK stays on the system image, so it can be restored;
      a factory reset brings it back anyway).
 

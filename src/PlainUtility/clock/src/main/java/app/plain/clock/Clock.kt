@@ -2,6 +2,7 @@ package app.plain.clock
 
 import app.plain.lang.tr
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * A countdown that lives in timestamps only, so nothing has to tick while the app is closed:
@@ -24,6 +25,9 @@ data class Countdown(val endAt: Long = 0, val left: Long = 0, val total: Long = 
         paused -> copy(left = left + ms, total = total + ms)
         else -> start(ms, now)
     }
+
+    /** The wall clock was moved by [jump] ms: a running countdown keeps the same real time left. */
+    fun shift(jump: Long) = if (running) copy(endAt = (endAt + jump).coerceAtLeast(1)) else this
 
     fun encode() = "$endAt,$left,$total"
 
@@ -83,6 +87,8 @@ data class Stopwatch(val startAt: Long = 0, val acc: Long = 0, val laps: List<Lo
     fun start(now: Long) = if (running) this else copy(startAt = now)
     fun pause(now: Long) = if (running) copy(startAt = 0, acc = elapsed(now)) else this
     fun lap(now: Long) = copy(laps = laps + elapsed(now))
+    /** The wall clock was moved by [jump] ms: a running stopwatch keeps the real time it has counted. */
+    fun shift(jump: Long) = if (running) copy(startAt = (startAt + jump).coerceAtLeast(1)) else this
     fun encode() = "$startAt,$acc;" + laps.joinToString(",")
 
     companion object {
@@ -92,6 +98,28 @@ data class Stopwatch(val startAt: Long = 0, val acc: Long = 0, val laps: List<Lo
             val h = parts[0].split(',').mapNotNull { it.toLongOrNull() }
             if (h.size != 2) return Stopwatch()
             return Stopwatch(h[0], h[1], parts.getOrElse(1) { "" }.split(',').mapNotNull { it.toLongOrNull() })
+        }
+    }
+}
+
+/**
+ * The wall clock and the time since boot at one moment ([boot]: Android's boot count). Comparing a later pair shows
+ * whether the wall clock was changed in between (by hand, or a network time fix): the running timers then keep their
+ * real length instead of ending early or late.
+ */
+data class Anchor(val wall: Long, val elapsed: Long, val boot: Int) {
+    /** How far the wall clock was moved (+ forward) since this anchor; null after a restart (boot time is unknown). */
+    fun jump(wallNow: Long, elapsedNow: Long, bootNow: Int): Long? {
+        if (bootNow != boot || elapsedNow < elapsed) return null
+        return (wallNow - wall) - (elapsedNow - elapsed)
+    }
+
+    fun encode() = "$wall,$elapsed,$boot"
+
+    companion object {
+        fun decode(s: String?): Anchor? {
+            val p = s?.split(',')?.mapNotNull { it.trim().toLongOrNull() } ?: return null
+            return if (p.size == 3) Anchor(p[0], p[1], p[2].toInt()) else null
         }
     }
 }
@@ -130,33 +158,35 @@ object Fmt {
      * "10 dk", "2 saat". Null when it doesn't read as a length (or is zero / over 24 h).
      */
     fun parseLength(input: String): Long? {
-        val s = input.trim().lowercase().replace(',', '.')
+        // (Locale.ROOT: in Turkish "MIN" would lower-case to "mın"; a dotted İ becomes a plain i)
+        val s = input.trim().lowercase(Locale.ROOT).replace("i̇", "i").replace(',', '.').replace('\u00A0', ' ')
         if (s.isEmpty()) return null
-        val ms: Long? = when {
-            Regex("""\d+(\.\d+)?""").matches(s) -> (s.toDouble() * 60_000).toLong()
+        // worked out in doubles and checked at the end: "99999999999999999999:00" must not crash or wrap round
+        val ms: Double? = when {
+            Regex("""\d+(\.\d+)?""").matches(s) -> s.toDoubleOrNull()?.times(60_000)
             Regex("""\d+:\d{1,2}(:\d{1,2})?""").matches(s) -> {
-                val p = s.split(':').map { it.toLong() }
+                val p = s.split(':').map { it.toDoubleOrNull() ?: return null }
                 if (p.size == 2) (p[0] * 60 + p[1]) * 1000 else (p[0] * 3600 + p[1] * 60 + p[2]) * 1000
             }
             else -> {
                 val found = UNIT.findAll(s).toList()
                 if (found.isEmpty() || UNIT.replace(s, "").isNotBlank()) null
                 else found.sumOf { m ->
-                    val v = m.groupValues[1].toDouble()
+                    val v = m.groupValues[1].toDoubleOrNull() ?: return null
                     when (m.groupValues[2]) {
-                        "hours", "hour", "hrs", "hr", "h", "saat", "sa" -> (v * 3_600_000).toLong()
-                        "seconds", "second", "secs", "sec", "s", "saniye", "sn" -> (v * 1000).toLong()
-                        else -> (v * 60_000).toLong()
+                        "hours", "hour", "hrs", "hr", "h", "saat", "sa" -> v * 3_600_000
+                        "seconds", "second", "secs", "sec", "s", "saniye", "sn" -> v * 1000
+                        else -> v * 60_000
                     }
                 }
             }
         }
-        return ms?.takeIf { it in 1000..86_400_000 }
+        return ms?.takeIf { it >= 1000.0 && it <= 86_400_000.0 }?.toLong()
     }
 
-    /** "2026-11-28": the day the pomodoro count belongs to. */
+    /** "2026-11-28": the day the pomodoro count belongs to (stored, so always Western digits). */
     fun day(now: Long): String {
         val c = Calendar.getInstance().apply { timeInMillis = now }
-        return "%04d-%02d-%02d".format(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
+        return String.format(Locale.US, "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
     }
 }

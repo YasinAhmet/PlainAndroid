@@ -64,7 +64,8 @@ class Situational(
         val dir = File(City.files(ctx), "sync").apply { mkdirs() }
         val tmp = File(dir, "data-sit.db")
         report(0.01f, tr("Copying the offline data", "Çevrimdışı veri kopyalanıyor"))
-        cur.copyTo(tmp, overwrite = true)
+        // a full disk leaves a partial copy of a few hundred MB behind otherwise
+        try { cur.copyTo(tmp, overwrite = true) } catch (e: Exception) { tmp.delete(); throw e }
         val db = SQLiteDatabase.openDatabase(tmp.path, null, SQLiteDatabase.OPEN_READWRITE)
         try {
             db.rawQuery("PRAGMA journal_mode=OFF", null).close()
@@ -197,8 +198,13 @@ class Situational(
                 }
             }
         }
-        futures.forEach { it.get() }
-        pool.shutdown()
+        try {
+            futures.forEach { it.get() }
+        } finally {
+            // also when a line's write failed (disk full): the workers stop before the caller closes the database
+            pool.shutdownNow()
+            try { pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        }
         checkCancel()
         if (failures.get() > refs.size / 2) throw IOException(tr("${City.operator}'s service did not answer for most lines (${failures.get()} of ${refs.size}). Try again later.",
             "${City.operator} servisi hatların çoğu için yanıt vermedi (${failures.get()} / ${refs.size}). Daha sonra yeniden deneyin."))

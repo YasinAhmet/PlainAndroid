@@ -152,8 +152,10 @@ class ViewerActivity : Activity() {
         if (playing) stopVideo() else super.onBackPressed()
     }
 
+    // as the grid: a limited "selected photos" grant (Android 14+) also reads the library (just those items)
     private fun canRead() = (if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)).all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)).all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } ||
+        (Build.VERSION.SDK_INT >= 34 && checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED)
 
     private fun bg(r: () -> Unit) { try { decoder.execute(r) } catch (_: RejectedExecutionException) {} }
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
@@ -165,6 +167,8 @@ class ViewerActivity : Activity() {
             onTap = { toggleBars() }
             onSwipe = { d -> step(d) }
             onZoomed = { z -> if (z > 1.6f) sharpen() }
+            // swipe down = close (back to the grid on this item's page), swipe up = Details
+            onVertical = { d -> if (d > 0) finish() else details() }
         }
         root.addView(iv, FrameLayout.LayoutParams(-1, -1))
 
@@ -291,12 +295,13 @@ class ViewerActivity : Activity() {
         }
     }
 
-    /** Decodes upright (ImageDecoder applies EXIF rotation) at roughly [px] on the long side. */
+    /**
+     * Decodes upright (ImageDecoder applies EXIF rotation) at most [px] on the long side. An exact target size, not
+     * a power-of-two sample: that could leave nearly 2× the side (4× the memory), e.g. a 108 MP photo at 6000 px.
+     */
     private fun decode(u: Uri, px: Int): Bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, u)) { d, info, _ ->
-        val long = max(info.size.width, info.size.height)
-        var s = 1
-        while (long / (s * 2) >= px) s *= 2
-        d.setTargetSampleSize(s)
+        val (w, h) = Paging.fitSize(info.size.width, info.size.height, px)
+        if (w != info.size.width || h != info.size.height) d.setTargetSize(w, h)
         d.memorySizePolicy = ImageDecoder.MEMORY_POLICY_LOW_RAM
     }
 
@@ -408,8 +413,10 @@ class ViewerActivity : Activity() {
     private fun removed(it: Item) {
         Library.remove(it)
         full.remove(key(it))
-        val at = items.indexOf(it)
-        items = items.filter { x -> x !== it }
+        // by key, not identity: the list may have been swapped (adopt) while Android's delete prompt was up
+        val k = key(it)
+        val at = items.indexOfFirst { x -> key(x) == k }
+        items = items.filter { x -> key(x) != k }
         if (items.isEmpty()) { toast(tr("Moved to trash.", "Çöpe taşındı.")); listMode = false; super.finish(); return }
         showAt(i.coerceAtMost(items.size - 1))
         if (Build.VERSION.SDK_INT >= 30) {
@@ -436,7 +443,7 @@ class ViewerActivity : Activity() {
         bg {
             val text = describe(this, it)
             main.post {
-                if (closed) return@post
+                if (closed || isFinishing) return@post   // no dialog on a closing screen (BadTokenException)
                 AlertDialog.Builder(this).setTitle(tr("Details", "Ayrıntılar")).setMessage(text).setPositiveButton(tr("OK", "Tamam"), null).show()
             }
         }

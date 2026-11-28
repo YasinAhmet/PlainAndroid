@@ -90,12 +90,27 @@ object Dedupe {
     private fun tagKey(f: FileInfo): String? {
         val t = Text.titleKey(f.tags.title)
         if (t.length < 2) return null
+        // "01.mp3", "02.mp3" (untagged rips): a number from the file name is not a title; only identical content matches
+        if (f.tags.fromFileName && t.none { it.isLetter() }) return null
         return t + "|" + Text.artistKey(f.tags.artist.ifEmpty { f.tags.albumArtist })
     }
 
     private fun albumsCompatible(a: FileInfo, b: FileInfo): Boolean {
         val x = Text.titleKey(a.tags.album)
         val y = Text.titleKey(b.tags.album)
+        return x.isEmpty() || y.isEmpty() || x == y
+    }
+
+    /**
+     * Two files without any artist tag match by title alone, so "Intro" in "Artist A/" and "Intro" in "Artist B/" (both
+     * untagged, about as long) were taken for one song. When both folders name an artist, those must agree; a file
+     * without one (Download/x.mp3) still matches.
+     */
+    private fun foldersCompatible(a: FileInfo, b: FileInfo): Boolean {
+        fun untagged(f: FileInfo) = f.tags.artist.isEmpty() && f.tags.albumArtist.isEmpty()
+        if (!untagged(a) || !untagged(b)) return true
+        val x = Text.artistKey(a.tags.inferredArtist)
+        val y = Text.artistKey(b.tags.inferredArtist)
         return x.isEmpty() || y.isEmpty() || x == y
     }
 
@@ -122,7 +137,7 @@ object Dedupe {
                     val y = files[g[b]]
                     if (x.durationMs > 0 && y.durationMs > 0 &&
                         kotlin.math.abs(x.durationMs - y.durationMs) <= DURATION_TOLERANCE_MS &&
-                        albumsCompatible(x, y)
+                        albumsCompatible(x, y) && foldersCompatible(x, y)
                     ) union(g[a], g[b])
                 }
             }
@@ -191,8 +206,12 @@ class Plan(
                 .forEach { (k, fs) ->
                     mergedAlbum[k] = LibraryIndex.majority(fs.map { Naming.folderArtist(it.tags) }) to LibraryIndex.majority(fs.map { Naming.folderAlbum(it.tags) })
                 }
-            fun folders(f: FileInfo): Pair<String, String> =
+            // Worked out once per file: the plan is rebuilt on every tick in the plan screen, and with 20k files the
+            // folder names (regexes) and sort keys made in each comparison took most of a second even on a desktop.
+            val folderMemo = java.util.IdentityHashMap<FileInfo, Pair<String, String>>()
+            fun folders(f: FileInfo): Pair<String, String> = folderMemo.getOrPut(f) {
                 f.tags.album.takeIf { it.isNotBlank() }?.let { mergedAlbum[Text.albumKey(it)] } ?: (Naming.folderArtist(f.tags) to Naming.folderAlbum(f.tags))
+            }
 
             // One spelling per artist/album folder.
             val artistName = Naming.canonicalNames(survivors.map { folders(it).first })
@@ -220,10 +239,11 @@ class Plan(
                 else wanted += f to (dir to name)
             }
             // Best files claim names first, so "Song (2)" is never the better copy.
-            val moves = wanted.sortedWith(compareBy<Pair<FileInfo, Pair<String, String>>> { it.second.first.lowercase(Locale.ROOT) + it.second.second.lowercase(Locale.ROOT) }
-                .thenComparator { a, b -> Dedupe.BEST_FIRST.compare(a.first, b.first) })
-                .map { (f, t) -> Move(f, t.first, Naming.unique(t.first, t.second, taken)) }
-                .sortedBy { it.toPath.lowercase(Locale.ROOT) }
+            class Want(val f: FileInfo, val dir: String, val name: String) { val key = dir.lowercase(Locale.ROOT) + name.lowercase(Locale.ROOT) }
+            val moves = wanted.map { (f, t) -> Want(f, t.first, t.second) }
+                .sortedWith(compareBy<Want> { it.key }.thenComparator { a, b -> Dedupe.BEST_FIRST.compare(a.f, b.f) })
+                .map { w -> Move(w.f, w.dir, Naming.unique(w.dir, w.name, taken)).let { it to it.toPath.lowercase(Locale.ROOT) } }
+                .sortedBy { it.second }.map { it.first }
             return Plan(moves, removals.sortedBy { it.file.path.lowercase(Locale.ROOT) }, inPlace, skipped, stay)
         }
     }

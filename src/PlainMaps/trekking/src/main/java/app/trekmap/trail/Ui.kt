@@ -111,8 +111,11 @@ fun Context.choose(title: String, items: List<Pair<String, () -> Unit>>) {
 }
 
 object Fmt {
-    fun dist(m: Double): String =
-        if (m < 1000) "${m.roundToInt()} m" else String.format(Locale.getDefault(), "%.2f km", m / 1000)
+    fun dist(m: Double): String = when {
+        !m.isFinite() -> "– m"
+        m < 1000 -> "${m.roundToInt()} m"
+        else -> String.format(Locale.getDefault(), "%.2f km", m / 1000)
+    }
 
     fun dur(sec: Long): String {
         val s = sec.coerceAtLeast(0)

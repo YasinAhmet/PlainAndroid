@@ -1,6 +1,7 @@
 package app.plain.home
 
 import java.text.Collator
+import java.util.Locale
 
 /**
  * One launchable activity. [key] is what the hidden-apps set and section overrides store.
@@ -13,11 +14,15 @@ data class AppEntry(val pkg: String, val cls: String, val label: String, val sto
 data class Section(val title: String, val apps: List<AppEntry>)
 
 object Apps {
-    /** Apps to show: not this launcher, not hidden, sorted by label (case and accent insensitive). */
-    fun visible(all: List<AppEntry>, hidden: Set<String>, selfPkg: String): List<AppEntry> {
-        val collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
+    /**
+     * Apps to show: not this launcher, not hidden, sorted by label in the phone's language ([locale]: Turkish puts
+     * Ç after C, İ after I, Ş after S), case and accent insensitive; equal names in a fixed order (by name, then key)
+     * so the grid never reshuffles between reloads.
+     */
+    fun visible(all: List<AppEntry>, hidden: Set<String>, selfPkg: String, locale: Locale = Locale.getDefault()): List<AppEntry> {
+        val collator = Collator.getInstance(locale).apply { strength = Collator.PRIMARY }
         return all.filter { it.pkg != selfPkg && it.key !in hidden }
-            .sortedWith { a, b -> collator.compare(a.label, b.label) }
+            .sortedWith(compareBy<AppEntry, String>(collator) { it.label }.thenBy { it.label }.thenBy { it.key })
     }
 }
 

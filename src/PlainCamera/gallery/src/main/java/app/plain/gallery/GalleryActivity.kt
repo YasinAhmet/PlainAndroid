@@ -148,7 +148,8 @@ class GalleryActivity : Activity() {
             onSize = { w, h -> relayout(w, h) }
         }
         frame.addView(grid, FrameLayout.LayoutParams(-1, -1))
-        message = label("", 16f, TEXT2).apply { visibility = View.GONE }
+        // opaque: when access is taken back (a limited "selected photos" grant ends) it covers the old thumbnails
+        message = label("", 16f, TEXT2).apply { visibility = View.GONE; setBackgroundColor(Color.BLACK) }
         frame.addView(message, FrameLayout.LayoutParams(-1, -1))
         undo = UndoBar(this).apply { onGone = { undoBatch.clear() } }
         frame.addView(undo, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(10), 0, dp(10), dp(8)) })
@@ -336,12 +337,13 @@ class GalleryActivity : Activity() {
     private fun layoutGrid() {
         if (gw == 0 || gh == 0) return
         val first = page * perPage
+        // (a cell at least 1 px wide: a sliver-thin window must not divide by zero)
         if (screen == Screen.FOLDERS) {
             grid.cols = if (gw > gh) 5 else 3
-            grid.rows = (gh / (gw / grid.cols + grid.labelH)).coerceAtLeast(1)
+            grid.rows = (gh / ((gw / grid.cols).coerceAtLeast(1) + grid.labelH)).coerceAtLeast(1)
         } else {
             grid.cols = photoCols + if (gw > gh) 2 else 0
-            grid.rows = (gh / (gw / grid.cols)).coerceAtLeast(1)
+            grid.rows = (gh / (gw / grid.cols).coerceAtLeast(1)).coerceAtLeast(1)
         }
         val per = grid.cols * grid.rows
         if (perPage > 0 && per != perPage) page = Paging.pageOf(first, per)
@@ -690,7 +692,8 @@ class GalleryActivity : Activity() {
             RC_TRASH -> {
                 val l = pendingTrash
                 pendingTrash = emptyList()
-                if (res == RESULT_OK) trashed(l)
+                // (empty after the app was recreated behind Android's prompt: the media-store observer reloads instead)
+                if (res == RESULT_OK && l.isNotEmpty()) trashed(l)
             }
             RC_RESTORE -> {
                 val l = pendingRestore

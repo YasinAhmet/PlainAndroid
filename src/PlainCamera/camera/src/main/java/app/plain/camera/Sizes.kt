@@ -156,6 +156,31 @@ object Sizes {
         }
     }
 
+    /** Storage left free when a video stops for a full disk (room for the file's index and the system). */
+    const val VIDEO_RESERVE = 64L shl 20
+    /** Below this much room a recording isn't started at all. */
+    private const val MIN_RECORD = 4L shl 20
+
+    /**
+     * The byte limit for a recording: the calling app's own limit ([callerMax], 0 = none) and the [free] storage less
+     * [reserve], whichever is smaller. 0 = too little room to start; Long.MAX_VALUE = no limit known.
+     */
+    fun recordLimit(callerMax: Long, free: Long, reserve: Long): Long {
+        val room = if (free == Long.MAX_VALUE) Long.MAX_VALUE else free - reserve
+        if (room < MIN_RECORD) return 0L
+        return if (callerMax > 0) minOf(callerMax, room) else room
+    }
+
+    /**
+     * MediaStore.EXTRA_DURATION_LIMIT (seconds; apps pass it as int or long) → milliseconds for
+     * MediaRecorder.setMaxDuration, 0 = none. Never overflows into a short or negative limit.
+     */
+    fun durationLimitMs(v: Any?): Int {
+        val s = (v as? Number)?.toLong() ?: (v as? String)?.trim()?.toLongOrNull() ?: return 0
+        if (s <= 0) return 0
+        return if (s >= Int.MAX_VALUE / 1000) Int.MAX_VALUE else (s * 1000).toInt()
+    }
+
     /** H.264 bit rate: about 0.25 bit per pixel per frame, 2–50 Mbit/s. */
     fun videoBitrate(d: Dim, fps: Int = 30): Int =
         (d.area * fps * 0.25).toLong().coerceIn(2_000_000, 50_000_000).toInt()

@@ -3,6 +3,7 @@ package app.localmusic
 import app.plain.lang.tr
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /** A playable song from MediaStore (pure data). */
 class Song(
@@ -50,6 +51,9 @@ class Song(
     val path get() = relPath + name
     val haystack: String = Text.fold("$title$artist$album$albumArtist${inferredArtist ?: ""}")
     val sortTitle: String = Text.sortKey(title)
+    /** Sort keys for the artist / album orders, made once per song (a 20k-song sort folded them ~600k times). */
+    val sortArtist: String by lazy(LazyThreadSafetyMode.PUBLICATION) { Text.sortKey(mainArtist) }
+    val sortAlbum: String by lazy(LazyThreadSafetyMode.PUBLICATION) { Text.sortKey(albumName) }
     val subtitle: String get() = listOf(shownArtist, album).filter { it.isNotBlank() }.joinToString(" · ")
 
     /** Merged-album key: same album name (ignoring "(Remastered)", years, case, accents) = one album across folders and artists.
@@ -80,6 +84,9 @@ class Group(val key: String, val title: String, val songs: List<Song>, val artis
     val firstAdded: Long by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.filter { it.dateAdded > 0 }.minOfOrNull { it.dateAdded } ?: 0 }
     val count get() = songs.size
     val sub: String get() = Text.count(songs.size, "song")
+    /** Sort keys of [title] and [artist], made once (sorting thousands of artists folded them in every comparison). */
+    val sortTitle: String by lazy(LazyThreadSafetyMode.PUBLICATION) { Text.sortKey(title) }
+    val sortArtist: String by lazy(LazyThreadSafetyMode.PUBLICATION) { Text.sortKey(artist) }
 
     /** "99 songs · 4 albums · 5 h 12 min" */
     val stats: String get() = listOfNotNull(
@@ -103,25 +110,25 @@ class LibraryIndex(all: List<Song>) {
             else -> tr("Various artists", "Çeşitli sanatçılar")
         }
         Group(k, majority(v.map { it.albumName }), trackOrder(v), artist)
-    }.sortedWith(compareBy({ Text.sortKey(it.title) }, { it.key }))
+    }.sortedWith(compareBy({ it.sortTitle }, { it.key }))
 
     private val albumBySong: Map<Long, Group> = HashMap<Long, Group>().apply { for (a in albums) for (s in a.songs) put(s.id, a) }
 
     val artists: List<Group> = songs.groupBy { it.artistKey }.map { (k, v) ->
         Group(k, majority(v.map { it.mainArtist }), albumOrder(v), albumCount = v.map { it.albumKey }.distinct().size)
-    }.sortedBy { Text.sortKey(it.title) }
+    }.sortedBy { it.sortTitle }
 
     val genres: List<Group> = songs.filter { it.genre.isNotBlank() }.groupBy { Text.fold(it.genre) }
         .map { (k, v) -> Group(k, majority(v.map { it.genre }), albumOrder(v), albumCount = v.map { it.albumKey }.distinct().size) }
-        .sortedBy { Text.sortKey(it.title) }
+        .sortedBy { it.sortTitle }
 
-    val folders: List<Group> = songs.groupBy { it.folder.lowercase() }
+    val folders: List<Group> = songs.groupBy { it.folder.lowercase(Locale.ROOT) }
         .map { (k, v) -> Group(k, majority(v.map { it.folder }), trackOrder(v)) }
-        .sortedBy { Text.sortKey(it.title) }
+        .sortedBy { it.sortTitle }
 
     /** Albums an artist appears on, newest first. */
     fun albumsOf(artist: Group): List<Group> =
-        artist.songs.mapNotNull { albumBySong[it.id] }.distinctBy { it.key }.sortedWith(compareBy({ -it.year }, { Text.sortKey(it.title) }))
+        artist.songs.mapNotNull { albumBySong[it.id] }.distinctBy { it.key }.sortedWith(compareBy({ -it.year }, { it.sortTitle }))
 
     fun search(query: String): List<Song> {
         val t = Text.tokens(query)
@@ -137,7 +144,8 @@ class LibraryIndex(all: List<Song>) {
 
     // --- derived views, computed once per library load (the index is rebuilt when MediaStore's generation changes) ---
 
-    val byPath: Map<String, Song> by lazy { songs.associateBy { it.path.lowercase() } }
+    /** Lower-cased path (Locale.ROOT: the same key whatever the phone's language; a cached map made under another language kept the old keys) -> song. */
+    val byPath: Map<String, Song> by lazy { songs.associateBy { pathKey(it.path) } }
     /** Plain Youtube's videos, newest first. */
     val videos: List<Song> by lazy { songs.filter { it.isVideo }.sortedByDescending { it.dateAdded } }
     /** Videos per channel, the channel with the newest video first. */
@@ -163,7 +171,9 @@ class LibraryIndex(all: List<Song>) {
 
     companion object {
         fun trackOrder(list: List<Song>) = list.sortedWith(compareBy({ it.disc }, { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }))
-        fun albumOrder(list: List<Song>) = list.sortedWith(compareBy({ Text.sortKey(it.albumName) }, { it.disc }, { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }))
+        fun albumOrder(list: List<Song>) = list.sortedWith(compareBy({ it.sortAlbum }, { it.disc }, { if (it.track == 0) Int.MAX_VALUE else it.track }, { it.sortTitle }))
+        /** Key of a path in [byPath] (playlists and the play history look songs up by it). */
+        fun pathKey(path: String): String = path.lowercase(Locale.ROOT)
         fun majority(names: List<String>): String = names.groupingBy { it }.eachCount().maxWith(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { -names.indexOf(it.key) }).key
     }
 }
@@ -181,10 +191,31 @@ class Playlist(var id: Long, var name: String, val entries: MutableList<Entry> =
         val s = byId[e.songId]
         when {
             s != null && s.path.equals(e.path, ignoreCase = true) -> s
-            byPath[e.path.lowercase()] != null -> byPath.getValue(e.path.lowercase()).also { e.songId = it.id } // ids renumbered
+            byPath[LibraryIndex.pathKey(e.path)] != null -> byPath.getValue(LibraryIndex.pathKey(e.path)).also { e.songId = it.id } // ids renumbered
             s != null -> s.also { e.path = it.path } // same file, moved (e.g. by the organiser)
             else -> null
         }
+    }
+}
+
+/**
+ * Favourites: an ordinary playlist marked with [Playlist.source] = [SOURCE] (stored like any other, so older versions
+ * just show it as a playlist). Holding the title in now playing, or the song menu's row, adds or removes a song (pure).
+ */
+object Favourites {
+    const val SOURCE = "fav" // never a LinkedPlaylists key (those are "yt:", "spotify:", "list:")
+
+    fun of(playlists: List<Playlist>): Playlist? = playlists.firstOrNull { it.source == SOURCE }
+
+    fun contains(playlists: List<Playlist>, s: Song): Boolean =
+        of(playlists)?.entries?.any { it.songId == s.id || it.path.equals(s.path, ignoreCase = true) } == true
+
+    /** Add [s] (making the playlist, named [name], the first time) or remove it. True = it is a favourite now. */
+    fun toggle(playlists: MutableList<Playlist>, s: Song, name: String): Boolean {
+        val p = of(playlists) ?: Playlist((playlists.maxOfOrNull { it.id } ?: 0) + 1, name, source = SOURCE).also { playlists += it }
+        val had = p.entries.removeAll { it.songId == s.id || it.path.equals(s.path, ignoreCase = true) }
+        if (!had) p.entries += Playlist.Entry(s.id, s.path)
+        return !had
     }
 }
 

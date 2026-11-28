@@ -91,8 +91,20 @@ object LookJpeg {
         ExifInterface.TAG_BRIGHTNESS_VALUE, ExifInterface.TAG_SCENE_CAPTURE_TYPE, ExifInterface.TAG_DIGITAL_ZOOM_RATIO,
     )
 
+    /** The bitmap ([bytes]) plus its JPEG copy fit comfortably in what the heap has left. */
+    private fun fits(bytes: Long): Boolean {
+        val rt = Runtime.getRuntime()
+        val left = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())
+        return bytes * 3 / 2 < left
+    }
+
     fun apply(ctx: Context, jpeg: ByteArray, look: Look, quality: Int): ByteArray {
         if (look.neutral) return jpeg
+        // a full-size ARGB copy of a big sensor's photo can need hundreds of MB; an OutOfMemoryError there may hit
+        // another thread instead of this catch, so a photo too big for the heap is kept untouched up front
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0 || !fits(o.outWidth.toLong() * o.outHeight * 4)) return jpeg
         val src = File(ctx.cacheDir, "look-src-${System.nanoTime()}.jpg")
         val dst = File(ctx.cacheDir, "look-dst-${System.nanoTime()}.jpg")
         return try {

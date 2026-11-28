@@ -325,8 +325,11 @@ class VoiceActivity : Activity() {
     private fun load() {
         val gen = ++loadGen
         val app = applicationContext
+        // nothing records right now: a recording left half-written by a killed app can go (it can't be played)
+        val idle = RecorderService.state == RecState.IDLE
         try {
             loader.execute {
+                if (idle) Recordings.dropStalePending(app, STALE_PENDING_SEC)
                 val l = Recordings.list(app)
                 main.post {
                     if (gen != loadGen || isDestroyed) return@post
@@ -553,9 +556,11 @@ class VoiceActivity : Activity() {
             .setTitle(tr("Rename", "Yeniden adlandır"))
             .setView(box)
             .setPositiveButton(tr("Rename", "Adlandır")) { _, _ ->
-                val name = Format.cleanName(e.text.toString())
-                if (name == null) { toast(tr("Type a name.", "Bir ad yazın.")); return@setPositiveButton }
-                if (Format.shownName(name) == r.name) return@setPositiveButton
+                val typed = Format.cleanName(e.text.toString())
+                if (typed == null) { toast(tr("Type a name.", "Bir ad yazın.")); return@setPositiveButton }
+                if (Format.shownName(typed) == r.name) return@setPositiveButton
+                // a name another recording has gets " (2)" rather than failing
+                val name = Format.uniqueName(typed, recs.filter { it.id != r.id }.map { it.name })
                 val app = applicationContext
                 try {
                     loader.execute {
@@ -623,6 +628,8 @@ class VoiceActivity : Activity() {
         private const val RC_MIC = 1
         private const val RC_TRASH = 2
         private const val RC_ALLOW = 3
+        /** Our pending recordings older than this are left over from a killed app (see Recordings.dropStalePending). */
+        private const val STALE_PENDING_SEC = 300L
     }
 }
 

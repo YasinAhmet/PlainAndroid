@@ -163,7 +163,8 @@ object Net {
     }
 
     fun xmlText(s: String): String = s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
-        .replace(Regex("&#(\\d+);")) { it.groupValues[1].toInt().toChar().toString() }.replace("&amp;", "&")
+        .replace(Regex("&#(\\d+);")) { Text.entity(it.groupValues[1], 10) ?: it.value }
+        .replace(Regex("&#[xX]([0-9a-fA-F]+);")) { Text.entity(it.groupValues[1], 16) ?: it.value }.replace("&amp;", "&")
 
     /** Holder so a sync can swap in a new Wi-Fi network after a reconnect. */
     class Net0(@Volatile var n: Network)

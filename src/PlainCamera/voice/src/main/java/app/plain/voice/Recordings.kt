@@ -83,4 +83,35 @@ object Recordings {
 
     /** Deletes the file for good. Throws RecoverableSecurityException when it isn't ours after all. */
     fun delete(ctx: Context, r: Rec): Boolean = ctx.contentResolver.delete(r.uri, null, null) > 0
+
+    /**
+     * Removes our own recordings that stayed pending (hidden) for longer than [olderThanSec]: what was left when the
+     * app was killed mid-recording. Such a file has no index, so it can't be played; the media store would only drop
+     * it after a week. Call only while nothing records. Best effort, off the main thread.
+     */
+    fun dropStalePending(ctx: Context, olderThanSec: Long) {
+        try {
+            var coll = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            val folders = Format.allFolders
+            val cutoff = System.currentTimeMillis() / 1000 - olderThanSec
+            val where = "(" + folders.joinToString(" OR ") { "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" } + ") AND " +
+                "${MediaStore.MediaColumns.IS_PENDING}=1 AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=? AND ${MediaStore.MediaColumns.DATE_ADDED}<?"
+            val args = android.os.Bundle().apply {
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, where)
+                putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, (folders + ctx.packageName + cutoff.toString()).toTypedArray())
+                if (Build.VERSION.SDK_INT >= 30) putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+            }
+            @Suppress("DEPRECATION")
+            if (Build.VERSION.SDK_INT < 30) coll = MediaStore.setIncludePending(coll)
+            val ids = ArrayList<Long>()
+            ctx.contentResolver.query(coll, arrayOf(MediaStore.MediaColumns._ID), args, null)?.use { c -> while (c.moveToNext()) ids += c.getLong(0) }
+            for (id in ids) discard(ctx, ContentUris.withAppendedId(coll, id))
+        } catch (_: Exception) {}
+    }
+
+    /** Free bytes on the shared storage the recordings go to; Long.MAX_VALUE when it can't be read. */
+    @Suppress("DEPRECATION")
+    fun freeBytes(): Long = try {
+        android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path).availableBytes
+    } catch (_: Exception) { Long.MAX_VALUE }
 }

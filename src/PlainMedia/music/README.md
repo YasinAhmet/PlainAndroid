@@ -194,3 +194,20 @@ Empty source folders are left behind (MediaStore cannot remove directories).
 ## Share (1.10)
 
 The song menu (long-press a song, or its menu in Now playing) has **Share file…** / **Share video…**: Android's share sheet gets the file itself (its MediaStore `content://` URI with read access granted to the chosen app). LocalMusic still has no internet permission; the app you pick does the sending. Files another app handed over as `file://` can't be shared this way and don't get the entry.
+
+## Edge-case pass (2026-11-28, not released yet)
+
+- **Favourites**: hold the song title in Now playing (or song menu → Add to / Remove from Favourites). It is an ordinary
+  playlist marked `source: "fav"` in `playlists.json`, so older versions just show it as a playlist; Now playing shows ★.
+- **Show the playing song**: hold the mini player (or ⋮ → Show the playing song) scrolls the list on screen to it, else
+  opens its album page (artist page for a single) scrolled to it.
+- **Sleep timer fade-out**: a minutes timer lowers the volume over its last 30 s, then pauses; the next play is at full volume.
+- Player: a notification / Bluetooth Next or Previous after Android reclaimed the process no longer empties the queue
+  (the library is loaded first; with no library at all nothing is dropped). Play pressed during a call waits for the
+  call; headphones unplugged during a call cancel the resume. A run of files that fail while playing stops after the
+  whole queue failed once (repeat all looped for ever). A song after a broken one starts from its beginning, and running
+  off the end that way pauses on the first song (as Next does). Resume works for files whose MediaStore length is 0.
+- `downloaded.txt` is read with the Youtube tab's rules (`LinkedPlaylists.savedUris`): ids starting with '-' are entries,
+  a cut-off last line is ignored.
+- Big libraries (20k): sorting keys are made once per song, queue edits are one pass, the organiser / duplicates plan is
+  built off the main thread (newest tap wins).

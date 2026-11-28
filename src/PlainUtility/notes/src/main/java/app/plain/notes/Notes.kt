@@ -14,6 +14,7 @@ import app.plain.lang.tr
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 
 /**
  * A note: text, a voice recording ([audio] = file name in files/notes/), or both (a caption). [remindAt] > 0: it
@@ -62,21 +63,46 @@ object Notes {
     fun audioFile(c: Context, n: Note) = n.audio?.let { File(dir(c), it) }
     private fun file(c: Context) = File(c.filesDir, "notes.json")
 
-    fun all(c: Context): List<Note> = synchronized(lock) {
-        try {
-            val a = JSONArray(file(c).takeIf { it.exists() }?.readText() ?: "[]")
-            (0 until a.length()).map { Note.of(a.getJSONObject(it)) }
-        } catch (_: Exception) { emptyList() }
+    /**
+     * The notes on disk. One broken entry is skipped, not the whole list; null when the file exists but can't be read
+     * at all (then a change must not write an empty list over it, see [change]).
+     */
+    private fun load(c: Context): List<Note>? {
+        val f = file(c)
+        if (!f.exists()) return emptyList()
+        return try {
+            val a = JSONArray(f.readText())
+            (0 until a.length()).mapNotNull { i -> try { a.optJSONObject(i)?.let { Note.of(it) } } catch (_: Exception) { null } }
+        } catch (_: Exception) { null }
     }
+
+    fun all(c: Context): List<Note> = synchronized(lock) { load(c) ?: emptyList() }
 
     fun get(c: Context, id: Long) = all(c).firstOrNull { it.id == id }
 
-    private fun write(c: Context, list: List<Note>) {
+    /** False when it couldn't be written (storage full…): the list on disk is then unchanged. */
+    private fun write(c: Context, list: List<Note>): Boolean = try {
         val a = JSONArray()
         list.forEach { a.put(it.json()) }
+        val text = a.toString()
         val tmp = File(c.filesDir, "notes.json.tmp")
-        tmp.writeText(a.toString())
-        if (!tmp.renameTo(file(c))) { file(c).delete(); tmp.renameTo(file(c)) }
+        tmp.writeText(text)
+        if (tmp.length() == 0L && text.isNotEmpty()) throw IOException("nothing written")
+        // (never delete the old file first: if the second step failed too, every note would be gone)
+        if (!tmp.renameTo(file(c))) { file(c).writeText(text); tmp.delete() }
+        true
+    } catch (_: Exception) { false }
+
+    /**
+     * Read, change and write the list in one go. A notes.json that can't be read is moved aside (notes.json.bad-<time>)
+     * instead of being overwritten, so a damaged file never takes the notes with it.
+     */
+    private fun change(c: Context, fn: (List<Note>) -> List<Note>): Boolean = synchronized(lock) {
+        val cur = load(c) ?: run {
+            file(c).renameTo(File(c.filesDir, "notes.json.bad-${System.currentTimeMillis()}"))
+            emptyList()
+        }
+        write(c, fn(cur))
     }
 
     /** A free id (ms timestamps, nudged when two notes are made in the same millisecond). */
@@ -87,24 +113,29 @@ object Notes {
         return id
     }
 
-    /** Adds or replaces [n] and sets its reminder. */
-    fun put(c: Context, n: Note) {
-        synchronized(lock) { write(c, all(c).filter { it.id != n.id } + n) }
+    /** Adds or replaces [n] and sets its reminder. False when it couldn't be saved (nothing changed). */
+    fun put(c: Context, n: Note): Boolean {
+        if (!change(c) { l -> l.filter { it.id != n.id } + n }) return false
         schedule(c, n)
         if (n.remindAt == 0L || !n.fired) cancelNotification(c, n)
         listener?.invoke()
+        return true
     }
 
-    fun delete(c: Context, n: Note) {
-        synchronized(lock) { write(c, all(c).filter { it.id != n.id }) }
+    fun delete(c: Context, n: Note): Boolean {
+        if (!change(c) { l -> l.filter { it.id != n.id } }) return false
         audioFile(c, n)?.delete()
         cancelAlarm(c, n)
         cancelNotification(c, n)
         listener?.invoke()
+        return true
     }
 
-    /** New time (0 = none) for a note's reminder. */
-    fun remind(c: Context, n: Note, at: Long) = put(c, n.copy(remindAt = at, fired = false))
+    /** New time (0 = none) for a note's reminder; the note as it is now on disk (it may have changed meanwhile). */
+    fun remind(c: Context, n: Note, at: Long): Boolean {
+        val cur = get(c, n.id) ?: return false   // deleted meanwhile: not brought back
+        return put(c, cur.copy(remindAt = at, fired = false))
+    }
 
     fun snoozeMinutes(c: Context) = c.getSharedPreferences("notes", Context.MODE_PRIVATE).getInt("snooze", 10)
 
@@ -136,17 +167,20 @@ object Notes {
         if (n.remindAt <= 0 || n.fired) return
         if (n.remindAt > System.currentTimeMillis() + 1500) { schedule(c, n); return }   // moved later meanwhile
         val f = n.copy(fired = true)
-        synchronized(lock) { write(c, all(c).map { if (it.id == id) f else it }) }
+        change(c) { l -> l.map { if (it.id == id) f else it } }
         notify(c, f)
         listener?.invoke()
     }
 
-    /** After a restart or update: alarms are gone, so set them again; reminders missed while off show now. */
+    /**
+     * After a restart or update: alarms are gone, so set them again; reminders missed while off show now. Ones that
+     * already went off are shown again without a sound (an update must not buzz every old reminder once more).
+     */
     fun restore(c: Context) {
         val now = System.currentTimeMillis()
         for (n in all(c)) when {
             n.remindAt <= 0 -> {}
-            n.fired -> notify(c, n)
+            n.fired -> notify(c, n, quiet = true)
             n.remindAt <= now -> fire(c, n.id)
             else -> schedule(c, n)
         }
@@ -158,7 +192,8 @@ object Notes {
     private fun nid(n: Note) = (n.id xor (n.id ushr 32)).toInt()
     private fun cancelNotification(c: Context, n: Note) { nm(c)?.cancel(nid(n)) }
 
-    fun canNotify(c: Context) = nm(c)?.areNotificationsEnabled() != false
+    /** False when Android won't show reminders: notifications off, or the reminders channel switched off. */
+    fun canNotify(c: Context) = nm(c)?.let { it.areNotificationsEnabled() && it.getNotificationChannel(CH)?.importance != NotificationManager.IMPORTANCE_NONE } != false
 
     fun channel(c: Context) {
         nm(c)?.createNotificationChannel(NotificationChannel(CH, tr("Note reminders", "Not hatırlatıcıları"), NotificationManager.IMPORTANCE_HIGH).apply {
@@ -180,7 +215,7 @@ object Notes {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-    private fun notify(c: Context, n: Note) {
+    private fun notify(c: Context, n: Note, quiet: Boolean = false) {
         PlainLang.init(c)
         channel(c)
         val rest = n.text.trim().lines().drop(1).joinToString("\n").trim()
@@ -202,6 +237,11 @@ object Notes {
             .setContentIntent(openPi(c, n))
             .addAction(Notification.Action.Builder(null, tr("Done", "Tamam"), pi(c, NotesReceiver.DONE, n)).build())
             .addAction(Notification.Action.Builder(null, tr("Snooze $snooze min", "$snooze dk ertele"), pi(c, NotesReceiver.SNOOZE, n)).build())
-        nm(c)?.notify(nid(n), b.build())
+        if (quiet) {
+            b.setOnlyAlertOnce(true)   // still showing (an update): no second alert
+            // after a restart it's new to Android: a group whose (never posted) summary alone may alert keeps it silent
+            b.setGroup("app.plain.notes.quiet").setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
+        }
+        try { nm(c)?.notify(nid(n), b.build()) } catch (_: Exception) {}
     }
 }
