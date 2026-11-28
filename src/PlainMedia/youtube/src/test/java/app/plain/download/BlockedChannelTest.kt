@@ -19,6 +19,9 @@ class BlockedChannelTest {
         assertEquals(IKind.CHANNEL, m[0].kind)
         assertEquals("Foşix Erlik", m[0].title)
         assertEquals(1, Browse.missingChannels("fosix erlik", vids, emptyList()).size)
+        // the user's own queries (Custom Feed › Search channels uses the same bypass)
+        assertEquals(listOf(fosix), Browse.missingChannels("ERLIK", vids, emptyList()).map { it.id })
+        assertEquals(listOf(fosix), Browse.missingChannels("FOSIXERLIK", vids, emptyList()).map { it.id })
     }
 
     @Test fun notAddedWhenPresentOrUnrelated() {

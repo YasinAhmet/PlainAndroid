@@ -371,7 +371,14 @@ class CustomFeedScreen(private val act: MainActivity) {
         val g = calls.gen
         io.execute {
             val r = try {
-                Result.success(Browse.page(WebApi.search(act, calls, g, q, SearchFilters(type = 1).sp())).items.filter { it.kind == IKind.CHANNEL && it.id.startsWith("UC") })
+                val chans = Browse.page(WebApi.search(act, calls, g, q, SearchFilters(type = 1).sp())).items.filter { it.kind == IKind.CHANNEL && it.id.startsWith("UC") }
+                // Legally blocked channels ("Foşix Erlik" from a Turkish IP) are left out of channel search in every
+                // region, but their videos are still found: add matching owners of video results (same as Search › Channels).
+                val extra = try {
+                    Browse.missingChannels(q, Browse.page(WebApi.search(act, calls, g, q, Clients.SEARCH_VIDEOS)).items, chans.map { it.id })
+                        .filter { it.id.startsWith("UC") }
+                } catch (e: Cancelled) { throw e } catch (_: Exception) { emptyList() }
+                Result.success(extra + chans)
             } catch (e: Throwable) { Result.failure(e) }
             main.post {
                 if (g != calls.gen || act.isFinishing || act.isDestroyed) return@post
